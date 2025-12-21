@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recording Indicator</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+      }
+      .indicator {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: rgba(26, 26, 46, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(0, 180, 216, 0.3);
+        border-radius: 30px;
+        padding: 10px 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      .indicator.recording {
+        border-color: rgba(239, 71, 111, 0.5);
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      .indicator.processing {
+        border-color: rgba(0, 180, 216, 0.5);
+      }
+      .hidden { display: none; }
+      @keyframes pulse {
+        0%, 100% { box-shadow: 0 4px 20px rgba(239, 71, 111, 0.2); }
+        50% { box-shadow: 0 4px 30px rgba(239, 71, 111, 0.4); }
+      }
+      .icon { font-size: 18px; }
+      .spinner {
+        width: 18px; height: 18px;
+        border: 2px solid rgba(0, 180, 216, 0.3);
+        border-top-color: #00b4d8;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .text {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.2;
+      }
+      .status {
+        color: #ef476f;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .processing .status { color: #00b4d8; }
+      .duration {
+        color: #8d99ae;
+        font-size: 11px;
+        font-family: monospace;
+      }
+      .waveform {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        height: 20px;
+      }
+      .wave-bar {
+        width: 3px;
+        background: linear-gradient(to top, #ef476f, #ffd166);
+        border-radius: 2px;
+        animation: wave 0.4s ease-in-out infinite alternate;
+      }
+      .wave-bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+      .wave-bar:nth-child(2) { height: 16px; animation-delay: 0.1s; }
+      .wave-bar:nth-child(3) { height: 12px; animation-delay: 0.2s; }
+      .wave-bar:nth-child(4) { height: 18px; animation-delay: 0.15s; }
+      .wave-bar:nth-child(5) { height: 10px; animation-delay: 0.05s; }
+      @keyframes wave {
+        from { transform: scaleY(1); }
+        to { transform: scaleY(0.5); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="indicator" class="indicator hidden">
+      <div class="icon" id="icon">🎤</div>
+      <div class="text">
+        <span class="status" id="status">录音中</span>
+        <span class="duration" id="duration">00:00</span>
+      </div>
+      <div class="waveform" id="waveform">
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+      </div>
+    </div>
+    <script>
+      const indicator = document.getElementById('indicator');
+      const icon = document.getElementById('icon');
+      const status = document.getElementById('status');
+      const duration = document.getElementById('duration');
+      const waveform = document.getElementById('waveform');
+      let timer = null;
+      let seconds = 0;
+
+      function formatTime(s) {
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        return m.toString().padStart(2, '0') + ':' + sec.toString().padStart(2, '0');
+      }
+
+      window.api.onRecordingState((state) => {
+        if (state.recording) {
+          indicator.className = 'indicator recording';
+          icon.innerHTML = '🎤';
+          status.textContent = '录音中';
+          waveform.style.display = 'flex';
+          seconds = 0;
+          duration.textContent = '00:00';
+          timer = setInterval(() => {
+            seconds++;
+            duration.textContent = formatTime(seconds);
+          }, 1000);
+        } else if (state.processing) {
+          indicator.className = 'indicator processing';
+          icon.innerHTML = '<div class="spinner"></div>';
+          status.textContent = '识别中...';
+          duration.textContent = '';
+          waveform.style.display = 'none';
+          if (timer) { clearInterval(timer); timer = null; }
+        } else {
+          indicator.className = 'indicator hidden';
+          if (timer) { clearInterval(timer); timer = null; }
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+node_modules
+dist
+out
+.DS_Store
+.eslintcache
+*.log*
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+models/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+

@@ -1,0 +1,10 @@
+[project]
+name = "justsay-whisper"
+version = "1.0.0"
+description = "Faster-Whisper service for JustSay"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.0.0",
+    "nvidia-cublas-cu12>=12.9.1.4",
+    "nvidia-cudnn-cu12>=9.17.0.29",
+]
