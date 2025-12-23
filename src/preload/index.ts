@@ -20,7 +20,11 @@ const api = {
 
   removeAllListeners: (channel: string): void => {
     ipcRenderer.removeAllListeners(channel)
-  }
+  },
+
+  // Model Management
+  getLocalModels: (): Promise<string[]> => ipcRenderer.invoke('get-local-models'),
+  downloadModel: (modelType: string): Promise<void> => ipcRenderer.invoke('download-model', modelType)
 }
 
 if (process.contextIsolated) {

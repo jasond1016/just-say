@@ -32,17 +32,26 @@ add_nvidia_paths()
 
 def main():
     parser = argparse.ArgumentParser(description='Faster-Whisper Recognition')
-    parser.add_argument('--audio', required=True, help='Audio file path')
+    parser.add_argument('--audio', help='Audio file path')
     parser.add_argument('--model', default='tiny',
                         choices=['tiny', 'base', 'small', 'medium', 'large-v3'])
     parser.add_argument('--model-path', help='Local model directory')
     parser.add_argument('--device', default='cpu', choices=['cpu', 'cuda'])
     parser.add_argument('--compute-type', default='default')
     parser.add_argument('--language', help='Language code')
+    parser.add_argument('--download-only', action='store_true', help='Download model and exit')
+    parser.add_argument('--download-root', help='Cache directory for models')
 
     args = parser.parse_args()
 
-    if not os.path.exists(args.audio):
+    # Audio is required unless download-only
+    if not args.download_only:
+        if not args.audio:
+            output_error("Audio file path required unless --download-only")
+            return 1
+        if not os.path.exists(args.audio):
+            output_error(f"Audio not found: {args.audio}")
+            return 1
         output_error(f"Audio not found: {args.audio}")
         return 1
 
@@ -54,7 +63,16 @@ def main():
         # Model path or name
         model_id = args.model_path if args.model_path and os.path.exists(args.model_path) else args.model
 
-        model = WhisperModel(model_id, device=args.device, compute_type=args.compute_type)
+        model = WhisperModel(
+            model_id, 
+            device=args.device, 
+            compute_type=args.compute_type,
+            download_root=args.download_root
+        )
+
+        if args.download_only:
+            print(json.dumps({'success': True, 'text': 'Model downloaded', 'duration': 0}, ensure_ascii=False))
+            return 0
 
         options = {
             'beam_size': 5,

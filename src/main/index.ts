@@ -184,3 +184,11 @@ ipcMain.handle('show-settings', () => {
 ipcMain.handle('quit-app', () => {
   app.quit()
 })
+
+ipcMain.handle('get-local-models', async () => {
+  return recognitionController?.getLocalModels() || []
+})
+
+ipcMain.handle('download-model', async (_event, modelType) => {
+  await recognitionController?.downloadModel(modelType)
+})

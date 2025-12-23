@@ -56,4 +56,18 @@ export class RecognitionController {
   async healthCheck(): Promise<boolean> {
     return this.recognizer.healthCheck()
   }
+
+  async getLocalModels(): Promise<string[]> {
+    if (this.recognizer instanceof LocalRecognizer) {
+      return this.recognizer.getModels()
+    }
+    return []
+  }
+
+  async downloadModel(modelType: string): Promise<void> {
+    if (this.recognizer instanceof LocalRecognizer) {
+      return this.recognizer.downloadModel(modelType)
+    }
+    throw new Error('Current backend does not support model downloading')
+  }
 }

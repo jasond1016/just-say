@@ -7,6 +7,8 @@ interface JustSayAPI {
   quit: () => Promise<void>
   onRecordingState: (callback: (state: { recording: boolean; processing?: boolean }) => void) => void
   removeAllListeners: (channel: string) => void
+  getLocalModels: () => Promise<string[]>
+  downloadModel: (modelType: string) => Promise<void>
 }
 
 declare global {

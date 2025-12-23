@@ -11,6 +11,7 @@
 | 文本输入 | [input/simulator.ts](file:///d:/my_projects/JustSay/src/main/input/simulator.ts) | PowerShell SendKeys |
 | 系统托盘 | [tray.ts](file:///d:/my_projects/JustSay/src/main/tray.ts) | 状态显示、右键菜单 |
 | 录音指示器 | [indicator.html](file:///d:/my_projects/JustSay/src/renderer/indicator.html) | 屏幕中下方悬浮窗 |
+| 模型管理 UI | [Settings.tsx](file:///d:/my_projects/JustSay/src/renderer/src/pages/Settings.tsx) | 模型下载与切换 |
 
 ### ✅ 识别后端
 - **本地模型**: Faster-Whisper (tiny/base/small/medium/large-v3)  

@@ -77,6 +77,11 @@ export class LocalRecognizer implements SpeechRecognizer {
       fs.writeFileSync(audioPath, audioBuffer)
 
       // Build args
+      const modelsPath = join(app.getPath('userData'), 'models')
+      if (!fs.existsSync(modelsPath)) {
+        fs.mkdirSync(modelsPath, { recursive: true })
+      }
+
       const args = [
         this.scriptPath,
         '--audio',
@@ -86,7 +91,9 @@ export class LocalRecognizer implements SpeechRecognizer {
         '--device',
         this.config.device || 'cpu',
         '--compute-type',
-        this.config.computeType || 'int8'
+        this.config.computeType || 'int8',
+        '--download-root',
+        modelsPath
       ]
 
       if (this.config.language && this.config.language !== 'auto') {
@@ -149,6 +156,62 @@ export class LocalRecognizer implements SpeechRecognizer {
       return true
     } catch {
       return false
+    }
+  }
+  async downloadModel(modelType: string): Promise<void> {
+    const modelsPath = join(app.getPath('userData'), 'models')
+    if (!fs.existsSync(modelsPath)) {
+      fs.mkdirSync(modelsPath, { recursive: true })
+    }
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        this.scriptPath,
+        '--model',
+        modelType,
+        '--download-root',
+        modelsPath,
+        '--download-only'
+      ]
+
+      console.log('[LocalRecognizer] Downloading model:', modelType)
+      const proc = spawn(this.pythonPath, args)
+      
+      let stderr = ''
+
+      proc.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString()
+        console.log('[Download Progress]', data.toString().trim())
+      })
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          resolve()
+        } else {
+          reject(new Error(`Download failed: ${stderr}`))
+        }
+      })
+    })
+  }
+
+  async getModels(): Promise<string[]> {
+    const modelsPath = join(app.getPath('userData'), 'models')
+    if (!fs.existsSync(modelsPath)) {
+      return []
+    }
+
+    try {
+      const files = fs.readdirSync(modelsPath)
+      // Filter for hugginface cache folders
+      // Format: models--systran--faster-whisper-{type}
+      const models = files
+        .filter(f => f.startsWith('models--systran--faster-whisper-'))
+        .map(f => f.replace('models--systran--faster-whisper-', ''))
+      
+      return models
+    } catch (error) {
+      console.error('Error listing models:', error)
+      return []
     }
   }
 }
