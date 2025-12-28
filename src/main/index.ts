@@ -6,7 +6,9 @@ import { setupTray, updateTrayStatus } from './tray'
 import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig } from './config'
 import { AudioRecorder } from './audio/recorder'
+import { StreamingAudioRecorder } from './audio/streaming-recorder'
 import { RecognitionController } from './recognition'
+import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
 
 // Window references
@@ -16,6 +18,8 @@ let indicatorWindow: BrowserWindow | null = null
 // Core modules
 let hotkeyManager: HotkeyManager | null = null
 let audioRecorder: AudioRecorder | null = null
+let streamingRecorder: StreamingAudioRecorder | null = null
+let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
 
@@ -106,35 +110,95 @@ async function initializeApp(): Promise<void> {
   inputSimulator = new InputSimulator()
   hotkeyManager = new HotkeyManager()
 
-  // Handle recording
-  hotkeyManager.on('recordStart', async () => {
-    console.log('[Main] Recording started')
-    updateTrayStatus('recording')
-    indicatorWindow?.show()
-    indicatorWindow?.webContents.send('recording-state', { recording: true })
-    await audioRecorder?.startRecording()
-  })
+  // Check if using streaming Soniox
+  const useStreamingSoniox = config.recognition?.backend === 'soniox' && config.recognition?.soniox?.apiKey
 
-  hotkeyManager.on('recordStop', async () => {
-    console.log('[Main] Recording stopped')
-    updateTrayStatus('processing')
-    indicatorWindow?.webContents.send('recording-state', { recording: false, processing: true })
+  if (useStreamingSoniox) {
+    console.log('[Main] Using streaming Soniox mode')
+    streamingRecorder = new StreamingAudioRecorder()
+    streamingSoniox = new StreamingSonioxRecognizer(config.recognition?.soniox)
 
-    try {
-      const audioBuffer = await audioRecorder?.stopRecording()
-      if (audioBuffer && audioBuffer.length > 0) {
-        const result = await recognitionController?.recognize(audioBuffer)
+    // Streaming mode: start WebSocket connection and recording together
+    hotkeyManager.on('recordStart', async () => {
+      console.log('[Main] Recording started (streaming)')
+      updateTrayStatus('recording')
+      indicatorWindow?.show()
+      indicatorWindow?.webContents.send('recording-state', { recording: true })
+
+      try {
+        // Start WebSocket connection first
+        await streamingSoniox?.startSession()
+
+        // Forward audio chunks to Soniox
+        streamingRecorder?.on('data', (chunk: Buffer) => {
+          streamingSoniox?.sendAudioChunk(chunk)
+        })
+
+        // Start recording
+        await streamingRecorder?.startRecording()
+      } catch (error) {
+        console.error('[Main] Streaming start error:', error)
+        updateTrayStatus('idle')
+        indicatorWindow?.hide()
+      }
+    })
+
+    hotkeyManager.on('recordStop', async () => {
+      const stopTime = Date.now()
+      console.log('[Main] Recording stopped (streaming)')
+      updateTrayStatus('processing')
+      indicatorWindow?.webContents.send('recording-state', { recording: false, processing: true })
+
+      try {
+        // Stop recording
+        streamingRecorder?.stopRecording()
+        streamingRecorder?.removeAllListeners('data')
+
+        // Get final result
+        const result = await streamingSoniox?.endSession()
+        console.log(`[Main] Recognition done in ${result?.durationMs}ms (${Date.now() - stopTime}ms after stop): "${result?.text}"`)
+
         if (result?.text) {
           await inputSimulator?.typeText(result.text)
         }
+      } catch (error) {
+        console.error('[Main] Streaming recognition error:', error)
+      } finally {
+        updateTrayStatus('idle')
+        indicatorWindow?.hide()
       }
-    } catch (error) {
-      console.error('[Main] Recognition error:', error)
-    } finally {
-      updateTrayStatus('idle')
-      indicatorWindow?.hide()
-    }
-  })
+    })
+  } else {
+    // Non-streaming mode (local, api, network)
+    hotkeyManager.on('recordStart', async () => {
+      console.log('[Main] Recording started')
+      updateTrayStatus('recording')
+      indicatorWindow?.show()
+      indicatorWindow?.webContents.send('recording-state', { recording: true })
+      await audioRecorder?.startRecording()
+    })
+
+    hotkeyManager.on('recordStop', async () => {
+      console.log('[Main] Recording stopped')
+      updateTrayStatus('processing')
+      indicatorWindow?.webContents.send('recording-state', { recording: false, processing: true })
+
+      try {
+        const audioBuffer = await audioRecorder?.stopRecording()
+        if (audioBuffer && audioBuffer.length > 0) {
+          const result = await recognitionController?.recognize(audioBuffer)
+          if (result?.text) {
+            await inputSimulator?.typeText(result.text)
+          }
+        }
+      } catch (error) {
+        console.error('[Main] Recognition error:', error)
+      } finally {
+        updateTrayStatus('idle')
+        indicatorWindow?.hide()
+      }
+    })
+  }
 
   // Start hotkey listener
   hotkeyManager.start()
