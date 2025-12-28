@@ -285,8 +285,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   hotkeyManager?.stop()
-  // Allow window to close on quit
+  // Allow all windows to close on quit
   mainWindow?.removeAllListeners('close')
+  meetingWindow?.removeAllListeners('close')
+  indicatorWindow?.removeAllListeners('close')
 })
 
 // IPC handlers
