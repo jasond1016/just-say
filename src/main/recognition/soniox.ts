@@ -36,7 +36,7 @@ export class SonioxRecognizer implements SpeechRecognizer {
     this.config = {
       model: 'stt-rt-v3',
       audioFormat: 'auto',
-      languageHints: ['zh', 'en'],
+      languageHints: ['zh', 'en', 'ja'],
       ...config
     }
   }
