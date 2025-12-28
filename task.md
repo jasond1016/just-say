@@ -19,15 +19,21 @@
 
 ### 1.4 文本输入
 - [x] Windows 文本模拟输入
+- [x] Linux 文本输入（剪贴板 + 自动粘贴）
 
 ---
 
-## Phase 2: 本地模型
+## Phase 2: 本地模型 & 云端集成
 
 ### 2.1 Faster-Whisper 集成
 - [x] Python 服务封装
 - [x] Electron 与 Python 通信
 - [x] 模型下载与管理 UI
+
+### 2.2 Soniox Realtime API 集成
+- [x] WebSocket 流式识别
+- [x] 流式音频录制（边录边发）
+- [x] 低延迟优化（松开后 ~500ms 出结果）
 
 ---
 
@@ -53,14 +59,17 @@
 - [ ] 权限请求处理
 
 ### 4.2 Linux 适配
-- [ ] X11/Wayland 兼容
-- [ ] 文本插入适配
+- [x] X11 快捷键支持（uiohook-napi）
+- [x] PulseAudio 音频录制
+- [x] xdotool 文本粘贴
+- [ ] Wayland 兼容
 
 ---
 
 ## 当前进度
 
-**状态**: Phase 2 完成
-**当前任务**: 待定
-
-
+**状态**: Phase 2 完成，Linux 基础适配完成
+**最新更新**: 2024-12-28
+- 集成 Soniox Realtime API（流式 WebSocket）
+- 实现流式音频录制和识别
+- 松开键后延迟从 ~2.5s 降至 ~500ms

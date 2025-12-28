@@ -1,9 +1,14 @@
-import { Tray, Menu, nativeImage, app, BrowserWindow, NativeImage } from 'electron'
+import { Tray, Menu, nativeImage, app, NativeImage } from 'electron'
 import { join } from 'path'
 
 let tray: Tray | null = null
 
-export function setupTray(mainWindow: BrowserWindow): Tray {
+export interface TrayCallbacks {
+  showSettings: () => void
+  showMeetingWindow: () => void
+}
+
+export function setupTray(callbacks: TrayCallbacks): Tray {
   // Create tray icon - use resources icon
   const iconPath = join(__dirname, '../../resources/icon.png')
 
@@ -30,9 +35,16 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
     },
     { type: 'separator' },
     {
+      label: '🎙️ 会议转录',
+      click: (): void => {
+        callbacks.showMeetingWindow()
+      }
+    },
+    { type: 'separator' },
+    {
       label: '设置',
       click: (): void => {
-        mainWindow.show()
+        callbacks.showSettings()
       }
     },
     { type: 'separator' },
@@ -48,7 +60,7 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
 
   // Double click to show settings
   tray.on('double-click', () => {
-    mainWindow.show()
+    callbacks.showSettings()
   })
 
   return tray

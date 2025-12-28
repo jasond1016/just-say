@@ -10,10 +10,12 @@ import { StreamingAudioRecorder } from './audio/streaming-recorder'
 import { RecognitionController } from './recognition'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
+import { MeetingTranscriptionManager } from './meeting-transcription'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
 let indicatorWindow: BrowserWindow | null = null
+let meetingWindow: BrowserWindow | null = null
 
 // Core modules
 let hotkeyManager: HotkeyManager | null = null
@@ -22,6 +24,7 @@ let streamingRecorder: StreamingAudioRecorder | null = null
 let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
+let meetingTranscription: MeetingTranscriptionManager | null = null
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -92,6 +95,45 @@ function createIndicatorWindow(): BrowserWindow {
   return window
 }
 
+function createMeetingWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 700,
+    height: 600,
+    show: false,
+    autoHideMenuBar: true,
+    title: '会议转录 - JustSay',
+    ...(process.platform === 'linux' ? { icon } : {}),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  window.on('close', (e) => {
+    // Stop transcription when window closes
+    if (meetingTranscription?.getStatus() === 'transcribing') {
+      meetingTranscription.stopTranscription()
+    }
+    e.preventDefault()
+    window.hide()
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    window.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/meeting.html`)
+  } else {
+    window.loadFile(join(__dirname, '../renderer/meeting.html'))
+  }
+
+  return window
+}
+
+function showMeetingWindow(): void {
+  if (!meetingWindow) {
+    meetingWindow = createMeetingWindow()
+  }
+  meetingWindow.show()
+}
+
 async function initializeApp(): Promise<void> {
   // Initialize config
   initConfig()
@@ -101,8 +143,11 @@ async function initializeApp(): Promise<void> {
   mainWindow = createMainWindow()
   indicatorWindow = createIndicatorWindow()
 
-  // Setup tray
-  setupTray(mainWindow)
+  // Setup tray with callbacks
+  setupTray({
+    showSettings: () => mainWindow?.show(),
+    showMeetingWindow: () => showMeetingWindow()
+  })
 
   // Initialize modules
   audioRecorder = new AudioRecorder()
@@ -255,4 +300,49 @@ ipcMain.handle('get-local-models', async () => {
 
 ipcMain.handle('download-model', async (_event, modelType) => {
   await recognitionController?.downloadModel(modelType)
+})
+
+// Meeting transcription IPC handlers
+ipcMain.handle('get-system-audio-sources', async () => {
+  if (!meetingTranscription) {
+    const config = getConfig()
+    meetingTranscription = new MeetingTranscriptionManager(
+      config.recognition?.soniox || {}
+    )
+  }
+  return meetingTranscription.getSystemAudioSources()
+})
+
+ipcMain.handle('start-meeting-transcription', async (_event, options) => {
+  const config = getConfig()
+  
+  if (!meetingTranscription) {
+    meetingTranscription = new MeetingTranscriptionManager(
+      config.recognition?.soniox || {}
+    )
+  }
+
+  // Set up event forwarding to renderer
+  meetingTranscription.removeAllListeners()
+  
+  meetingTranscription.on('transcript', (segment) => {
+    meetingWindow?.webContents.send('meeting-transcript', segment)
+  })
+
+  meetingTranscription.on('status', (status) => {
+    meetingWindow?.webContents.send('meeting-status', status)
+  })
+
+  meetingTranscription.on('error', (err) => {
+    console.error('[Main] Meeting transcription error:', err)
+    meetingWindow?.webContents.send('meeting-status', 'error')
+  })
+
+  await meetingTranscription.startTranscription(options)
+})
+
+ipcMain.handle('stop-meeting-transcription', async () => {
+  if (meetingTranscription) {
+    await meetingTranscription.stopTranscription()
+  }
 })

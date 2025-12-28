@@ -24,7 +24,27 @@ const api = {
 
   // Model Management
   getLocalModels: (): Promise<string[]> => ipcRenderer.invoke('get-local-models'),
-  downloadModel: (modelType: string): Promise<void> => ipcRenderer.invoke('download-model', modelType)
+  downloadModel: (modelType: string): Promise<void> => ipcRenderer.invoke('download-model', modelType),
+
+  // Meeting Transcription
+  startMeetingTranscription: (options: {
+    includeMicrophone: boolean
+  }): Promise<void> => ipcRenderer.invoke('start-meeting-transcription', options),
+
+  stopMeetingTranscription: (): Promise<void> => ipcRenderer.invoke('stop-meeting-transcription'),
+
+  getSystemAudioSources: (): Promise<Array<{ id: string; name: string; isDefault?: boolean }>> =>
+    ipcRenderer.invoke('get-system-audio-sources'),
+
+  onMeetingTranscript: (
+    callback: (segment: { text: string; timestamp: number; isFinal: boolean }) => void
+  ): void => {
+    ipcRenderer.on('meeting-transcript', (_event, segment) => callback(segment))
+  },
+
+  onMeetingStatus: (callback: (status: string) => void): void => {
+    ipcRenderer.on('meeting-status', (_event, status) => callback(status))
+  }
 }
 
 if (process.contextIsolated) {
