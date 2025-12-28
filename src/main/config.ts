@@ -17,7 +17,7 @@ export interface AppConfig {
     maxDurationSec?: number
   }
   recognition?: {
-    backend?: 'local' | 'api' | 'network'
+    backend?: 'local' | 'api' | 'network' | 'soniox'
     language?: string
     punctuation?: boolean
     local?: {
@@ -38,6 +38,11 @@ export interface AppConfig {
       protocol?: string
       authType?: string
       authToken?: string
+    }
+    soniox?: {
+      apiKey?: string
+      model?: string
+      languageHints?: string[]
     }
   }
   output?: {

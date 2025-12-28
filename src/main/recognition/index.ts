@@ -2,6 +2,7 @@ import { AppConfig } from '../config'
 import { LocalRecognizer } from './local'
 import { ApiRecognizer } from './api'
 import { NetworkRecognizer } from './network'
+import { SonioxRecognizer } from './soniox'
 
 export interface RecognitionResult {
   text: string
@@ -31,6 +32,8 @@ export class RecognitionController {
     switch (backend) {
       case 'api':
         return new ApiRecognizer(this.config.recognition?.api)
+      case 'soniox':
+        return new SonioxRecognizer(this.config.recognition?.soniox)
       case 'network':
         return new NetworkRecognizer(this.config.recognition?.network)
       default:
