@@ -52,8 +52,6 @@ def main():
         if not os.path.exists(args.audio):
             output_error(f"Audio not found: {args.audio}")
             return 1
-        output_error(f"Audio not found: {args.audio}")
-        return 1
 
     try:
         from faster_whisper import WhisperModel
