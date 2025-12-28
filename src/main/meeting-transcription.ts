@@ -2,6 +2,7 @@ import { EventEmitter } from 'events'
 import { SystemAudioRecorder, SystemAudioSource } from './audio/system-audio-recorder'
 import { StreamingAudioRecorder } from './audio/streaming-recorder'
 import { StreamingSonioxRecognizer, StreamingSonioxConfig } from './recognition/streaming-soniox'
+import { profiler } from './utils/profiler'
 
 export interface MeetingTranscriptionOptions {
   includeMicrophone: boolean // Whether to also capture microphone input
@@ -30,6 +31,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
   private status: MeetingStatus = 'idle'
   private transcriptHistory: TranscriptSegment[] = []
+  private lastTextLength = 0
 
   // For mixing audio streams
   private mixBuffer: Buffer[] = []
@@ -39,6 +41,40 @@ export class MeetingTranscriptionManager extends EventEmitter {
     super()
     this.sonioxConfig = sonioxConfig
     this.systemRecorder = new SystemAudioRecorder()
+  }
+
+  /**
+   * Pre-connect to the recognition service to reduce startup latency.
+   * Call this when the meeting window opens or before user starts transcription.
+   */
+  async preConnect(): Promise<void> {
+    if (this.recognizer?.isPreConnected()) {
+      console.log('[MeetingTranscription] Already pre-connected')
+      return
+    }
+
+    console.log('[MeetingTranscription] Pre-connecting to recognition service...')
+    this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+    
+    // Set up error handler for pre-connection
+    this.recognizer.on('error', (err: Error) => {
+      console.error('[MeetingTranscription] Pre-connect error:', err)
+    })
+
+    try {
+      await this.recognizer.preConnect()
+      console.log('[MeetingTranscription] Pre-connected successfully')
+    } catch (err) {
+      console.error('[MeetingTranscription] Pre-connect failed:', err)
+      this.recognizer = null
+    }
+  }
+
+  /**
+   * Check if pre-connected and ready
+   */
+  isPreConnected(): boolean {
+    return this.recognizer?.isPreConnected() ?? false
   }
 
   /**
@@ -72,15 +108,28 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
     this.setStatus('starting')
     this.transcriptHistory = []
+    this.lastTextLength = 0
 
     try {
-      // Initialize recognizer
-      this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+      // Start profiling session
+      profiler.startSession()
 
-      // Set up recognizer events
-      this.recognizer.on('partial', (text: string) => {
+      // Use pre-connected recognizer or create new one
+      if (!this.recognizer?.isPreConnected()) {
+        this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+      }
+
+      // Set up recognizer events (clear any from pre-connect first)
+      this.recognizer.removeAllListeners('partial')
+      this.recognizer.removeAllListeners('error')
+      
+      this.recognizer.on('partial', (result: { finalText: string; interimText: string; combined: string }) => {
+        // Track response for profiling (use combined length for latency tracking)
+        profiler.markResponseReceived(result.combined.length, this.lastTextLength)
+        this.lastTextLength = result.combined.length
+
         const segment: TranscriptSegment = {
-          text,
+          text: result.combined,  // Show both final + interim for immediate feedback
           timestamp: Date.now(),
           isFinal: false,
           source: 'mixed'
@@ -93,8 +142,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
         this.emit('error', err)
       })
 
-      // Start WebSocket connection
+      // Start WebSocket connection (instant if pre-connected)
+      profiler.markConnectionStart()
       await this.recognizer.startSession()
+      profiler.markConnectionEstablished()
       console.log('[MeetingTranscription] Recognizer session started')
 
       // Set up system audio source
@@ -119,7 +170,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
         // Send mixed audio periodically
         this.mixInterval = setInterval(() => {
           this.sendMixedAudio()
-        }, 100) // Send every 100ms
+        }, 50) // Send every 50ms for lower latency
 
         // Start both recorders
         await Promise.all([this.systemRecorder.startRecording(), this.micRecorder.startRecording()])
@@ -128,6 +179,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
       } else {
         // System audio only mode
         this.systemRecorder.on('data', (chunk: Buffer) => {
+          profiler.markAudioSent(chunk.length)
           this.recognizer?.sendAudioChunk(chunk)
         })
 
@@ -188,6 +240,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
         this.recognizer = null
       }
 
+      // Print profiling report
+      profiler.printReport()
+      profiler.endSession()
+
       console.log('[MeetingTranscription] Stopped successfully')
     } catch (err) {
       console.error('[MeetingTranscription] Stop error:', err)
@@ -219,10 +275,11 @@ export class MeetingTranscriptionManager extends EventEmitter {
     if (this.mixBuffer.length === 0) return
 
     // Simple mixing: just concatenate buffers
-    // For better mixing, we could add the PCM samples together
     const combined = Buffer.concat(this.mixBuffer)
+    const bytesSent = combined.length
     this.mixBuffer = []
 
+    profiler.markAudioSent(bytesSent)
     this.recognizer?.sendAudioChunk(combined)
   }
 

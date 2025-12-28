@@ -132,18 +132,26 @@ export class SystemAudioRecorder extends EventEmitter {
   private buildFfmpegArgs(): string[] {
     const platform = os.platform()
 
+    // Low-latency parameters to reduce capture delay
+    const lowLatencyArgs = [
+      '-probesize', '32',
+      '-analyzeduration', '0',
+      '-fflags', 'nobuffer+flush_packets',
+      '-flags', 'low_delay'
+    ]
+
     // Common output args: output to stdout as raw PCM
     const outputArgs = ['-ar', '16000', '-ac', '1', '-f', 's16le', '-']
 
     if (platform === 'win32') {
       // Windows: WASAPI loopback
-      return ['-f', 'dshow', '-i', `audio=${this.selectedSource}`, ...outputArgs]
+      return [...lowLatencyArgs, '-f', 'dshow', '-i', `audio=${this.selectedSource}`, ...outputArgs]
     } else if (platform === 'darwin') {
       // macOS: AVFoundation with virtual audio device
-      return ['-f', 'avfoundation', '-i', `:${this.selectedSource}`, ...outputArgs]
+      return [...lowLatencyArgs, '-f', 'avfoundation', '-i', `:${this.selectedSource}`, ...outputArgs]
     } else {
       // Linux: PulseAudio monitor source
-      return ['-f', 'pulse', '-i', this.selectedSource!, ...outputArgs]
+      return [...lowLatencyArgs, '-f', 'pulse', '-i', this.selectedSource!, ...outputArgs]
     }
   }
 

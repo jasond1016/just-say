@@ -132,6 +132,18 @@ function showMeetingWindow(): void {
     meetingWindow = createMeetingWindow()
   }
   meetingWindow.show()
+
+  // Pre-connect to recognition service to reduce latency
+  const config = getConfig()
+  if (!meetingTranscription) {
+    meetingTranscription = new MeetingTranscriptionManager(
+      config.recognition?.soniox || {}
+    )
+  }
+  // Fire and forget - don't block window showing
+  meetingTranscription.preConnect().catch((err) => {
+    console.error('[Main] Pre-connect failed:', err)
+  })
 }
 
 async function initializeApp(): Promise<void> {
