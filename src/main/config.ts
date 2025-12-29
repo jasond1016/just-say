@@ -51,6 +51,7 @@ export interface AppConfig {
     capitalize?: boolean
   }
   ui?: {
+    theme?: 'system' | 'light' | 'dark'
     indicatorEnabled?: boolean
     indicatorPosition?: 'center_bottom' | 'cursor'
     indicatorOpacity?: number
@@ -91,6 +92,7 @@ const defaultConfig: AppConfig = {
     capitalize: true
   },
   ui: {
+    theme: 'system',
     indicatorEnabled: true,
     indicatorPosition: 'center_bottom',
     indicatorOpacity: 0.9,

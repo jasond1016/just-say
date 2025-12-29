@@ -39,9 +39,12 @@ function createMainWindow(): BrowserWindow {
     }
   })
 
+  // Completely remove the menu bar
+  window.setMenuBarVisibility(false)
+  window.setMenu(null)
+
   window.on('ready-to-show', () => {
-    // Don't show by default - it's a tray app
-    // window.show()
+    window.show()
   })
 
   window.on('close', (e) => {
@@ -309,6 +312,10 @@ ipcMain.handle('quit-app', () => {
   app.quit()
 })
 
+ipcMain.handle('show-meeting-window', () => {
+  showMeetingWindow()
+})
+
 ipcMain.handle('get-local-models', async () => {
   return recognitionController?.getLocalModels() || []
 })
@@ -337,16 +344,17 @@ ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   meetingTranscription.removeAllListeners()
 
   meetingTranscription.on('transcript', (segment) => {
-    meetingWindow?.webContents.send('meeting-transcript', segment)
+    // Send to main window (embedded meeting transcription)
+    mainWindow?.webContents.send('meeting-transcript', segment)
   })
 
   meetingTranscription.on('status', (status) => {
-    meetingWindow?.webContents.send('meeting-status', status)
+    mainWindow?.webContents.send('meeting-status', status)
   })
 
   meetingTranscription.on('error', (err) => {
     console.error('[Main] Meeting transcription error:', err)
-    meetingWindow?.webContents.send('meeting-status', 'error')
+    mainWindow?.webContents.send('meeting-status', 'error')
   })
 
   await meetingTranscription.startTranscription(options)

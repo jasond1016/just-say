@@ -1,0 +1,254 @@
+/* ============================================
+   Meeting Transcription Component Styles
+   ============================================ */
+
+.meeting-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+/* Controls bar */
+.meeting-controls {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    flex-wrap: wrap;
+}
+
+[data-theme='light'] .meeting-controls {
+    box-shadow: var(--shadow-sm);
+}
+
+.meeting-controls__divider {
+    width: 1px;
+    height: 24px;
+    background: var(--glass-border);
+    margin: 0 var(--space-sm);
+}
+
+/* Timer */
+.meeting-timer {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: var(--font-size-2xl);
+    font-weight: 600;
+    color: var(--accent-primary);
+    text-align: center;
+    padding: var(--space-sm);
+}
+
+.meeting-timer.recording {
+    animation: timer-blink 1s infinite;
+}
+
+@keyframes timer-blink {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}
+
+/* Transcript area */
+.meeting-transcript {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    min-height: 300px;
+}
+
+[data-theme='light'] .meeting-transcript {
+    box-shadow: var(--shadow-sm);
+}
+
+.meeting-transcript__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-lg);
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.meeting-transcript__content {
+    flex: 1;
+    padding: var(--space-lg);
+    overflow-y: auto;
+}
+
+.meeting-transcript__content::-webkit-scrollbar {
+    width: 6px;
+}
+
+.meeting-transcript__content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.meeting-transcript__content::-webkit-scrollbar-thumb {
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+}
+
+.meeting-transcript__placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding-top: 80px;
+}
+
+/* Transcript segments */
+.transcript-segment {
+    margin-bottom: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border-left: 4px solid var(--accent-primary);
+}
+
+[data-theme='light'] .transcript-segment {
+    background: var(--bg-primary);
+}
+
+.transcript-segment--partial {
+    opacity: 0.8;
+    border-left-style: dashed;
+}
+
+.transcript-segment__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+
+.transcript-segment__speaker {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.transcript-segment__text {
+    font-size: var(--font-size-md);
+    line-height: 1.7;
+    color: var(--text-primary);
+}
+
+.transcript-segment__translation {
+    margin-top: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 1px dashed var(--glass-border);
+    font-size: var(--font-size-sm);
+    color: var(--accent-secondary);
+    font-style: italic;
+}
+
+.translation-label {
+    font-size: var(--font-size-xs);
+    color: var(--text-muted);
+    margin-right: var(--space-xs);
+}
+
+/* Speaker color palette */
+.speaker-0 {
+    border-left-color: #00b4d8 !important;
+}
+
+.speaker-0 .transcript-segment__speaker {
+    background: rgba(0, 180, 216, 0.2);
+    color: #00b4d8;
+}
+
+.speaker-1 {
+    border-left-color: #06d6a0 !important;
+}
+
+.speaker-1 .transcript-segment__speaker {
+    background: rgba(6, 214, 160, 0.2);
+    color: #06d6a0;
+}
+
+.speaker-2 {
+    border-left-color: #ffd166 !important;
+}
+
+.speaker-2 .transcript-segment__speaker {
+    background: rgba(255, 209, 102, 0.2);
+    color: #ffd166;
+}
+
+.speaker-3 {
+    border-left-color: #ef476f !important;
+}
+
+.speaker-3 .transcript-segment__speaker {
+    background: rgba(239, 71, 111, 0.2);
+    color: #ef476f;
+}
+
+.speaker-4 {
+    border-left-color: #90e0ef !important;
+}
+
+.speaker-4 .transcript-segment__speaker {
+    background: rgba(144, 224, 239, 0.2);
+    color: #90e0ef;
+}
+
+.speaker-5 {
+    border-left-color: #a8dadc !important;
+}
+
+.speaker-5 .transcript-segment__speaker {
+    background: rgba(168, 218, 220, 0.2);
+    color: #a8dadc;
+}
+
+.speaker-6 {
+    border-left-color: #e6b0aa !important;
+}
+
+.speaker-6 .transcript-segment__speaker {
+    background: rgba(230, 176, 170, 0.2);
+    color: #e6b0aa;
+}
+
+.speaker-7 {
+    border-left-color: #bb8fce !important;
+}
+
+.speaker-7 .transcript-segment__speaker {
+    background: rgba(187, 143, 206, 0.2);
+    color: #bb8fce;
+}
+
+/* Light theme adjustments for speaker colors */
+[data-theme='light'] .speaker-0 .transcript-segment__speaker {
+    color: #0077b6;
+}
+
+[data-theme='light'] .speaker-1 .transcript-segment__speaker {
+    color: #059669;
+}
+
+[data-theme='light'] .speaker-2 .transcript-segment__speaker {
+    color: #d97706;
+}
+
+[data-theme='light'] .speaker-3 .transcript-segment__speaker {
+    color: #dc2626;
+}

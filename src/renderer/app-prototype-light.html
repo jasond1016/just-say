@@ -1,0 +1,1624 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JustSay - UI Design Prototype (Light Mode)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================
+         Design System - Premium Neutral + Glassmorphism
+         LIGHT MODE
+         ============================================ */
+
+        :root {
+            /* Background Colors - Light */
+            --bg-primary: #f8f9fc;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #f0f2f8;
+            --bg-elevated: #ffffff;
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(0, 0, 0, 0.06);
+
+            /* Accent Colors */
+            --accent-primary: #0077b6;
+            --accent-primary-hover: #005f92;
+            --accent-secondary: #00b4d8;
+            --accent-success: #059669;
+            --accent-warning: #d97706;
+            --accent-danger: #dc2626;
+
+            /* Text Colors - Light */
+            --text-primary: #1a1a2e;
+            --text-secondary: #64748b;
+            --text-muted: #94a3b8;
+
+            /* Shadows & Glows */
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+            --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+            --glow-primary: 0 4px 20px rgba(0, 119, 182, 0.15);
+            --glow-success: 0 4px 20px rgba(5, 150, 105, 0.15);
+            --glow-danger: 0 4px 20px rgba(220, 38, 38, 0.15);
+
+            /* Spacing */
+            --space-xs: 4px;
+            --space-sm: 8px;
+            --space-md: 16px;
+            --space-lg: 24px;
+            --space-xl: 32px;
+            --space-2xl: 48px;
+
+            /* Border Radius */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-xl: 24px;
+            --radius-full: 9999px;
+
+            /* Typography */
+            --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            --font-size-xs: 11px;
+            --font-size-sm: 13px;
+            --font-size-md: 15px;
+            --font-size-lg: 18px;
+            --font-size-xl: 24px;
+            --font-size-2xl: 32px;
+
+            /* Transitions */
+            --transition-fast: 0.15s ease;
+            --transition-normal: 0.25s ease;
+            --transition-slow: 0.4s ease;
+
+            /* Layout */
+            --sidebar-width: 220px;
+            --title-bar-height: 40px;
+        }
+
+        /* ============================================
+         Base Styles
+         ============================================ */
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            height: 100%;
+            font-family: var(--font-family);
+            font-size: var(--font-size-md);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ============================================
+         App Layout
+         ============================================ */
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* Title Bar */
+        .title-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            height: var(--title-bar-height);
+            padding: 0 var(--space-md);
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--glass-border);
+            -webkit-app-region: drag;
+        }
+
+        .title-bar__brand {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            font-weight: 600;
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
+        }
+
+        .title-bar__brand-icon {
+            font-size: 18px;
+        }
+
+        .title-bar__controls {
+            display: flex;
+            gap: var(--space-sm);
+            -webkit-app-region: no-drag;
+        }
+
+        .title-bar__btn {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            transition: transform var(--transition-fast);
+        }
+
+        .title-bar__btn:hover {
+            transform: scale(1.1);
+        }
+
+        .title-bar__btn--close {
+            background: #ff5f57;
+        }
+
+        .title-bar__btn--minimize {
+            background: #febc2e;
+        }
+
+        .title-bar__btn--maximize {
+            background: #28c840;
+        }
+
+        /* Main Container */
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* ============================================
+         Sidebar Navigation
+         ============================================ */
+
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--glass-border);
+            display: flex;
+            flex-direction: column;
+            padding: var(--space-md);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .sidebar__nav {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-xs);
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-md);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            border: 1px solid transparent;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(135deg, rgba(0, 119, 182, 0.08), rgba(0, 180, 216, 0.08));
+            color: var(--accent-primary);
+            border-color: rgba(0, 119, 182, 0.15);
+        }
+
+        .nav-item__icon {
+            font-size: 20px;
+            width: 24px;
+            text-align: center;
+        }
+
+        .sidebar__divider {
+            height: 1px;
+            background: var(--glass-border);
+            margin: var(--space-md) 0;
+        }
+
+        .sidebar__footer {
+            padding-top: var(--space-md);
+            border-top: 1px solid var(--glass-border);
+        }
+
+        .sidebar__version {
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        /* ============================================
+         Content Area
+         ============================================ */
+
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--bg-primary);
+        }
+
+        .content-view {
+            display: none;
+            flex-direction: column;
+            flex: 1;
+            padding: var(--space-xl);
+            overflow-y: auto;
+        }
+
+        .content-view.active {
+            display: flex;
+        }
+
+        /* Content Header */
+        .content-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: var(--space-xl);
+        }
+
+        .content-header__title {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+        }
+
+        .content-header__title h1 {
+            font-size: var(--font-size-xl);
+            font-weight: 600;
+        }
+
+        .content-header__title-icon {
+            font-size: 28px;
+        }
+
+        /* Status Badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-sm);
+            padding: var(--space-sm) var(--space-md);
+            border-radius: var(--radius-full);
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--glass-border);
+        }
+
+        .status-badge--idle {
+            color: var(--text-secondary);
+        }
+
+        .status-badge--active {
+            color: var(--accent-success);
+            background: rgba(5, 150, 105, 0.1);
+            border-color: rgba(5, 150, 105, 0.2);
+            animation: pulse-success 2s infinite;
+        }
+
+        .status-badge--error {
+            color: var(--accent-danger);
+            background: rgba(220, 38, 38, 0.1);
+            border-color: rgba(220, 38, 38, 0.2);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+
+        @keyframes pulse-success {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.2);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px rgba(5, 150, 105, 0);
+            }
+        }
+
+        /* ============================================
+         Buttons
+         ============================================ */
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--space-sm);
+            padding: var(--space-md) var(--space-lg);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            border: 1px solid transparent;
+            text-decoration: none;
+        }
+
+        .btn--primary {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: white;
+            box-shadow: var(--glow-primary);
+        }
+
+        .btn--primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(0, 119, 182, 0.3);
+        }
+
+        .btn--danger {
+            background: linear-gradient(135deg, var(--accent-danger), #ef4444);
+            color: white;
+            box-shadow: var(--glow-danger);
+        }
+
+        .btn--danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(220, 38, 38, 0.3);
+        }
+
+        .btn--ghost {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            border-color: var(--glass-border);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn--ghost:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn--sm {
+            padding: var(--space-sm) var(--space-md);
+            font-size: var(--font-size-xs);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .btn-icon {
+            font-size: 16px;
+        }
+
+        /* ============================================
+         Cards & Panels
+         ============================================ */
+
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .card--glass {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+        }
+
+        .card__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-md) var(--space-lg);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .card__title {
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .card__body {
+            padding: var(--space-lg);
+        }
+
+        /* ============================================
+         Form Controls
+         ============================================ */
+
+        .form-group {
+            margin-bottom: var(--space-lg);
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: var(--space-sm);
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            color: var(--text-secondary);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: var(--space-md);
+            background: var(--bg-primary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: var(--font-size-sm);
+            transition: all var(--transition-fast);
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.1);
+        }
+
+        .form-select {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2364748b' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right var(--space-md) center;
+            padding-right: var(--space-xl);
+        }
+
+        /* Toggle Switch */
+        .toggle {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-md);
+            cursor: pointer;
+        }
+
+        .toggle__input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle__slider {
+            width: 44px;
+            height: 24px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-full);
+            transition: all var(--transition-fast);
+            position: relative;
+        }
+
+        .toggle__slider::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            background: white;
+            border-radius: 50%;
+            transition: all var(--transition-fast);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .toggle__input:checked+.toggle__slider {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .toggle__input:checked+.toggle__slider::after {
+            left: 22px;
+        }
+
+        .toggle__label {
+            font-size: var(--font-size-sm);
+            color: var(--text-primary);
+        }
+
+        /* Checkbox */
+        .checkbox {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--space-sm);
+            cursor: pointer;
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
+        }
+
+        .checkbox__input {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent-primary);
+            cursor: pointer;
+        }
+
+        /* ============================================
+         Push-to-Talk Mode
+         ============================================ */
+
+        .ptt-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            gap: var(--space-2xl);
+        }
+
+        .ptt-status-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--space-lg);
+            padding: var(--space-2xl);
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-xl);
+            min-width: 320px;
+            box-shadow: var(--shadow-md);
+        }
+
+        .ptt-icon {
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(0, 119, 182, 0.1), rgba(0, 180, 216, 0.1));
+            border-radius: 50%;
+            font-size: 36px;
+        }
+
+        .ptt-status-card.active .ptt-icon {
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.1), rgba(239, 68, 68, 0.1));
+            animation: pulse-icon 1.5s infinite;
+        }
+
+        @keyframes pulse-icon {
+
+            0%,
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.2);
+            }
+
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 15px rgba(220, 38, 38, 0);
+            }
+        }
+
+        .ptt-status-text {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .ptt-shortcut {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            color: var(--text-muted);
+            font-size: var(--font-size-sm);
+        }
+
+        .kbd {
+            display: inline-block;
+            padding: var(--space-xs) var(--space-sm);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: var(--font-size-xs);
+            color: var(--text-secondary);
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .ptt-instructions {
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .ptt-instructions h3 {
+            font-size: var(--font-size-md);
+            font-weight: 600;
+            margin-bottom: var(--space-md);
+            color: var(--text-primary);
+        }
+
+        .ptt-instructions ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .ptt-instructions li {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
+        }
+
+        .ptt-instructions li::before {
+            content: '✓';
+            color: var(--accent-success);
+            font-weight: bold;
+        }
+
+        /* ============================================
+         Meeting Transcription Mode
+         ============================================ */
+
+        .meeting-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            gap: var(--space-lg);
+        }
+
+        /* Toolbar */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-md) var(--space-lg);
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            flex-wrap: wrap;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .toolbar__group {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+        }
+
+        .toolbar__divider {
+            width: 1px;
+            height: 24px;
+            background: var(--glass-border);
+            margin: 0 var(--space-sm);
+        }
+
+        .toolbar__spacer {
+            flex: 1;
+        }
+
+        /* Timer */
+        .timer {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: var(--font-size-2xl);
+            font-weight: 600;
+            color: var(--accent-primary);
+            text-align: center;
+            padding: var(--space-md);
+        }
+
+        .timer.recording {
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
+        }
+
+        /* Search Bar */
+        .search-bar {
+            position: relative;
+            max-width: 240px;
+        }
+
+        .search-bar__input {
+            width: 100%;
+            padding: var(--space-sm) var(--space-md);
+            padding-left: 36px;
+            background: var(--bg-primary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-full);
+            color: var(--text-primary);
+            font-size: var(--font-size-sm);
+            transition: all var(--transition-fast);
+        }
+
+        .search-bar__input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px rgba(0, 119, 182, 0.1);
+        }
+
+        .search-bar__icon {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* Transcript Area */
+        .transcript {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .transcript__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-md) var(--space-lg);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .transcript__content {
+            flex: 1;
+            padding: var(--space-lg);
+            overflow-y: auto;
+        }
+
+        .transcript__content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .transcript__content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .transcript__content::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+        }
+
+        /* Transcript Segment */
+        .segment {
+            position: relative;
+            margin-bottom: var(--space-lg);
+            padding: var(--space-md) var(--space-lg);
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            border-left: 3px solid var(--accent-primary);
+            transition: all var(--transition-fast);
+        }
+
+        .segment:hover {
+            background: rgba(0, 119, 182, 0.05);
+        }
+
+        .segment:hover .segment__actions {
+            opacity: 1;
+        }
+
+        .segment--speaker-1 {
+            border-left-color: var(--accent-primary);
+        }
+
+        .segment--speaker-2 {
+            border-left-color: var(--accent-success);
+        }
+
+        .segment--speaker-3 {
+            border-left-color: var(--accent-warning);
+        }
+
+        .segment--speaker-4 {
+            border-left-color: var(--accent-danger);
+        }
+
+        .segment__meta {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            margin-bottom: var(--space-sm);
+        }
+
+        .segment__time {
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+        }
+
+        .segment__speaker {
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            background: rgba(0, 119, 182, 0.1);
+            color: var(--accent-primary);
+        }
+
+        .segment__speaker--2 {
+            background: rgba(5, 150, 105, 0.1);
+            color: var(--accent-success);
+        }
+
+        .segment__text {
+            font-size: var(--font-size-md);
+            line-height: 1.7;
+            color: var(--text-primary);
+        }
+
+        .segment__translation {
+            margin-top: var(--space-sm);
+            padding-top: var(--space-sm);
+            border-top: 1px dashed var(--glass-border);
+            font-size: var(--font-size-sm);
+            color: var(--accent-secondary);
+            font-style: italic;
+        }
+
+        .segment__actions {
+            position: absolute;
+            top: var(--space-md);
+            right: var(--space-md);
+            display: flex;
+            gap: var(--space-xs);
+            opacity: 0;
+            transition: opacity var(--transition-fast);
+        }
+
+        .segment__action-btn {
+            padding: var(--space-xs);
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-sm);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 14px;
+            transition: all var(--transition-fast);
+        }
+
+        .segment__action-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        /* ============================================
+         Settings Mode
+         ============================================ */
+
+        .settings-container {
+            display: flex;
+            gap: var(--space-xl);
+            flex: 1;
+        }
+
+        .settings-nav {
+            width: 200px;
+            flex-shrink: 0;
+        }
+
+        .settings-nav__item {
+            display: block;
+            padding: var(--space-md);
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
+            text-decoration: none;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            margin-bottom: var(--space-xs);
+        }
+
+        .settings-nav__item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .settings-nav__item.active {
+            background: linear-gradient(135deg, rgba(0, 119, 182, 0.08), rgba(0, 180, 216, 0.08));
+            color: var(--accent-primary);
+        }
+
+        .settings-content {
+            flex: 1;
+            max-width: 600px;
+        }
+
+        .settings-section {
+            margin-bottom: var(--space-xl);
+        }
+
+        .settings-section__title {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+            margin-bottom: var(--space-lg);
+            color: var(--text-primary);
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-md) 0;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .settings-row:last-child {
+            border-bottom: none;
+        }
+
+        .settings-row__info {
+            flex: 1;
+            margin-right: var(--space-lg);
+        }
+
+        .settings-row__label {
+            font-size: var(--font-size-sm);
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: var(--space-xs);
+        }
+
+        .settings-row__desc {
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+        }
+
+        /* ============================================
+         Status Bar
+         ============================================ */
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-sm) var(--space-lg);
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--glass-border);
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+        }
+
+        .status-bar__left,
+        .status-bar__right {
+            display: flex;
+            align-items: center;
+            gap: var(--space-lg);
+        }
+
+        .status-bar__item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xs);
+        }
+
+        /* ============================================
+         Export Modal
+         ============================================ */
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-xl);
+            width: 400px;
+            max-width: 90vw;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .modal__header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: var(--space-lg);
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        .modal__title {
+            font-size: var(--font-size-lg);
+            font-weight: 600;
+        }
+
+        .modal__close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            transition: color var(--transition-fast);
+        }
+
+        .modal__close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal__body {
+            padding: var(--space-lg);
+        }
+
+        .modal__footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: var(--space-sm);
+            padding: var(--space-lg);
+            border-top: 1px solid var(--glass-border);
+        }
+
+        /* Export Options */
+        .export-options {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .export-option {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+            padding: var(--space-md);
+            background: var(--bg-tertiary);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+
+        .export-option:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .export-option.selected {
+            background: rgba(0, 119, 182, 0.08);
+            border-color: var(--accent-primary);
+        }
+
+        .export-option__icon {
+            font-size: 24px;
+        }
+
+        .export-option__info {
+            flex: 1;
+        }
+
+        .export-option__name {
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .export-option__desc {
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+        }
+
+        /* ============================================
+         Utilities
+         ============================================ */
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <!-- Title Bar -->
+        <div class="title-bar">
+            <div class="title-bar__brand">
+                <span class="title-bar__brand-icon">🎙️</span>
+                <span>JustSay</span>
+            </div>
+            <div class="title-bar__controls">
+                <button class="title-bar__btn title-bar__btn--minimize"></button>
+                <button class="title-bar__btn title-bar__btn--maximize"></button>
+                <button class="title-bar__btn title-bar__btn--close"></button>
+            </div>
+        </div>
+
+        <div class="main-container">
+            <!-- Sidebar -->
+            <nav class="sidebar">
+                <div class="sidebar__nav">
+                    <a class="nav-item active" data-view="ptt">
+                        <span class="nav-item__icon">🎤</span>
+                        <span>按键说话</span>
+                    </a>
+                    <a class="nav-item" data-view="meeting">
+                        <span class="nav-item__icon">📝</span>
+                        <span>会议转录</span>
+                    </a>
+                    <div class="sidebar__divider"></div>
+                    <a class="nav-item" data-view="settings">
+                        <span class="nav-item__icon">⚙️</span>
+                        <span>设置</span>
+                    </a>
+                </div>
+                <div class="sidebar__footer">
+                    <p class="sidebar__version">v1.0.0</p>
+                </div>
+            </nav>
+
+            <!-- Content -->
+            <main class="content">
+                <!-- Push-to-Talk View -->
+                <div class="content-view active" id="view-ptt">
+                    <div class="content-header">
+                        <div class="content-header__title">
+                            <span class="content-header__title-icon">🎤</span>
+                            <h1>按键说话</h1>
+                        </div>
+                        <div class="status-badge status-badge--idle">
+                            <span class="status-dot"></span>
+                            <span>待机中</span>
+                        </div>
+                    </div>
+
+                    <div class="ptt-container">
+                        <div class="ptt-status-card" id="pttCard">
+                            <div class="ptt-icon">🎙️</div>
+                            <div class="ptt-status-text">准备就绪</div>
+                            <div class="ptt-shortcut">
+                                按住 <span class="kbd">Right Alt</span> 开始说话
+                            </div>
+                        </div>
+
+                        <div class="ptt-instructions">
+                            <h3>使用方法</h3>
+                            <ul>
+                                <li>按住快捷键开始录音</li>
+                                <li>松开快捷键自动识别</li>
+                                <li>识别结果自动插入到当前输入框</li>
+                                <li>最小化后可在后台运行</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Meeting Transcription View -->
+                <div class="content-view" id="view-meeting">
+                    <div class="content-header">
+                        <div class="content-header__title">
+                            <span class="content-header__title-icon">📝</span>
+                            <h1>会议转录</h1>
+                        </div>
+                        <div class="status-badge status-badge--idle" id="meetingStatus">
+                            <span class="status-dot"></span>
+                            <span>待机中</span>
+                        </div>
+                    </div>
+
+                    <div class="meeting-container">
+                        <div class="toolbar">
+                            <div class="toolbar__group">
+                                <button class="btn btn--primary" id="btnStart">
+                                    <span class="btn-icon">▶️</span>
+                                    开始转录
+                                </button>
+                                <button class="btn btn--danger hidden" id="btnStop">
+                                    <span class="btn-icon">⏹️</span>
+                                    停止转录
+                                </button>
+                            </div>
+
+                            <div class="toolbar__divider"></div>
+
+                            <div class="toolbar__group">
+                                <label class="checkbox">
+                                    <input type="checkbox" class="checkbox__input" id="includeMic">
+                                    <span>录麦克风</span>
+                                </label>
+                                <label class="checkbox">
+                                    <input type="checkbox" class="checkbox__input" id="enableTranslation">
+                                    <span>实时翻译</span>
+                                </label>
+                                <select class="form-input form-select" style="width: 120px; padding: 6px 12px;"
+                                    id="targetLang" disabled>
+                                    <option value="en">英语</option>
+                                    <option value="zh">中文</option>
+                                    <option value="ja">日语</option>
+                                </select>
+                            </div>
+
+                            <div class="toolbar__spacer"></div>
+
+                            <div class="toolbar__group">
+                                <div class="search-bar">
+                                    <span class="search-bar__icon">🔍</span>
+                                    <input type="text" class="search-bar__input" placeholder="搜索..." id="searchInput">
+                                </div>
+                            </div>
+
+                            <div class="toolbar__divider"></div>
+
+                            <div class="toolbar__group">
+                                <button class="btn btn--ghost btn--sm" id="btnCopy">
+                                    <span class="btn-icon">📋</span>
+                                    复制
+                                </button>
+                                <button class="btn btn--ghost btn--sm" id="btnExport">
+                                    <span class="btn-icon">💾</span>
+                                    导出
+                                </button>
+                                <button class="btn btn--ghost btn--sm" id="btnClear">
+                                    <span class="btn-icon">🗑️</span>
+                                    清空
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="timer" id="timer">00:00:00</div>
+
+                        <div class="transcript">
+                            <div class="transcript__header">
+                                <span class="card__title">实时转录</span>
+                            </div>
+                            <div class="transcript__content" id="transcriptContent">
+                                <div class="segment segment--speaker-1">
+                                    <div class="segment__meta">
+                                        <span class="segment__time">10:30:15</span>
+                                        <span class="segment__speaker">说话人 1</span>
+                                    </div>
+                                    <div class="segment__text">今天我们来讨论一下项目的进度安排。首先看一下上周的完成情况。</div>
+                                    <div class="segment__translation">Today, let's discuss the project progress. First,
+                                        let's look at last week's completion.</div>
+                                    <div class="segment__actions">
+                                        <button class="segment__action-btn" title="编辑">✏️</button>
+                                        <button class="segment__action-btn" title="复制">📋</button>
+                                        <button class="segment__action-btn" title="删除">🗑️</button>
+                                    </div>
+                                </div>
+
+                                <div class="segment segment--speaker-2">
+                                    <div class="segment__meta">
+                                        <span class="segment__time">10:30:42</span>
+                                        <span class="segment__speaker segment__speaker--2">说话人 2</span>
+                                    </div>
+                                    <div class="segment__text">好的，我来汇报一下开发进度。目前核心功能已经完成了百分之八十。</div>
+                                    <div class="segment__translation">Alright, let me report on the development
+                                        progress. Currently, the core functionality is 80% complete.</div>
+                                    <div class="segment__actions">
+                                        <button class="segment__action-btn" title="编辑">✏️</button>
+                                        <button class="segment__action-btn" title="复制">📋</button>
+                                        <button class="segment__action-btn" title="删除">🗑️</button>
+                                    </div>
+                                </div>
+
+                                <div class="segment segment--speaker-1">
+                                    <div class="segment__meta">
+                                        <span class="segment__time">10:31:05</span>
+                                        <span class="segment__speaker">说话人 1</span>
+                                    </div>
+                                    <div class="segment__text">很好，那预计什么时候可以完成全部开发？</div>
+                                    <div class="segment__translation">Great, so when do you expect to complete all
+                                        development?</div>
+                                    <div class="segment__actions">
+                                        <button class="segment__action-btn" title="编辑">✏️</button>
+                                        <button class="segment__action-btn" title="复制">📋</button>
+                                        <button class="segment__action-btn" title="删除">🗑️</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings View -->
+                <div class="content-view" id="view-settings">
+                    <div class="content-header">
+                        <div class="content-header__title">
+                            <span class="content-header__title-icon">⚙️</span>
+                            <h1>设置</h1>
+                        </div>
+                    </div>
+
+                    <div class="settings-container">
+                        <nav class="settings-nav">
+                            <a class="settings-nav__item active" data-settings="general">常规</a>
+                            <a class="settings-nav__item" data-settings="audio">音频</a>
+                            <a class="settings-nav__item" data-settings="recognition">识别</a>
+                            <a class="settings-nav__item" data-settings="hotkey">快捷键</a>
+                            <a class="settings-nav__item" data-settings="output">输出</a>
+                            <a class="settings-nav__item" data-settings="appearance">外观</a>
+                            <a class="settings-nav__item" data-settings="advanced">高级</a>
+                        </nav>
+
+                        <div class="settings-content">
+                            <div class="settings-section">
+                                <h2 class="settings-section__title">常规设置</h2>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">界面语言</div>
+                                        <div class="settings-row__desc">选择应用界面显示的语言</div>
+                                    </div>
+                                    <select class="form-input form-select" style="width: 150px;">
+                                        <option>简体中文</option>
+                                        <option>English</option>
+                                    </select>
+                                </div>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">开机自动启动</div>
+                                        <div class="settings-row__desc">系统启动时自动运行 JustSay</div>
+                                    </div>
+                                    <label class="toggle">
+                                        <input type="checkbox" class="toggle__input">
+                                        <span class="toggle__slider"></span>
+                                    </label>
+                                </div>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">关闭时最小化到托盘</div>
+                                        <div class="settings-row__desc">点击关闭按钮时隐藏到系统托盘而不是退出</div>
+                                    </div>
+                                    <label class="toggle">
+                                        <input type="checkbox" class="toggle__input" checked>
+                                        <span class="toggle__slider"></span>
+                                    </label>
+                                </div>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">启动时隐藏主窗口</div>
+                                        <div class="settings-row__desc">应用启动后直接最小化到托盘</div>
+                                    </div>
+                                    <label class="toggle">
+                                        <input type="checkbox" class="toggle__input">
+                                        <span class="toggle__slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-section">
+                                <h2 class="settings-section__title">音频设置</h2>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">麦克风设备</div>
+                                        <div class="settings-row__desc">选择用于录音的输入设备</div>
+                                    </div>
+                                    <select class="form-input form-select" style="width: 200px;">
+                                        <option>默认设备</option>
+                                        <option>MacBook Pro 麦克风</option>
+                                        <option>外接 USB 麦克风</option>
+                                    </select>
+                                </div>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">最短录制时长</div>
+                                        <div class="settings-row__desc">低于此时长的录音将被忽略</div>
+                                    </div>
+                                    <select class="form-input form-select" style="width: 120px;">
+                                        <option>0.3 秒</option>
+                                        <option selected>0.5 秒</option>
+                                        <option>1.0 秒</option>
+                                    </select>
+                                </div>
+
+                                <div class="settings-row">
+                                    <div class="settings-row__info">
+                                        <div class="settings-row__label">最长录制时长</div>
+                                        <div class="settings-row__desc">达到此时长后自动停止录音</div>
+                                    </div>
+                                    <select class="form-input form-select" style="width: 120px;">
+                                        <option>30 秒</option>
+                                        <option selected>60 秒</option>
+                                        <option>120 秒</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-bar__left">
+                <div class="status-bar__item">
+                    <span>🟢</span>
+                    <span>就绪</span>
+                </div>
+                <div class="status-bar__item">
+                    <span>识别引擎:</span>
+                    <span>Soniox</span>
+                </div>
+            </div>
+            <div class="status-bar__right">
+                <div class="status-bar__item">
+                    <span>快捷键:</span>
+                    <span class="kbd">Right Alt</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal-overlay" id="exportModal">
+        <div class="modal">
+            <div class="modal__header">
+                <h3 class="modal__title">导出转录</h3>
+                <button class="modal__close" onclick="closeExportModal()">×</button>
+            </div>
+            <div class="modal__body">
+                <div class="export-options">
+                    <div class="export-option selected" data-format="txt">
+                        <span class="export-option__icon">📄</span>
+                        <div class="export-option__info">
+                            <div class="export-option__name">纯文本 (.txt)</div>
+                            <div class="export-option__desc">简单的文本格式，包含时间戳和说话人</div>
+                        </div>
+                    </div>
+                    <div class="export-option" data-format="md">
+                        <span class="export-option__icon">📝</span>
+                        <div class="export-option__info">
+                            <div class="export-option__name">Markdown (.md)</div>
+                            <div class="export-option__desc">带格式的文档，适合进一步编辑</div>
+                        </div>
+                    </div>
+                    <div class="export-option" data-format="srt">
+                        <span class="export-option__icon">🎬</span>
+                        <div class="export-option__info">
+                            <div class="export-option__name">字幕 (.srt)</div>
+                            <div class="export-option__desc">标准字幕格式，可用于视频编辑</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal__footer">
+                <button class="btn btn--ghost" onclick="closeExportModal()">取消</button>
+                <button class="btn btn--primary">
+                    <span class="btn-icon">💾</span>
+                    导出
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+
+                const viewId = item.dataset.view;
+                document.querySelectorAll('.content-view').forEach(v => v.classList.remove('active'));
+                document.getElementById('view-' + viewId).classList.add('active');
+            });
+        });
+
+        // Settings nav
+        document.querySelectorAll('.settings-nav__item').forEach(item => {
+            item.addEventListener('click', () => {
+                document.querySelectorAll('.settings-nav__item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+            });
+        });
+
+        // Translation toggle
+        const enableTranslation = document.getElementById('enableTranslation');
+        const targetLang = document.getElementById('targetLang');
+        enableTranslation.addEventListener('change', () => {
+            targetLang.disabled = !enableTranslation.checked;
+        });
+
+        // Export modal
+        document.getElementById('btnExport').addEventListener('click', () => {
+            document.getElementById('exportModal').classList.add('active');
+        });
+
+        function closeExportModal() {
+            document.getElementById('exportModal').classList.remove('active');
+        }
+
+        // Export option selection
+        document.querySelectorAll('.export-option').forEach(opt => {
+            opt.addEventListener('click', () => {
+                document.querySelectorAll('.export-option').forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+            });
+        });
+
+        // Start/Stop toggle demo
+        const btnStart = document.getElementById('btnStart');
+        const btnStop = document.getElementById('btnStop');
+        const timer = document.getElementById('timer');
+        const meetingStatus = document.getElementById('meetingStatus');
+        let isRecording = false;
+        let timerInterval;
+        let seconds = 0;
+
+        btnStart.addEventListener('click', () => {
+            isRecording = true;
+            btnStart.classList.add('hidden');
+            btnStop.classList.remove('hidden');
+            timer.classList.add('recording');
+            meetingStatus.className = 'status-badge status-badge--active';
+            meetingStatus.querySelector('span:last-child').textContent = '转录中';
+
+            timerInterval = setInterval(() => {
+                seconds++;
+                const h = Math.floor(seconds / 3600);
+                const m = Math.floor((seconds % 3600) / 60);
+                const s = seconds % 60;
+                timer.textContent = [h, m, s].map(v => v.toString().padStart(2, '0')).join(':');
+            }, 1000);
+        });
+
+        btnStop.addEventListener('click', () => {
+            isRecording = false;
+            btnStop.classList.add('hidden');
+            btnStart.classList.remove('hidden');
+            timer.classList.remove('recording');
+            meetingStatus.className = 'status-badge status-badge--idle';
+            meetingStatus.querySelector('span:last-child').textContent = '待机中';
+            clearInterval(timerInterval);
+        });
+
+        // PTT demo
+        const pttCard = document.getElementById('pttCard');
+        document.addEventListener('keydown', (e) => {
+            if (e.altKey && e.location === 2) {
+                pttCard.classList.add('active');
+                pttCard.querySelector('.ptt-status-text').textContent = '正在录音...';
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'Alt') {
+                pttCard.classList.remove('active');
+                pttCard.querySelector('.ptt-status-text').textContent = '准备就绪';
+            }
+        });
+    </script>
+</body>
+
+</html>

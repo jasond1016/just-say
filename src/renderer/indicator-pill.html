@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Recording Indicator - Pill Style</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* ============================================
+         Pill/Capsule Floating Indicator
+         Premium Neutral + Glassmorphism
+         ============================================ */
+
+        :root {
+            /* Dark theme */
+            --bg-glass: rgba(15, 15, 20, 0.92);
+            --bg-glass-light: rgba(248, 249, 252, 0.95);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --border-glass-light: rgba(0, 0, 0, 0.08);
+
+            --accent-primary: #00b4d8;
+            --accent-recording: #ef476f;
+            --accent-processing: #00b4d8;
+            --accent-success: #06d6a0;
+
+            --text-primary: #f0f0f0;
+            --text-primary-light: #1a1a2e;
+            --text-secondary: #8d99ae;
+            --text-secondary-light: #64748b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            background: transparent;
+            overflow: hidden;
+            user-select: none;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+
+        /* Demo background */
+        body.demo {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            padding: 40px;
+        }
+
+        .demo-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .demo-label {
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-align: center;
+        }
+
+        /* ============================================
+         Pill Indicator - Main Design
+         ============================================ */
+
+        .indicator-pill {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: var(--bg-glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-glass);
+            border-radius: 50px;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+
+        .indicator-pill.hidden {
+            opacity: 0;
+            transform: scale(0.9) translateY(-10px);
+            pointer-events: none;
+        }
+
+        /* Recording state */
+        .indicator-pill.recording {
+            border-color: rgba(239, 71, 111, 0.4);
+            animation: glow-recording 1.5s ease-in-out infinite;
+        }
+
+        @keyframes glow-recording {
+
+            0%,
+            100% {
+                box-shadow:
+                    0 8px 32px rgba(0, 0, 0, 0.4),
+                    0 0 20px rgba(239, 71, 111, 0.15),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            }
+
+            50% {
+                box-shadow:
+                    0 8px 32px rgba(0, 0, 0, 0.4),
+                    0 0 40px rgba(239, 71, 111, 0.35),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            }
+        }
+
+        /* Processing state */
+        .indicator-pill.processing {
+            border-color: rgba(0, 180, 216, 0.4);
+            animation: glow-processing 1.5s ease-in-out infinite;
+        }
+
+        @keyframes glow-processing {
+
+            0%,
+            100% {
+                box-shadow:
+                    0 8px 32px rgba(0, 0, 0, 0.4),
+                    0 0 20px rgba(0, 180, 216, 0.15),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            }
+
+            50% {
+                box-shadow:
+                    0 8px 32px rgba(0, 0, 0, 0.4),
+                    0 0 40px rgba(0, 180, 216, 0.35),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            }
+        }
+
+        /* Icon container */
+        .indicator-pill__icon-wrap {
+            position: relative;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .indicator-pill__icon {
+            font-size: 20px;
+            z-index: 1;
+        }
+
+        /* Pulsing dot behind icon */
+        .indicator-pill.recording .indicator-pill__icon-wrap::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: rgba(239, 71, 111, 0.2);
+            border-radius: 50%;
+            animation: pulse-dot 1s ease-out infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% {
+                transform: scale(0.8);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(1.5);
+                opacity: 0;
+            }
+        }
+
+        /* Spinner for processing */
+        .indicator-pill__spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(0, 180, 216, 0.2);
+            border-top-color: var(--accent-processing);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        .indicator-pill.processing .indicator-pill__icon {
+            display: none;
+        }
+
+        .indicator-pill.processing .indicator-pill__spinner {
+            display: block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Text content */
+        .indicator-pill__content {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+
+        .indicator-pill__status {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .indicator-pill.recording .indicator-pill__status {
+            color: var(--accent-recording);
+        }
+
+        .indicator-pill.processing .indicator-pill__status {
+            color: var(--accent-processing);
+        }
+
+        .indicator-pill__duration {
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 1px;
+        }
+
+        .indicator-pill.processing .indicator-pill__duration {
+            display: none;
+        }
+
+        /* Waveform */
+        .waveform {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            height: 20px;
+            padding-left: 8px;
+            border-left: 1px solid rgba(255, 255, 255, 0.1);
+            margin-left: 4px;
+        }
+
+        .indicator-pill.recording .waveform {
+            display: flex;
+        }
+
+        .wave-bar {
+            width: 3px;
+            background: linear-gradient(to top, var(--accent-recording), #ffd166);
+            border-radius: 2px;
+            animation: wave 0.4s ease-in-out infinite alternate;
+        }
+
+        .wave-bar:nth-child(1) {
+            height: 6px;
+            animation-delay: 0s;
+        }
+
+        .wave-bar:nth-child(2) {
+            height: 14px;
+            animation-delay: 0.1s;
+        }
+
+        .wave-bar:nth-child(3) {
+            height: 10px;
+            animation-delay: 0.2s;
+        }
+
+        .wave-bar:nth-child(4) {
+            height: 18px;
+            animation-delay: 0.15s;
+        }
+
+        .wave-bar:nth-child(5) {
+            height: 8px;
+            animation-delay: 0.05s;
+        }
+
+        @keyframes wave {
+            from {
+                transform: scaleY(1);
+            }
+
+            to {
+                transform: scaleY(0.4);
+            }
+        }
+
+        /* ============================================
+         Light Theme Variant
+         ============================================ */
+
+        .indicator-pill.light {
+            background: var(--bg-glass-light);
+            border-color: var(--border-glass-light);
+            box-shadow:
+                0 4px 20px rgba(0, 0, 0, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.5);
+        }
+
+        .indicator-pill.light .indicator-pill__status {
+            color: var(--text-primary-light);
+        }
+
+        .indicator-pill.light.recording .indicator-pill__status {
+            color: var(--accent-recording);
+        }
+
+        .indicator-pill.light.processing .indicator-pill__status {
+            color: var(--accent-processing);
+        }
+
+        .indicator-pill.light .indicator-pill__duration {
+            color: var(--text-secondary-light);
+        }
+
+        .indicator-pill.light .waveform {
+            border-left-color: rgba(0, 0, 0, 0.1);
+        }
+
+        .indicator-pill.light.recording {
+            animation: glow-recording-light 1.5s ease-in-out infinite;
+        }
+
+        @keyframes glow-recording-light {
+
+            0%,
+            100% {
+                box-shadow:
+                    0 4px 20px rgba(0, 0, 0, 0.1),
+                    0 0 15px rgba(239, 71, 111, 0.1),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            }
+
+            50% {
+                box-shadow:
+                    0 4px 20px rgba(0, 0, 0, 0.1),
+                    0 0 30px rgba(239, 71, 111, 0.25),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            }
+        }
+
+        /* ============================================
+         Compact Variant
+         ============================================ */
+
+        .indicator-pill.compact {
+            padding: 8px 14px;
+            gap: 8px;
+        }
+
+        .indicator-pill.compact .indicator-pill__icon-wrap {
+            width: 24px;
+            height: 24px;
+        }
+
+        .indicator-pill.compact .indicator-pill__icon {
+            font-size: 16px;
+        }
+
+        .indicator-pill.compact .indicator-pill__status {
+            font-size: 12px;
+        }
+
+        .indicator-pill.compact .indicator-pill__duration {
+            font-size: 10px;
+        }
+
+        .indicator-pill.compact .waveform {
+            height: 16px;
+            padding-left: 6px;
+        }
+
+        .indicator-pill.compact .wave-bar {
+            width: 2px;
+        }
+
+        /* ============================================
+         Minimal Variant (status only, no duration)
+         ============================================ */
+
+        .indicator-pill.minimal {
+            padding: 10px 18px;
+        }
+
+        .indicator-pill.minimal .indicator-pill__content {
+            flex-direction: row;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .indicator-pill.minimal .indicator-pill__duration {
+            display: none;
+        }
+
+        .indicator-pill.minimal.recording .indicator-pill__content::after {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--accent-recording);
+            border-radius: 50%;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
+        }
+
+        /* ============================================
+         Extended Variant (more info)
+         ============================================ */
+
+        .indicator-pill.extended {
+            padding: 14px 24px;
+            gap: 16px;
+        }
+
+        .indicator-pill.extended .indicator-pill__icon-wrap {
+            width: 40px;
+            height: 40px;
+        }
+
+        .indicator-pill.extended .indicator-pill__icon {
+            font-size: 24px;
+        }
+
+        .indicator-pill.extended .indicator-pill__status {
+            font-size: 14px;
+        }
+
+        .indicator-pill.extended .indicator-pill__duration {
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-top: 2px;
+        }
+
+        .indicator-pill.extended.recording .indicator-pill__duration {
+            color: var(--accent-recording);
+        }
+
+        /* ============================================
+         Demo Controls
+         ============================================ */
+
+        .demo-controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+        }
+
+        .demo-btn {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .demo-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .demo-btn.active {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        /* Demo rows */
+        .demo-row {
+            display: flex;
+            gap: 32px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+    </style>
+</head>
+
+<body class="demo">
+
+    <!-- Standard Pill - Recording -->
+    <div class="demo-section">
+        <p class="demo-label">标准胶囊 - 录音中（深色）</p>
+        <div class="indicator-pill recording">
+            <div class="indicator-pill__icon-wrap">
+                <span class="indicator-pill__icon">🎤</span>
+                <div class="indicator-pill__spinner"></div>
+            </div>
+            <div class="indicator-pill__content">
+                <span class="indicator-pill__status">录音中</span>
+                <span class="indicator-pill__duration">00:05</span>
+            </div>
+            <div class="waveform">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Standard Pill - Processing -->
+    <div class="demo-section">
+        <p class="demo-label">标准胶囊 - 处理中</p>
+        <div class="indicator-pill processing">
+            <div class="indicator-pill__icon-wrap">
+                <span class="indicator-pill__icon">🎤</span>
+                <div class="indicator-pill__spinner"></div>
+            </div>
+            <div class="indicator-pill__content">
+                <span class="indicator-pill__status">识别中...</span>
+                <span class="indicator-pill__duration">00:05</span>
+            </div>
+            <div class="waveform">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Variants row -->
+    <div class="demo-section">
+        <p class="demo-label">尺寸变体</p>
+        <div class="demo-row">
+            <!-- Compact -->
+            <div class="indicator-pill compact recording">
+                <div class="indicator-pill__icon-wrap">
+                    <span class="indicator-pill__icon">🎤</span>
+                    <div class="indicator-pill__spinner"></div>
+                </div>
+                <div class="indicator-pill__content">
+                    <span class="indicator-pill__status">录音中</span>
+                    <span class="indicator-pill__duration">00:05</span>
+                </div>
+                <div class="waveform">
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                </div>
+            </div>
+
+            <!-- Extended -->
+            <div class="indicator-pill extended recording">
+                <div class="indicator-pill__icon-wrap">
+                    <span class="indicator-pill__icon">🎤</span>
+                    <div class="indicator-pill__spinner"></div>
+                </div>
+                <div class="indicator-pill__content">
+                    <span class="indicator-pill__status">录音中</span>
+                    <span class="indicator-pill__duration">00:05</span>
+                </div>
+                <div class="waveform">
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Light theme -->
+    <div class="demo-section"
+        style="padding: 32px; background: linear-gradient(135deg, #f0f2f8 0%, #e8eaf0 100%); border-radius: 16px;">
+        <p class="demo-label" style="color: #64748b;">浅色主题</p>
+        <div class="demo-row">
+            <div class="indicator-pill light recording">
+                <div class="indicator-pill__icon-wrap">
+                    <span class="indicator-pill__icon">🎤</span>
+                    <div class="indicator-pill__spinner"></div>
+                </div>
+                <div class="indicator-pill__content">
+                    <span class="indicator-pill__status">录音中</span>
+                    <span class="indicator-pill__duration">00:05</span>
+                </div>
+                <div class="waveform">
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                </div>
+            </div>
+
+            <div class="indicator-pill light processing">
+                <div class="indicator-pill__icon-wrap">
+                    <span class="indicator-pill__icon">🎤</span>
+                    <div class="indicator-pill__spinner"></div>
+                </div>
+                <div class="indicator-pill__content">
+                    <span class="indicator-pill__status">识别中...</span>
+                    <span class="indicator-pill__duration">00:05</span>
+                </div>
+                <div class="waveform">
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                    <div class="wave-bar"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Demo Controls -->
+    <div class="demo-controls">
+        <button class="demo-btn active" onclick="setAllState('recording')">录音中</button>
+        <button class="demo-btn" onclick="setAllState('processing')">处理中</button>
+        <button class="demo-btn" onclick="setAllState('idle')">隐藏</button>
+    </div>
+
+    <script>
+        // Demo timer
+        let seconds = 5;
+        setInterval(() => {
+            seconds++;
+            const min = Math.floor(seconds / 60);
+            const sec = seconds % 60;
+            const timeStr = min.toString().padStart(2, '0') + ':' + sec.toString().padStart(2, '0');
+            document.querySelectorAll('.indicator-pill__duration').forEach(el => {
+                el.textContent = timeStr;
+            });
+        }, 1000);
+
+        // Demo state switching
+        function setAllState(state) {
+            document.querySelectorAll('.demo-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            document.querySelectorAll('.indicator-pill').forEach(el => {
+                el.classList.remove('recording', 'processing', 'hidden');
+                if (state !== 'idle') {
+                    el.classList.add(state);
+                }
+                if (state === 'idle') {
+                    el.classList.add('hidden');
+                }
+            });
+
+            // Update status text
+            const statusText = state === 'recording' ? '录音中' : (state === 'processing' ? '识别中...' : '');
+            document.querySelectorAll('.indicator-pill__status').forEach(el => {
+                el.textContent = statusText;
+            });
+        }
+    </script>
+</body>
+
+</html>
