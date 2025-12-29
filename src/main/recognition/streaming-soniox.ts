@@ -5,6 +5,8 @@ export interface StreamingSonioxConfig {
   apiKey?: string
   model?: string
   languageHints?: string[]
+  /** Enable speaker diarization. Each token will include a speaker number. Default: true */
+  enableSpeakerDiarization?: boolean
 }
 
 interface SonioxToken {
@@ -12,6 +14,8 @@ interface SonioxToken {
   is_final?: boolean
   confidence?: number
   language?: string
+  /** Speaker number (when speaker diarization is enabled) */
+  speaker?: number
 }
 
 interface SonioxResponse {
@@ -27,6 +31,8 @@ export interface PartialResult {
   finalText: string    // Confirmed text that won't change
   interimText: string  // Provisional text that may change
   combined: string     // finalText + interimText for display
+  /** Current speaker number (if speaker diarization is enabled) */
+  currentSpeaker?: number
 }
 
 /**
@@ -40,7 +46,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   private isConnected = false
   private isConfigSent = false
   private finalText: string[] = []
-  private interimText: string[] = []  // Track non-final tokens
+  private interimText: string[] = [] // Track non-final tokens
+  private currentSpeaker?: number
   private startTime = 0
   private preConnectTime = 0
   private readonly WS_ENDPOINT = 'wss://stt-rt.soniox.com/transcribe-websocket'
@@ -49,7 +56,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
     super()
     this.config = {
       model: 'stt-rt-v3',
-      languageHints: ['zh', 'en'],
+      languageHints: ['zh', 'en', 'ja'],
+      enableSpeakerDiarization: true, // Default enabled
       ...config
     }
   }
@@ -181,11 +189,15 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       num_channels: 1,
       language_hints: this.config.languageHints,
       // Enable endpoint detection for faster finalization
-      enable_endpoint_detection: true
+      enable_endpoint_detection: true,
+      // Enable speaker diarization
+      enable_speaker_diarization: this.config.enableSpeakerDiarization
     }
     this.ws.send(JSON.stringify(config))
     this.isConfigSent = true
-    console.log('[StreamingSoniox] Config sent with endpoint detection enabled')
+    console.log(
+      `[StreamingSoniox] Config sent (endpoint detection: on, speaker diarization: ${this.config.enableSpeakerDiarization})`
+    )
   }
 
   /**
@@ -242,9 +254,14 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       // Process tokens
       if (response.tokens) {
         // Collect final and interim tokens separately
-        this.interimText = []  // Reset interim for each response
-        
+        this.interimText = [] // Reset interim for each response
+
         for (const token of response.tokens) {
+          // Track speaker changes
+          if (token.speaker !== undefined && token.speaker !== this.currentSpeaker) {
+            this.currentSpeaker = token.speaker
+          }
+
           if (token.is_final) {
             this.finalText.push(token.text)
           } else {
@@ -257,7 +274,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
         const result: PartialResult = {
           finalText: this.finalText.join(''),
           interimText: this.interimText.join(''),
-          combined: this.finalText.join('') + this.interimText.join('')
+          combined: this.finalText.join('') + this.interimText.join(''),
+          currentSpeaker: this.currentSpeaker
         }
         this.emit('partial', result)
       }
