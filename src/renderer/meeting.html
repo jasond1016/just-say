@@ -1,437 +1,658 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>会议转录 - JustSay</title>
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      
-      html, body {
-        height: 100%;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-        color: #e8e8e8;
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>会议转录 - JustSay</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #e8e8e8;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 20px;
+      gap: 16px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 16px;
+      border-bottom: 1px solid rgba(0, 180, 216, 0.2);
+    }
+
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      background: linear-gradient(90deg, #00b4d8, #90e0ef);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .status-badge.idle {
+      color: #8d99ae;
+    }
+
+    .status-badge.transcribing {
+      color: #06d6a0;
+      border-color: rgba(6, 214, 160, 0.3);
+      animation: pulse-green 2s infinite;
+    }
+
+    .status-badge.error {
+      color: #ef476f;
+      border-color: rgba(239, 71, 111, 0.3);
+    }
+
+    @keyframes pulse-green {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 0 rgba(6, 214, 160, 0.3);
       }
 
-      .container {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        padding: 20px;
-        gap: 16px;
+      50% {
+        box-shadow: 0 0 0 8px rgba(6, 214, 160, 0);
+      }
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .btn {
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #00b4d8, #0077b6);
+      color: white;
+      box-shadow: 0 4px 15px rgba(0, 180, 216, 0.3);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 180, 216, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef476f, #d00000);
+      color: white;
+      box-shadow: 0 4px 15px rgba(239, 71, 111, 0.3);
+    }
+
+    .btn-danger:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(239, 71, 111, 0.4);
+    }
+
+    /* Checkbox option */
+    .option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+      color: #b0b0b0;
+      font-size: 13px;
+    }
+
+    .option input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #00b4d8;
+      cursor: pointer;
+    }
+
+    .option label {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    /* Transcript area */
+    .transcript-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+    }
+
+    .transcript-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .transcript-header span {
+      font-size: 13px;
+      color: #8d99ae;
+      font-weight: 500;
+    }
+
+    .btn-clear {
+      padding: 6px 12px;
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      color: #8d99ae;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-clear:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+
+    .transcript-content {
+      flex: 1;
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 15px;
+      line-height: 1.8;
+      color: #e0e0e0;
+    }
+
+    .transcript-content::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .transcript-content::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .transcript-content::-webkit-scrollbar-thumb {
+      background: rgba(0, 180, 216, 0.3);
+      border-radius: 3px;
+    }
+
+    .transcript-placeholder {
+      color: #6c757d;
+      font-style: italic;
+      text-align: center;
+      padding-top: 80px;
+    }
+
+    .transcript-segment {
+      margin-bottom: 16px;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 10px;
+      border-left: 4px solid rgba(0, 180, 216, 0.5);
+    }
+
+    .transcript-segment.partial {
+      border-left-color: rgba(255, 209, 102, 0.5);
+      opacity: 0.85;
+    }
+
+    .transcript-time {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: #6c757d;
+      margin-bottom: 8px;
+    }
+
+    .transcript-text {
+      display: block;
+      line-height: 1.7;
+      font-size: 15px;
+      color: #e8e8e8;
+    }
+
+    /* Speaker styles */
+    .speaker-label {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-right: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Speaker color palette */
+    .speaker-0 {
+      background: rgba(0, 180, 216, 0.2);
+      color: #00b4d8;
+      border-left-color: #00b4d8 !important;
+    }
+
+    .speaker-1 {
+      background: rgba(6, 214, 160, 0.2);
+      color: #06d6a0;
+      border-left-color: #06d6a0 !important;
+    }
+
+    .speaker-2 {
+      background: rgba(255, 209, 102, 0.2);
+      color: #ffd166;
+      border-left-color: #ffd166 !important;
+    }
+
+    .speaker-3 {
+      background: rgba(239, 71, 111, 0.2);
+      color: #ef476f;
+      border-left-color: #ef476f !important;
+    }
+
+    .speaker-4 {
+      background: rgba(144, 224, 239, 0.2);
+      color: #90e0ef;
+      border-left-color: #90e0ef !important;
+    }
+
+    .speaker-5 {
+      background: rgba(168, 218, 220, 0.2);
+      color: #a8dadc;
+      border-left-color: #a8dadc !important;
+    }
+
+    .speaker-6 {
+      background: rgba(230, 176, 170, 0.2);
+      color: #e6b0aa;
+      border-left-color: #e6b0aa !important;
+    }
+
+    .speaker-7 {
+      background: rgba(187, 143, 206, 0.2);
+      color: #bb8fce;
+      border-left-color: #bb8fce !important;
+    }
+
+    .speaker-label.speaker-0 {
+      background: rgba(0, 180, 216, 0.3);
+    }
+
+    .speaker-label.speaker-1 {
+      background: rgba(6, 214, 160, 0.3);
+    }
+
+    .speaker-label.speaker-2 {
+      background: rgba(255, 209, 102, 0.3);
+    }
+
+    .speaker-label.speaker-3 {
+      background: rgba(239, 71, 111, 0.3);
+    }
+
+    .speaker-label.speaker-4 {
+      background: rgba(144, 224, 239, 0.3);
+    }
+
+    .speaker-label.speaker-5 {
+      background: rgba(168, 218, 220, 0.3);
+    }
+
+    .speaker-label.speaker-6 {
+      background: rgba(230, 176, 170, 0.3);
+    }
+
+    .speaker-label.speaker-7 {
+      background: rgba(187, 143, 206, 0.3);
+    }
+
+    /* Duration */
+    .duration {
+      font-family: 'SF Mono', 'Monaco', monospace;
+      font-size: 24px;
+      color: #00b4d8;
+      text-align: center;
+      padding: 8px;
+    }
+
+    .duration.recording {
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1;
       }
 
-      /* Header */
-      .header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding-bottom: 16px;
-        border-bottom: 1px solid rgba(0, 180, 216, 0.2);
+      50% {
+        opacity: 0.6;
       }
+    }
+  </style>
+</head>
 
-      .header h1 {
-        font-size: 20px;
-        font-weight: 600;
-        background: linear-gradient(90deg, #00b4d8, #90e0ef);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-
-      .status-badge {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 14px;
-        border-radius: 20px;
-        font-size: 12px;
-        font-weight: 500;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      }
-
-      .status-badge.idle { color: #8d99ae; }
-      .status-badge.transcribing { 
-        color: #06d6a0;
-        border-color: rgba(6, 214, 160, 0.3);
-        animation: pulse-green 2s infinite;
-      }
-      .status-badge.error { 
-        color: #ef476f;
-        border-color: rgba(239, 71, 111, 0.3);
-      }
-
-      @keyframes pulse-green {
-        0%, 100% { box-shadow: 0 0 0 0 rgba(6, 214, 160, 0.3); }
-        50% { box-shadow: 0 0 0 8px rgba(6, 214, 160, 0); }
-      }
-
-      .status-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: currentColor;
-      }
-
-      /* Controls */
-      .controls {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        padding: 16px;
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
-      }
-
-      .btn {
-        padding: 12px 28px;
-        border: none;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-
-      .btn-primary {
-        background: linear-gradient(135deg, #00b4d8, #0077b6);
-        color: white;
-        box-shadow: 0 4px 15px rgba(0, 180, 216, 0.3);
-      }
-
-      .btn-primary:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0, 180, 216, 0.4);
-      }
-
-      .btn-primary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-        transform: none;
-      }
-
-      .btn-danger {
-        background: linear-gradient(135deg, #ef476f, #d00000);
-        color: white;
-        box-shadow: 0 4px 15px rgba(239, 71, 111, 0.3);
-      }
-
-      .btn-danger:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(239, 71, 111, 0.4);
-      }
-
-      /* Checkbox option */
-      .option {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-left: auto;
-        color: #b0b0b0;
-        font-size: 13px;
-      }
-
-      .option input[type="checkbox"] {
-        width: 18px;
-        height: 18px;
-        accent-color: #00b4d8;
-        cursor: pointer;
-      }
-
-      .option label {
-        cursor: pointer;
-        user-select: none;
-      }
-
-      /* Transcript area */
-      .transcript-area {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        background: rgba(0, 0, 0, 0.2);
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        overflow: hidden;
-      }
-
-      .transcript-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 12px 16px;
-        background: rgba(255, 255, 255, 0.02);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      }
-
-      .transcript-header span {
-        font-size: 13px;
-        color: #8d99ae;
-        font-weight: 500;
-      }
-
-      .btn-clear {
-        padding: 6px 12px;
-        font-size: 12px;
-        background: rgba(255, 255, 255, 0.05);
-        color: #8d99ae;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 6px;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-
-      .btn-clear:hover {
-        background: rgba(255, 255, 255, 0.1);
-        color: #fff;
-      }
-
-      .transcript-content {
-        flex: 1;
-        padding: 16px;
-        overflow-y: auto;
-        font-size: 15px;
-        line-height: 1.8;
-        color: #e0e0e0;
-      }
-
-      .transcript-content::-webkit-scrollbar {
-        width: 6px;
-      }
-
-      .transcript-content::-webkit-scrollbar-track {
-        background: rgba(255, 255, 255, 0.05);
-      }
-
-      .transcript-content::-webkit-scrollbar-thumb {
-        background: rgba(0, 180, 216, 0.3);
-        border-radius: 3px;
-      }
-
-      .transcript-placeholder {
-        color: #6c757d;
-        font-style: italic;
-        text-align: center;
-        padding-top: 80px;
-      }
-
-      .transcript-segment {
-        margin-bottom: 12px;
-        padding: 10px 14px;
-        background: rgba(255, 255, 255, 0.02);
-        border-radius: 8px;
-        border-left: 3px solid rgba(0, 180, 216, 0.5);
-      }
-
-      .transcript-segment.partial {
-        border-left-color: rgba(255, 209, 102, 0.5);
-        opacity: 0.8;
-      }
-
-      .transcript-time {
-        display: block;
-        font-size: 11px;
-        color: #6c757d;
-        margin-bottom: 4px;
-      }
-
-      /* Duration */
-      .duration {
-        font-family: 'SF Mono', 'Monaco', monospace;
-        font-size: 24px;
-        color: #00b4d8;
-        text-align: center;
-        padding: 8px;
-      }
-
-      .duration.recording {
-        animation: blink 1s infinite;
-      }
-
-      @keyframes blink {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <div class="header">
-        <h1>🎙️ 会议转录</h1>
-        <div class="status-badge idle" id="statusBadge">
-          <span class="status-dot"></span>
-          <span id="statusText">就绪</span>
-        </div>
-      </div>
-
-      <div class="controls">
-        <button class="btn btn-primary" id="startBtn" onclick="startTranscription()">
-          ▶️ 开始转录
-        </button>
-        <button class="btn btn-danger" id="stopBtn" onclick="stopTranscription()" style="display: none;">
-          ⏹️ 停止转录
-        </button>
-        
-        <div class="option">
-          <input type="checkbox" id="includeMic" />
-          <label for="includeMic">同时录制麦克风</label>
-        </div>
-      </div>
-
-      <div class="duration" id="duration">00:00:00</div>
-
-      <div class="transcript-area">
-        <div class="transcript-header">
-          <span>实时转录文本</span>
-          <button class="btn-clear" onclick="clearTranscript()">清空</button>
-        </div>
-        <div class="transcript-content" id="transcriptContent">
-          <div class="transcript-placeholder">
-            点击"开始转录"捕获系统音频并实时转录...
-          </div>
-        </div>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎙️ 会议转录</h1>
+      <div class="status-badge idle" id="statusBadge">
+        <span class="status-dot"></span>
+        <span id="statusText">就绪</span>
       </div>
     </div>
 
-    <script>
-      let isTranscribing = false;
-      let durationTimer = null;
-      let seconds = 0;
+    <div class="controls">
+      <button class="btn btn-primary" id="startBtn" onclick="startTranscription()">
+        ▶️ 开始转录
+      </button>
+      <button class="btn btn-danger" id="stopBtn" onclick="stopTranscription()" style="display: none;">
+        ⏹️ 停止转录
+      </button>
 
-      const startBtn = document.getElementById('startBtn');
-      const stopBtn = document.getElementById('stopBtn');
-      const statusBadge = document.getElementById('statusBadge');
-      const statusText = document.getElementById('statusText');
-      const durationEl = document.getElementById('duration');
-      const transcriptContent = document.getElementById('transcriptContent');
-      const includeMic = document.getElementById('includeMic');
+      <div class="option">
+        <input type="checkbox" id="includeMic" />
+        <label for="includeMic">同时录制麦克风</label>
+      </div>
+    </div>
 
-      function formatDuration(s) {
-        const h = Math.floor(s / 3600);
-        const m = Math.floor((s % 3600) / 60);
-        const sec = s % 60;
-        return [h, m, sec].map(v => v.toString().padStart(2, '0')).join(':');
+    <div class="duration" id="duration">00:00:00</div>
+
+    <div class="transcript-area">
+      <div class="transcript-header">
+        <span>实时转录文本</span>
+        <button class="btn-clear" onclick="clearTranscript()">清空</button>
+      </div>
+      <div class="transcript-content" id="transcriptContent">
+        <div class="transcript-placeholder">
+          点击"开始转录"捕获系统音频并实时转录...
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let isTranscribing = false;
+    let durationTimer = null;
+    let seconds = 0;
+
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const statusBadge = document.getElementById('statusBadge');
+    const statusText = document.getElementById('statusText');
+    const durationEl = document.getElementById('duration');
+    const transcriptContent = document.getElementById('transcriptContent');
+    const includeMic = document.getElementById('includeMic');
+
+    function formatDuration(s) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      const sec = s % 60;
+      return [h, m, sec].map(v => v.toString().padStart(2, '0')).join(':');
+    }
+
+    function updateStatus(status) {
+      statusBadge.className = 'status-badge ' + status;
+      if (status === 'idle') {
+        statusText.textContent = '就绪';
+        durationEl.classList.remove('recording');
+      } else if (status === 'transcribing') {
+        statusText.textContent = '转录中';
+        durationEl.classList.add('recording');
+      } else if (status === 'error') {
+        statusText.textContent = '错误';
+        durationEl.classList.remove('recording');
+      }
+    }
+
+    async function startTranscription() {
+      if (isTranscribing) return;
+
+      try {
+        await window.api.startMeetingTranscription({
+          includeMicrophone: includeMic.checked
+        });
+
+        isTranscribing = true;
+        startBtn.style.display = 'none';
+        stopBtn.style.display = 'flex';
+        includeMic.disabled = true;
+        updateStatus('transcribing');
+
+        // Clear transcript area and reset counter
+        transcriptContent.innerHTML = '';
+        renderedSegmentCount = 0;
+
+        // Start timer
+        seconds = 0;
+        durationTimer = setInterval(() => {
+          seconds++;
+          durationEl.textContent = formatDuration(seconds);
+        }, 1000);
+
+      } catch (err) {
+        console.error('Start error:', err);
+        updateStatus('error');
+      }
+    }
+
+    async function stopTranscription() {
+      if (!isTranscribing) return;
+
+      try {
+        await window.api.stopMeetingTranscription();
+      } catch (err) {
+        console.error('Stop error:', err);
       }
 
-      function updateStatus(status) {
-        statusBadge.className = 'status-badge ' + status;
-        if (status === 'idle') {
-          statusText.textContent = '就绪';
-          durationEl.classList.remove('recording');
-        } else if (status === 'transcribing') {
-          statusText.textContent = '转录中';
-          durationEl.classList.add('recording');
-        } else if (status === 'error') {
-          statusText.textContent = '错误';
-          durationEl.classList.remove('recording');
+      isTranscribing = false;
+      startBtn.style.display = 'flex';
+      stopBtn.style.display = 'none';
+      includeMic.disabled = false;
+      updateStatus('idle');
+
+      if (durationTimer) {
+        clearInterval(durationTimer);
+        durationTimer = null;
+      }
+    }
+
+    // Track which completed segments we've already rendered
+    let renderedSegmentCount = 0;
+
+    function clearTranscript() {
+      transcriptContent.innerHTML = '<div class="transcript-placeholder">点击"开始转录"捕获系统音频并实时转录...</div>';
+      renderedSegmentCount = 0;
+    }
+
+    function getSpeakerClass(speaker) {
+      if (speaker === undefined || speaker === null) return '';
+      return 'speaker-' + (speaker % 8);
+    }
+
+    function getSpeakerLabel(speaker) {
+      if (speaker === undefined || speaker === null) return '';
+      return `<span class="speaker-label ${getSpeakerClass(speaker)}">说话人 ${speaker + 1}</span>`;
+    }
+
+    // Format text with line breaks after sentence-ending punctuation
+    function formatTextWithLineBreaks(text) {
+      if (!text) return '';
+      // Add line breaks after sentence-ending punctuation (followed by space or end of string)
+      // Handles: . ! ? 。 ！ ？ and also handles quotes after punctuation
+      return text
+        .replace(/([.!?。！？]["']?\s)/g, '$1<br>')
+        .replace(/([.!?。！？]["']?)$/g, '$1');
+    }
+
+    function createSegmentElement(speaker, text, isPartial = false, timestamp = null) {
+      const segmentEl = document.createElement('div');
+      const speakerClass = getSpeakerClass(speaker);
+      segmentEl.className = 'transcript-segment' + (speakerClass ? ' ' + speakerClass : '') + (isPartial ? ' partial' : '');
+      segmentEl.dataset.speaker = speaker !== undefined ? speaker : '';
+
+      const time = timestamp ? new Date(timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+      const speakerLabel = speaker !== undefined ? getSpeakerLabel(speaker) : '';
+      // Format text with line breaks for readability
+      const formattedText = isPartial ? text : formatTextWithLineBreaks(text);
+      segmentEl.innerHTML = `<span class="transcript-time">${time} ${speakerLabel}</span><span class="transcript-text">${formattedText}</span>`;
+
+      return segmentEl;
+    }
+
+    function addTranscriptSegment(segment) {
+      // Remove placeholder if exists
+      const placeholder = transcriptContent.querySelector('.transcript-placeholder');
+      if (placeholder) placeholder.remove();
+
+      if (segment.isFinal) {
+        // Final segment - finalize the current partial if any
+        const partialEl = transcriptContent.querySelector('.transcript-segment.partial');
+        if (partialEl) {
+          partialEl.classList.remove('partial');
+        }
+        // Don't clear anything - keep all the speaker segments that were rendered
+        // Just reset counter for next session
+        renderedSegmentCount = 0;
+        return;
+      }
+
+      // Use the new speakerSegments array if available
+      const speakerSegments = segment.speakerSegments || [];
+      const currentSpeakerSegment = segment.currentSpeakerSegment;
+
+      // If there are new completed segments, the old partial is now finalized
+      // We need to remove it before rendering the completed segment
+      if (renderedSegmentCount < speakerSegments.length) {
+        const partialEl = transcriptContent.querySelector('.transcript-segment.partial');
+        if (partialEl) {
+          partialEl.remove();
         }
       }
 
-      async function startTranscription() {
-        if (isTranscribing) return;
-
-        try {
-          await window.api.startMeetingTranscription({
-            includeMicrophone: includeMic.checked
-          });
-
-          isTranscribing = true;
-          startBtn.style.display = 'none';
-          stopBtn.style.display = 'flex';
-          includeMic.disabled = true;
-          updateStatus('transcribing');
-
-          // Clear placeholder
-          const placeholder = transcriptContent.querySelector('.transcript-placeholder');
-          if (placeholder) placeholder.remove();
-
-          // Start timer
-          seconds = 0;
-          durationTimer = setInterval(() => {
-            seconds++;
-            durationEl.textContent = formatDuration(seconds);
-          }, 1000);
-
-        } catch (err) {
-          console.error('Start error:', err);
-          updateStatus('error');
-        }
-      }
-
-      async function stopTranscription() {
-        if (!isTranscribing) return;
-
-        try {
-          await window.api.stopMeetingTranscription();
-        } catch (err) {
-          console.error('Stop error:', err);
-        }
-
-        isTranscribing = false;
-        startBtn.style.display = 'flex';
-        stopBtn.style.display = 'none';
-        includeMic.disabled = false;
-        updateStatus('idle');
-
-        if (durationTimer) {
-          clearInterval(durationTimer);
-          durationTimer = null;
-        }
-      }
-
-      function clearTranscript() {
-        transcriptContent.innerHTML = '<div class="transcript-placeholder">点击"开始转录"捕获系统音频并实时转录...</div>';
-      }
-
-      function addTranscriptSegment(segment) {
-        // Remove placeholder if exists
-        const placeholder = transcriptContent.querySelector('.transcript-placeholder');
-        if (placeholder) placeholder.remove();
-
-        // Find or create partial segment
-        let partialEl = transcriptContent.querySelector('.transcript-segment.partial');
-        
-        if (segment.isFinal) {
-          // Remove partial and add final
-          if (partialEl) partialEl.remove();
-          
-          const time = new Date(segment.timestamp).toLocaleTimeString();
-          const segmentEl = document.createElement('div');
-          segmentEl.className = 'transcript-segment';
-          segmentEl.innerHTML = `<span class="transcript-time">${time}</span>${segment.text}`;
+      // Render any new completed segments
+      while (renderedSegmentCount < speakerSegments.length) {
+        const seg = speakerSegments[renderedSegmentCount];
+        if (seg.text.trim()) {
+          const segmentEl = createSegmentElement(seg.speaker, seg.text, false, segment.timestamp);
           transcriptContent.appendChild(segmentEl);
-        } else {
-          // Update or create partial
-          if (!partialEl) {
-            partialEl = document.createElement('div');
-            partialEl.className = 'transcript-segment partial';
-            transcriptContent.appendChild(partialEl);
-          }
-          partialEl.textContent = segment.text;
         }
-
-        // Scroll to bottom
-        transcriptContent.scrollTop = transcriptContent.scrollHeight;
+        renderedSegmentCount++;
       }
 
-      // Listen for transcript events
-      window.api.onMeetingTranscript((segment) => {
-        addTranscriptSegment(segment);
-      });
+      // Handle the current active segment (partial)
+      let partialEl = transcriptContent.querySelector('.transcript-segment.partial');
 
-      // Listen for status changes
-      window.api.onMeetingStatus((status) => {
-        if (status === 'idle' && isTranscribing) {
-          stopTranscription();
-        } else if (status === 'error') {
-          updateStatus('error');
+      if (currentSpeakerSegment && currentSpeakerSegment.text.trim()) {
+        if (!partialEl) {
+          // Create new partial
+          partialEl = createSegmentElement(
+            currentSpeakerSegment.speaker,
+            currentSpeakerSegment.text,
+            true,
+            segment.timestamp
+          );
+          transcriptContent.appendChild(partialEl);
+        } else {
+          // Update existing partial
+          const currentDataSpeaker = partialEl.dataset.speaker;
+          const newSpeaker = String(currentSpeakerSegment.speaker);
+
+          if (currentDataSpeaker !== newSpeaker) {
+            // Speaker changed - create new partial
+            partialEl.remove();
+            partialEl = createSegmentElement(
+              currentSpeakerSegment.speaker,
+              currentSpeakerSegment.text,
+              true,
+              segment.timestamp
+            );
+            transcriptContent.appendChild(partialEl);
+          } else {
+            // Same speaker - just update text
+            const textSpan = partialEl.querySelector('.transcript-text');
+            if (textSpan) {
+              textSpan.textContent = currentSpeakerSegment.text;
+            }
+          }
         }
-      });
-    </script>
-  </body>
+      } else if (partialEl) {
+        // No current segment text, remove partial
+        partialEl.remove();
+      }
+
+      // Scroll to bottom
+      transcriptContent.scrollTop = transcriptContent.scrollHeight;
+    }
+
+    // Listen for transcript events
+    window.api.onMeetingTranscript((segment) => {
+      addTranscriptSegment(segment);
+    });
+
+    // Listen for status changes
+    window.api.onMeetingStatus((status) => {
+      if (status === 'idle' && isTranscribing) {
+        stopTranscription();
+      } else if (status === 'error') {
+        updateStatus('error');
+      }
+    });
+  </script>
+</body>
+
 </html>

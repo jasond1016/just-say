@@ -1,7 +1,12 @@
 import { EventEmitter } from 'events'
 import { SystemAudioRecorder, SystemAudioSource } from './audio/system-audio-recorder'
 import { StreamingAudioRecorder } from './audio/streaming-recorder'
-import { StreamingSonioxRecognizer, StreamingSonioxConfig } from './recognition/streaming-soniox'
+import {
+  StreamingSonioxRecognizer,
+  StreamingSonioxConfig,
+  SpeakerSegment,
+  PartialResult
+} from './recognition/streaming-soniox'
 import { profiler } from './utils/profiler'
 
 export interface MeetingTranscriptionOptions {
@@ -15,6 +20,12 @@ export interface TranscriptSegment {
   timestamp: number
   isFinal: boolean
   source?: 'system' | 'microphone' | 'mixed'
+  /** Current speaker number from diarization (if enabled) */
+  speaker?: number
+  /** All completed speaker segments (for multi-speaker display) */
+  speakerSegments?: SpeakerSegment[]
+  /** Current active segment being transcribed */
+  currentSpeakerSegment?: SpeakerSegment | null
 }
 
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
@@ -123,16 +134,19 @@ export class MeetingTranscriptionManager extends EventEmitter {
       this.recognizer.removeAllListeners('partial')
       this.recognizer.removeAllListeners('error')
       
-      this.recognizer.on('partial', (result: { finalText: string; interimText: string; combined: string }) => {
+      this.recognizer.on('partial', (result: PartialResult) => {
         // Track response for profiling (use combined length for latency tracking)
         profiler.markResponseReceived(result.combined.length, this.lastTextLength)
         this.lastTextLength = result.combined.length
 
         const segment: TranscriptSegment = {
-          text: result.combined,  // Show both final + interim for immediate feedback
+          text: result.combined, // Legacy: combined text for backward compatibility
           timestamp: Date.now(),
           isFinal: false,
-          source: 'mixed'
+          source: 'mixed',
+          speaker: result.currentSpeaker,
+          speakerSegments: result.segments,
+          currentSpeakerSegment: result.currentSegment
         }
         this.emit('transcript', segment)
       })

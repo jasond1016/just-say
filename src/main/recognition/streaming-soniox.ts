@@ -26,12 +26,22 @@ interface SonioxResponse {
   message?: string
 }
 
-// Partial result includes both final and interim text
+// A segment of text from a specific speaker
+export interface SpeakerSegment {
+  speaker: number
+  text: string
+  isFinal: boolean // Is this segment complete (speaker changed or session ended)
+}
+
+// Partial result with speaker-aware segments
 export interface PartialResult {
-  finalText: string    // Confirmed text that won't change
-  interimText: string  // Provisional text that may change
-  combined: string     // finalText + interimText for display
-  /** Current speaker number (if speaker diarization is enabled) */
+  /** All completed speaker segments (speaker changed, so these are finalized) */
+  segments: SpeakerSegment[]
+  /** Current active segment being transcribed */
+  currentSegment: SpeakerSegment | null
+  /** Legacy: combined text for backward compatibility */
+  combined: string
+  /** Current speaker number */
   currentSpeaker?: number
 }
 
@@ -45,8 +55,10 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   private ws: WebSocket | null = null
   private isConnected = false
   private isConfigSent = false
-  private finalText: string[] = []
-  private interimText: string[] = [] // Track non-final tokens
+  // Speaker-aware segments
+  private completedSegments: SpeakerSegment[] = []
+  private currentSegmentText: string[] = [] // Text for current speaker (final tokens)
+  private interimText: string[] = [] // Non-final tokens (may change)
   private currentSpeaker?: number
   private startTime = 0
   private preConnectTime = 0
@@ -127,7 +139,11 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       throw new Error('Soniox API key required')
     }
 
-    this.finalText = []
+    // Reset state for new session
+    this.completedSegments = []
+    this.currentSegmentText = []
+    this.interimText = []
+    this.currentSpeaker = undefined
     this.startTime = Date.now()
 
     // If already pre-connected, just send config
@@ -213,21 +229,27 @@ export class StreamingSonioxRecognizer extends EventEmitter {
    * End the streaming session and get final result.
    */
   async endSession(): Promise<{ text: string; durationMs: number }> {
+    const getFullText = (): string => {
+      const segmentTexts = this.completedSegments.map((s) => s.text)
+      const currentText = this.currentSegmentText.join('')
+      return [...segmentTexts, currentText].join('').trim()
+    }
+
     return new Promise((resolve) => {
       if (!this.isConnected || !this.ws) {
-        resolve({ text: this.finalText.join('').trim(), durationMs: Date.now() - this.startTime })
+        resolve({ text: getFullText(), durationMs: Date.now() - this.startTime })
         return
       }
 
       const timeout = setTimeout(() => {
         this.ws?.close()
-        resolve({ text: this.finalText.join('').trim(), durationMs: Date.now() - this.startTime })
+        resolve({ text: getFullText(), durationMs: Date.now() - this.startTime })
       }, 5000)
 
       // Listen for finished signal
       const finishHandler = (): void => {
         clearTimeout(timeout)
-        resolve({ text: this.finalText.join('').trim(), durationMs: Date.now() - this.startTime })
+        resolve({ text: getFullText(), durationMs: Date.now() - this.startTime })
       }
       this.once('finished', finishHandler)
 
@@ -253,28 +275,65 @@ export class StreamingSonioxRecognizer extends EventEmitter {
 
       // Process tokens
       if (response.tokens) {
-        // Collect final and interim tokens separately
-        this.interimText = [] // Reset interim for each response
+        // Reset interim for each response
+        this.interimText = []
 
         for (const token of response.tokens) {
-          // Track speaker changes
-          if (token.speaker !== undefined && token.speaker !== this.currentSpeaker) {
-            this.currentSpeaker = token.speaker
+          // If token has no speaker, keep the current speaker (don't default to 0)
+          // This handles special tokens like <end> that may not have speaker info
+          const tokenSpeaker = token.speaker ?? this.currentSpeaker ?? 0
+
+          // Check if speaker changed (only if both are defined and different)
+          if (
+            this.currentSpeaker !== undefined &&
+            token.speaker !== undefined &&
+            tokenSpeaker !== this.currentSpeaker
+          ) {
+            // Finalize current segment before switching
+            const segmentText = this.currentSegmentText.join('')
+            if (segmentText.trim()) {
+              this.completedSegments.push({
+                speaker: this.currentSpeaker,
+                text: segmentText,
+                isFinal: true
+              })
+            }
+            // Start new segment
+            this.currentSegmentText = []
           }
 
+          this.currentSpeaker = tokenSpeaker
+
           if (token.is_final) {
-            this.finalText.push(token.text)
+            this.currentSegmentText.push(token.text)
           } else {
             // Non-final tokens - show immediately but may change
             this.interimText.push(token.text)
           }
         }
 
-        // Emit partial result with both final and interim text
+        // Build current segment for display
+        const currentSegment: SpeakerSegment | null =
+          this.currentSpeaker !== undefined
+            ? {
+                speaker: this.currentSpeaker,
+                text: this.currentSegmentText.join('') + this.interimText.join(''),
+                isFinal: false
+              }
+            : null
+
+        // Compute combined text for backward compatibility
+        const allTexts = [
+          ...this.completedSegments.map((s) => s.text),
+          this.currentSegmentText.join(''),
+          this.interimText.join('')
+        ]
+
+        // Emit partial result with speaker segments
         const result: PartialResult = {
-          finalText: this.finalText.join(''),
-          interimText: this.interimText.join(''),
-          combined: this.finalText.join('') + this.interimText.join(''),
+          segments: [...this.completedSegments],
+          currentSegment,
+          combined: allTexts.join(''),
           currentSpeaker: this.currentSpeaker
         }
         this.emit('partial', result)
