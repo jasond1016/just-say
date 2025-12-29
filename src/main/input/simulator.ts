@@ -63,10 +63,13 @@ export class InputSimulator {
         })
       } else if (this.platform === 'darwin') {
         // macOS: Use osascript to simulate Cmd+V
-        exec(`osascript -e 'tell application "System Events" to keystroke "v" using command down'`, (error) => {
-          if (error) reject(error)
-          else resolve()
-        })
+        exec(
+          `osascript -e 'tell application "System Events" to keystroke "v" using command down'`,
+          (error) => {
+            if (error) reject(error)
+            else resolve()
+          }
+        )
       } else {
         // Linux: Try xdotool first, then xclip with xdotool key
         exec('xdotool key --clearmodifiers ctrl+v', (error) => {

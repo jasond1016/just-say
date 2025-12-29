@@ -3,80 +3,83 @@ import React, { useEffect, useState } from 'react'
 const ALL_MODELS = ['tiny', 'base', 'small', 'medium', 'large-v3']
 
 interface ModelManagerProps {
-    currentModel: string
-    onModelChange: (model: string) => void
+  currentModel: string
+  onModelChange: (model: string) => void
 }
 
-export function ModelManager({ currentModel, onModelChange }: ModelManagerProps): React.JSX.Element {
-    const [downloadedModels, setDownloadedModels] = useState<string[]>([])
-    const [downloading, setDownloading] = useState<string | null>(null)
-    const [error, setError] = useState<string | null>(null)
+export function ModelManager({
+  currentModel,
+  onModelChange
+}: ModelManagerProps): React.JSX.Element {
+  const [downloadedModels, setDownloadedModels] = useState<string[]>([])
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-    useEffect(() => {
-        loadModels()
-    }, [])
+  useEffect(() => {
+    loadModels()
+  }, [])
 
-    const loadModels = async (): Promise<void> => {
-        try {
-            const models = await window.api.getLocalModels()
-            setDownloadedModels(models)
-        } catch (err) {
-            console.error('Failed to load models:', err)
-        }
+  const loadModels = async (): Promise<void> => {
+    try {
+      const models = await window.api.getLocalModels()
+      setDownloadedModels(models)
+    } catch (err) {
+      console.error('Failed to load models:', err)
     }
+  }
 
-    const handleDownload = async (model: string): Promise<void> => {
-        setDownloading(model)
-        setError(null)
-        try {
-            await window.api.downloadModel(model)
-            await loadModels()
-        } catch (err) {
-            setError(`Failed to download ${model}: ${err instanceof Error ? err.message : String(err)}`)
-        } finally {
-            setDownloading(null)
-        }
+  const handleDownload = async (model: string): Promise<void> => {
+    setDownloading(model)
+    setError(null)
+    try {
+      await window.api.downloadModel(model)
+      await loadModels()
+    } catch (err) {
+      setError(`Failed to download ${model}: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setDownloading(null)
     }
+  }
 
-    return (
-        <div className="model-manager">
-            <h3>Local Models</h3>
-            {error && <div className="error-banner">{error}</div>}
-            <div className="models-list">
-                {ALL_MODELS.map((model) => {
-                    const isDownloaded = downloadedModels.includes(model)
-                    const isCurrent = currentModel === model
-                    const isDownloading = downloading === model
+  return (
+    <div className="model-manager">
+      <h3>Local Models</h3>
+      {error && <div className="error-banner">{error}</div>}
+      <div className="models-list">
+        {ALL_MODELS.map((model) => {
+          const isDownloaded = downloadedModels.includes(model)
+          const isCurrent = currentModel === model
+          const isDownloading = downloading === model
 
-                    return (
-                        <div key={model} className={`model-item ${isCurrent ? 'active' : ''}`}>
-                            <div className="model-info">
-                                <span className="model-name">{model}</span>
-                                {isCurrent && <span className="badge current">Active</span>}
-                                {isDownloaded && !isCurrent && <span className="badge downloaded">Downloaded</span>}
-                            </div>
-                            <div className="model-actions">
-                                {isDownloaded ? (
-                                    !isCurrent && (
-                                        <button onClick={() => onModelChange(model)} disabled={!!downloading}>
-                                            Select
-                                        </button>
-                                    )
-                                ) : (
-                                    <button
-                                        onClick={() => handleDownload(model)}
-                                        disabled={!!downloading}
-                                        className="download-btn"
-                                    >
-                                        {isDownloading ? 'Downloading...' : 'Download'}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    )
-                })}
+          return (
+            <div key={model} className={`model-item ${isCurrent ? 'active' : ''}`}>
+              <div className="model-info">
+                <span className="model-name">{model}</span>
+                {isCurrent && <span className="badge current">Active</span>}
+                {isDownloaded && !isCurrent && <span className="badge downloaded">Downloaded</span>}
+              </div>
+              <div className="model-actions">
+                {isDownloaded ? (
+                  !isCurrent && (
+                    <button onClick={() => onModelChange(model)} disabled={!!downloading}>
+                      Select
+                    </button>
+                  )
+                ) : (
+                  <button
+                    onClick={() => handleDownload(model)}
+                    disabled={!!downloading}
+                    className="download-btn"
+                  >
+                    {isDownloading ? 'Downloading...' : 'Download'}
+                  </button>
+                )}
+              </div>
             </div>
-            <style>{`
+          )
+        })}
+      </div>
+      <style>{`
         .model-manager {
           background: rgba(255, 255, 255, 0.05);
           border-radius: 8px;
@@ -143,6 +146,6 @@ export function ModelManager({ currentModel, onModelChange }: ModelManagerProps)
           margin-bottom: 10px;
         }
       `}</style>
-        </div>
-    )
+    </div>
+  )
 }

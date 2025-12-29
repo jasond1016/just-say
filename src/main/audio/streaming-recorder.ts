@@ -79,42 +79,41 @@ export class StreamingAudioRecorder extends EventEmitter {
 
     // Low-latency parameters to reduce capture delay
     const lowLatencyArgs = [
-      '-probesize', '32',
-      '-analyzeduration', '0',
-      '-fflags', 'nobuffer+flush_packets',
-      '-flags', 'low_delay'
+      '-probesize',
+      '32',
+      '-analyzeduration',
+      '0',
+      '-fflags',
+      'nobuffer+flush_packets',
+      '-flags',
+      'low_delay'
     ]
 
     // Common output args: output to stdout as raw PCM
     const outputArgs = [
-      '-ar', '16000',      // 16kHz sample rate
-      '-ac', '1',          // mono
-      '-f', 's16le',       // raw PCM signed 16-bit little-endian
-      '-'                  // output to stdout
+      '-ar',
+      '16000', // 16kHz sample rate
+      '-ac',
+      '1', // mono
+      '-f',
+      's16le', // raw PCM signed 16-bit little-endian
+      '-' // output to stdout
     ]
 
     if (platform === 'win32') {
       return [
         ...lowLatencyArgs,
-        '-f', 'dshow',
-        '-i', 'audio=@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{default}',
+        '-f',
+        'dshow',
+        '-i',
+        'audio=@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_{default}',
         ...outputArgs
       ]
     } else if (platform === 'darwin') {
-      return [
-        ...lowLatencyArgs,
-        '-f', 'avfoundation',
-        '-i', ':0',
-        ...outputArgs
-      ]
+      return [...lowLatencyArgs, '-f', 'avfoundation', '-i', ':0', ...outputArgs]
     } else {
       // Linux with PulseAudio
-      return [
-        ...lowLatencyArgs,
-        '-f', 'pulse',
-        '-i', 'default',
-        ...outputArgs
-      ]
+      return [...lowLatencyArgs, '-f', 'pulse', '-i', 'default', ...outputArgs]
     }
   }
 

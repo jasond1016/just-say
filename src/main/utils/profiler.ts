@@ -4,15 +4,15 @@
  */
 
 export interface AudioWindow {
-  startTime: number    // When audio capture started for this window
-  endTime: number      // When audio capture ended
-  bytesSent: number    // Total bytes sent in this window
+  startTime: number // When audio capture started for this window
+  endTime: number // When audio capture ended
+  bytesSent: number // Total bytes sent in this window
 }
 
 export interface ResponseEvent {
-  timestamp: number    // When response was received
-  textLength: number   // Length of recognized text at this point
-  isNew: boolean       // Whether this contains new text
+  timestamp: number // When response was received
+  textLength: number // Length of recognized text at this point
+  isNew: boolean // Whether this contains new text
 }
 
 export interface LatencyStats {
@@ -27,19 +27,19 @@ export interface LatencyStats {
 class TranscriptionProfiler {
   private enabled = true
   private sessionStartTime: number | null = null
-  
+
   // Time-window tracking
   private audioWindowStart: number | null = null
   private totalBytesSent = 0
   private totalResponsesReceived = 0
-  
+
   // Latency measurements (time between last audio sent and response received)
   private responseLatencies: number[] = []
-  
+
   // For detailed timeline
   private audioEvents: { timestamp: number; bytes: number }[] = []
   private responseEvents: ResponseEvent[] = []
-  
+
   // Connection timing
   private connectionStartTime: number | null = null
   private connectionEstablishedTime: number | null = null
@@ -90,14 +90,14 @@ class TranscriptionProfiler {
    */
   markAudioSent(bytes: number): void {
     if (!this.enabled) return
-    
+
     const now = performance.now()
-    
+
     // Track first audio of current "window"
     if (this.audioWindowStart === null) {
       this.audioWindowStart = now
     }
-    
+
     this.totalBytesSent += bytes
     this.audioEvents.push({ timestamp: now, bytes })
   }
@@ -107,25 +107,25 @@ class TranscriptionProfiler {
    */
   markResponseReceived(textLength: number, previousTextLength: number): void {
     if (!this.enabled) return
-    
+
     const now = performance.now()
     const isNew = textLength > previousTextLength
-    
+
     this.responseEvents.push({
       timestamp: now,
       textLength,
       isNew
     })
-    
+
     // Calculate latency from last audio to this response
     if (this.audioWindowStart !== null && isNew) {
       const latency = now - this.audioWindowStart
       this.responseLatencies.push(latency)
-      
+
       // Reset window for next measurement
       this.audioWindowStart = null
     }
-    
+
     this.totalResponsesReceived++
   }
 
@@ -144,10 +144,10 @@ class TranscriptionProfiler {
    */
   getResponseLatencyStats(): LatencyStats | null {
     if (this.responseLatencies.length === 0) return null
-    
+
     const sorted = [...this.responseLatencies].sort((a, b) => a - b)
     const sum = sorted.reduce((a, b) => a + b, 0)
-    
+
     return {
       avgMs: Math.round(sum / sorted.length),
       minMs: Math.round(sorted[0]),
@@ -163,15 +163,15 @@ class TranscriptionProfiler {
    */
   getInterResponseStats(): LatencyStats | null {
     if (this.responseEvents.length < 2) return null
-    
+
     const intervals: number[] = []
     for (let i = 1; i < this.responseEvents.length; i++) {
       intervals.push(this.responseEvents[i].timestamp - this.responseEvents[i - 1].timestamp)
     }
-    
+
     const sorted = intervals.sort((a, b) => a - b)
     const sum = sorted.reduce((a, b) => a + b, 0)
-    
+
     return {
       avgMs: Math.round(sum / sorted.length),
       minMs: Math.round(sorted[0]),
@@ -187,10 +187,11 @@ class TranscriptionProfiler {
    */
   getAudioStats(): { totalBytes: number; avgChunkSize: number; chunksPerSecond: number } | null {
     if (this.audioEvents.length === 0) return null
-    
-    const duration = (this.audioEvents[this.audioEvents.length - 1].timestamp - 
-                     this.audioEvents[0].timestamp) / 1000
-    
+
+    const duration =
+      (this.audioEvents[this.audioEvents.length - 1].timestamp - this.audioEvents[0].timestamp) /
+      1000
+
     return {
       totalBytes: this.totalBytesSent,
       avgChunkSize: Math.round(this.totalBytesSent / this.audioEvents.length),
@@ -243,7 +244,9 @@ class TranscriptionProfiler {
     console.log(`\n📈 Summary:`)
     console.log(`   Audio chunks sent: ${this.audioEvents.length}`)
     console.log(`   Responses received: ${this.totalResponsesReceived}`)
-    console.log(`   Response ratio: ${(this.totalResponsesReceived / this.audioEvents.length * 100).toFixed(1)}%`)
+    console.log(
+      `   Response ratio: ${((this.totalResponsesReceived / this.audioEvents.length) * 100).toFixed(1)}%`
+    )
 
     console.log('\n====================================================\n')
   }

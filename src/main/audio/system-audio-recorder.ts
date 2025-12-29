@@ -134,10 +134,14 @@ export class SystemAudioRecorder extends EventEmitter {
 
     // Low-latency parameters to reduce capture delay
     const lowLatencyArgs = [
-      '-probesize', '32',
-      '-analyzeduration', '0',
-      '-fflags', 'nobuffer+flush_packets',
-      '-flags', 'low_delay'
+      '-probesize',
+      '32',
+      '-analyzeduration',
+      '0',
+      '-fflags',
+      'nobuffer+flush_packets',
+      '-flags',
+      'low_delay'
     ]
 
     // Common output args: output to stdout as raw PCM
@@ -148,7 +152,14 @@ export class SystemAudioRecorder extends EventEmitter {
       return [...lowLatencyArgs, '-f', 'dshow', '-i', `audio=${this.selectedSource}`, ...outputArgs]
     } else if (platform === 'darwin') {
       // macOS: AVFoundation with virtual audio device
-      return [...lowLatencyArgs, '-f', 'avfoundation', '-i', `:${this.selectedSource}`, ...outputArgs]
+      return [
+        ...lowLatencyArgs,
+        '-f',
+        'avfoundation',
+        '-i',
+        `:${this.selectedSource}`,
+        ...outputArgs
+      ]
     } else {
       // Linux: PulseAudio monitor source
       return [...lowLatencyArgs, '-f', 'pulse', '-i', this.selectedSource!, ...outputArgs]
@@ -250,11 +261,15 @@ export class SystemAudioRecorder extends EventEmitter {
     const sources: SystemAudioSource[] = []
 
     try {
-      const result = spawnSync('ffmpeg', ['-f', 'avfoundation', '-list_devices', 'true', '-i', '""'], {
-        encoding: 'utf8',
-        timeout: 5000,
-        shell: true
-      })
+      const result = spawnSync(
+        'ffmpeg',
+        ['-f', 'avfoundation', '-list_devices', 'true', '-i', '""'],
+        {
+          encoding: 'utf8',
+          timeout: 5000,
+          shell: true
+        }
+      )
 
       const output = result.stderr || ''
       const lines = output.split('\n')

@@ -3,18 +3,20 @@
 ## 完成的功能
 
 ### ✅ 核心功能
-| 功能 | 文件 | 说明 |
-|------|------|------|
-| 快捷键监听 | [hotkey.ts](file:///d:/my_projects/JustSay/src/main/hotkey.ts) | 右 Alt 按住说话模式 |
-| 音频录制 | [audio/recorder.ts](file:///d:/my_projects/JustSay/src/main/audio/recorder.ts) | 使用 FFmpeg 录制 |
-| 本地识别 | [recognition/local.ts](file:///d:/my_projects/JustSay/src/main/recognition/local.ts) | Faster-Whisper Python 服务 |
-| 文本输入 | [input/simulator.ts](file:///d:/my_projects/JustSay/src/main/input/simulator.ts) | PowerShell SendKeys |
-| 系统托盘 | [tray.ts](file:///d:/my_projects/JustSay/src/main/tray.ts) | 状态显示、右键菜单 |
-| 录音指示器 | [indicator.html](file:///d:/my_projects/JustSay/src/renderer/indicator.html) | 屏幕中下方悬浮窗 |
-| 模型管理 UI | [Settings.tsx](file:///d:/my_projects/JustSay/src/renderer/src/pages/Settings.tsx) | 模型下载与切换 |
+
+| 功能        | 文件                                                                                 | 说明                       |
+| ----------- | ------------------------------------------------------------------------------------ | -------------------------- |
+| 快捷键监听  | [hotkey.ts](file:///d:/my_projects/JustSay/src/main/hotkey.ts)                       | 右 Alt 按住说话模式        |
+| 音频录制    | [audio/recorder.ts](file:///d:/my_projects/JustSay/src/main/audio/recorder.ts)       | 使用 FFmpeg 录制           |
+| 本地识别    | [recognition/local.ts](file:///d:/my_projects/JustSay/src/main/recognition/local.ts) | Faster-Whisper Python 服务 |
+| 文本输入    | [input/simulator.ts](file:///d:/my_projects/JustSay/src/main/input/simulator.ts)     | PowerShell SendKeys        |
+| 系统托盘    | [tray.ts](file:///d:/my_projects/JustSay/src/main/tray.ts)                           | 状态显示、右键菜单         |
+| 录音指示器  | [indicator.html](file:///d:/my_projects/JustSay/src/renderer/indicator.html)         | 屏幕中下方悬浮窗           |
+| 模型管理 UI | [Settings.tsx](file:///d:/my_projects/JustSay/src/renderer/src/pages/Settings.tsx)   | 模型下载与切换             |
 
 ### ✅ 识别后端
-- **本地模型**: Faster-Whisper (tiny/base/small/medium/large-v3)  
+
+- **本地模型**: Faster-Whisper (tiny/base/small/medium/large-v3)
 - **云端 API**: OpenAI Whisper API 兼容
 - **局域网服务**: HTTP REST API
 

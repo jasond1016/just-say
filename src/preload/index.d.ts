@@ -5,7 +5,9 @@ interface JustSayAPI {
   setConfig: (config: unknown) => Promise<void>
   showSettings: () => Promise<void>
   quit: () => Promise<void>
-  onRecordingState: (callback: (state: { recording: boolean; processing?: boolean }) => void) => void
+  onRecordingState: (
+    callback: (state: { recording: boolean; processing?: boolean }) => void
+  ) => void
   removeAllListeners: (channel: string) => void
   getLocalModels: () => Promise<string[]>
   downloadModel: (modelType: string) => Promise<void>

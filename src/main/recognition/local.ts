@@ -36,16 +36,17 @@ export class LocalRecognizer implements SpeechRecognizer {
       projectRoot = app.getAppPath()
     }
     this.scriptPath = join(projectRoot, 'python', 'whisper_service.py')
-    
+
     // Find python - prefer venv
     this.pythonPath = this.findPython(projectRoot)
   }
 
   private findPython(projectRoot: string): string {
     const platform = process.platform
-    const venvPath = platform === 'win32'
-      ? join(projectRoot, 'python', '.venv', 'Scripts', 'python.exe')
-      : join(projectRoot, 'python', '.venv', 'bin', 'python')
+    const venvPath =
+      platform === 'win32'
+        ? join(projectRoot, 'python', '.venv', 'Scripts', 'python.exe')
+        : join(projectRoot, 'python', '.venv', 'bin', 'python')
 
     if (fs.existsSync(venvPath)) {
       console.log('[LocalRecognizer] Using venv python:', venvPath)
@@ -176,7 +177,7 @@ export class LocalRecognizer implements SpeechRecognizer {
 
       console.log('[LocalRecognizer] Downloading model:', modelType)
       const proc = spawn(this.pythonPath, args)
-      
+
       let stderr = ''
 
       proc.stderr.on('data', (data: Buffer) => {
@@ -205,9 +206,9 @@ export class LocalRecognizer implements SpeechRecognizer {
       // Filter for hugginface cache folders
       // Format: models--systran--faster-whisper-{type}
       const models = files
-        .filter(f => f.startsWith('models--systran--faster-whisper-'))
-        .map(f => f.replace('models--systran--faster-whisper-', ''))
-      
+        .filter((f) => f.startsWith('models--systran--faster-whisper-'))
+        .map((f) => f.replace('models--systran--faster-whisper-', ''))
+
       return models
     } catch (error) {
       console.error('Error listing models:', error)

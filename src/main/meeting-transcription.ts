@@ -13,10 +13,13 @@ export interface MeetingTranscriptionOptions {
   includeMicrophone: boolean // Whether to also capture microphone input
   microphoneDevice?: string // Specific microphone device to use
   systemAudioSource?: string // Specific system audio source to use
+  translationEnabled?: boolean // Enable real-time translation
+  targetLanguage?: string // Target language for translation (e.g., 'en', 'zh', 'ja')
 }
 
 export interface TranscriptSegment {
   text: string
+  translatedText?: string // Translated text (when translation enabled)
   timestamp: number
   isFinal: boolean
   source?: 'system' | 'microphone' | 'mixed'
@@ -26,6 +29,8 @@ export interface TranscriptSegment {
   speakerSegments?: SpeakerSegment[]
   /** Current active segment being transcribed */
   currentSpeakerSegment?: SpeakerSegment | null
+  /** Whether translation is enabled */
+  translationEnabled?: boolean
 }
 
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
@@ -66,7 +71,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
     console.log('[MeetingTranscription] Pre-connecting to recognition service...')
     this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
-    
+
     // Set up error handler for pre-connection
     this.recognizer.on('error', (err: Error) => {
       console.error('[MeetingTranscription] Pre-connect error:', err)
@@ -126,14 +131,25 @@ export class MeetingTranscriptionManager extends EventEmitter {
       profiler.startSession()
 
       // Use pre-connected recognizer or create new one
+      // Merge translation options if provided
+      const recognizerConfig = {
+        ...this.sonioxConfig,
+        translation:
+          options.translationEnabled && options.targetLanguage
+            ? { enabled: true, targetLanguage: options.targetLanguage }
+            : undefined
+      }
       if (!this.recognizer?.isPreConnected()) {
-        this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+        this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
+      } else {
+        // Update config for pre-connected recognizer
+        this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
       }
 
       // Set up recognizer events (clear any from pre-connect first)
       this.recognizer.removeAllListeners('partial')
       this.recognizer.removeAllListeners('error')
-      
+
       this.recognizer.on('partial', (result: PartialResult) => {
         // Track response for profiling (use combined length for latency tracking)
         profiler.markResponseReceived(result.combined.length, this.lastTextLength)
@@ -141,12 +157,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
         const segment: TranscriptSegment = {
           text: result.combined, // Legacy: combined text for backward compatibility
+          translatedText: result.currentSegment?.translatedText,
           timestamp: Date.now(),
           isFinal: false,
           source: 'mixed',
           speaker: result.currentSpeaker,
           speakerSegments: result.segments,
-          currentSpeakerSegment: result.currentSegment
+          currentSpeakerSegment: result.currentSegment,
+          translationEnabled: result.translationEnabled
         }
         this.emit('transcript', segment)
       })

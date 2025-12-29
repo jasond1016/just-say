@@ -1,12 +1,17 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Recording Indicator</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body {
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
         background: transparent;
         overflow: hidden;
         user-select: none;
@@ -30,20 +35,34 @@
       .indicator.processing {
         border-color: rgba(0, 180, 216, 0.5);
       }
-      .hidden { display: none; }
-      @keyframes pulse {
-        0%, 100% { box-shadow: 0 4px 20px rgba(239, 71, 111, 0.2); }
-        50% { box-shadow: 0 4px 30px rgba(239, 71, 111, 0.4); }
+      .hidden {
+        display: none;
       }
-      .icon { font-size: 18px; }
+      @keyframes pulse {
+        0%,
+        100% {
+          box-shadow: 0 4px 20px rgba(239, 71, 111, 0.2);
+        }
+        50% {
+          box-shadow: 0 4px 30px rgba(239, 71, 111, 0.4);
+        }
+      }
+      .icon {
+        font-size: 18px;
+      }
       .spinner {
-        width: 18px; height: 18px;
+        width: 18px;
+        height: 18px;
         border: 2px solid rgba(0, 180, 216, 0.3);
         border-top-color: #00b4d8;
         border-radius: 50%;
         animation: spin 1s linear infinite;
       }
-      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
       .text {
         display: flex;
         flex-direction: column;
@@ -54,7 +73,9 @@
         font-size: 12px;
         font-weight: 600;
       }
-      .processing .status { color: #00b4d8; }
+      .processing .status {
+        color: #00b4d8;
+      }
       .duration {
         color: #8d99ae;
         font-size: 11px;
@@ -72,14 +93,33 @@
         border-radius: 2px;
         animation: wave 0.4s ease-in-out infinite alternate;
       }
-      .wave-bar:nth-child(1) { height: 8px; animation-delay: 0s; }
-      .wave-bar:nth-child(2) { height: 16px; animation-delay: 0.1s; }
-      .wave-bar:nth-child(3) { height: 12px; animation-delay: 0.2s; }
-      .wave-bar:nth-child(4) { height: 18px; animation-delay: 0.15s; }
-      .wave-bar:nth-child(5) { height: 10px; animation-delay: 0.05s; }
+      .wave-bar:nth-child(1) {
+        height: 8px;
+        animation-delay: 0s;
+      }
+      .wave-bar:nth-child(2) {
+        height: 16px;
+        animation-delay: 0.1s;
+      }
+      .wave-bar:nth-child(3) {
+        height: 12px;
+        animation-delay: 0.2s;
+      }
+      .wave-bar:nth-child(4) {
+        height: 18px;
+        animation-delay: 0.15s;
+      }
+      .wave-bar:nth-child(5) {
+        height: 10px;
+        animation-delay: 0.05s;
+      }
       @keyframes wave {
-        from { transform: scaleY(1); }
-        to { transform: scaleY(0.5); }
+        from {
+          transform: scaleY(1);
+        }
+        to {
+          transform: scaleY(0.5);
+        }
       }
     </style>
   </head>
@@ -99,44 +139,50 @@
       </div>
     </div>
     <script>
-      const indicator = document.getElementById('indicator');
-      const icon = document.getElementById('icon');
-      const status = document.getElementById('status');
-      const duration = document.getElementById('duration');
-      const waveform = document.getElementById('waveform');
-      let timer = null;
-      let seconds = 0;
+      const indicator = document.getElementById('indicator')
+      const icon = document.getElementById('icon')
+      const status = document.getElementById('status')
+      const duration = document.getElementById('duration')
+      const waveform = document.getElementById('waveform')
+      let timer = null
+      let seconds = 0
 
       function formatTime(s) {
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return m.toString().padStart(2, '0') + ':' + sec.toString().padStart(2, '0');
+        const m = Math.floor(s / 60)
+        const sec = s % 60
+        return m.toString().padStart(2, '0') + ':' + sec.toString().padStart(2, '0')
       }
 
       window.api.onRecordingState((state) => {
         if (state.recording) {
-          indicator.className = 'indicator recording';
-          icon.innerHTML = '🎤';
-          status.textContent = '录音中';
-          waveform.style.display = 'flex';
-          seconds = 0;
-          duration.textContent = '00:00';
+          indicator.className = 'indicator recording'
+          icon.innerHTML = '🎤'
+          status.textContent = '录音中'
+          waveform.style.display = 'flex'
+          seconds = 0
+          duration.textContent = '00:00'
           timer = setInterval(() => {
-            seconds++;
-            duration.textContent = formatTime(seconds);
-          }, 1000);
+            seconds++
+            duration.textContent = formatTime(seconds)
+          }, 1000)
         } else if (state.processing) {
-          indicator.className = 'indicator processing';
-          icon.innerHTML = '<div class="spinner"></div>';
-          status.textContent = '识别中...';
-          duration.textContent = '';
-          waveform.style.display = 'none';
-          if (timer) { clearInterval(timer); timer = null; }
+          indicator.className = 'indicator processing'
+          icon.innerHTML = '<div class="spinner"></div>'
+          status.textContent = '识别中...'
+          duration.textContent = ''
+          waveform.style.display = 'none'
+          if (timer) {
+            clearInterval(timer)
+            timer = null
+          }
         } else {
-          indicator.className = 'indicator hidden';
-          if (timer) { clearInterval(timer); timer = null; }
+          indicator.className = 'indicator hidden'
+          if (timer) {
+            clearInterval(timer)
+            timer = null
+          }
         }
-      });
+      })
     </script>
   </body>
 </html>

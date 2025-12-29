@@ -7,6 +7,11 @@ export interface StreamingSonioxConfig {
   languageHints?: string[]
   /** Enable speaker diarization. Each token will include a speaker number. Default: true */
   enableSpeakerDiarization?: boolean
+  /** One-way translation config */
+  translation?: {
+    enabled: boolean
+    targetLanguage: string // e.g., 'en', 'zh', 'ja', 'fr'
+  }
 }
 
 interface SonioxToken {
@@ -16,6 +21,10 @@ interface SonioxToken {
   language?: string
   /** Speaker number (when speaker diarization is enabled) */
   speaker?: number
+  /** Translation status: 'none' (no translation), 'original' (transcribed text), 'translation' (translated text) */
+  translation_status?: 'none' | 'original' | 'translation'
+  /** Source language of the spoken text (for translation tokens) */
+  source_language?: string
 }
 
 interface SonioxResponse {
@@ -30,6 +39,7 @@ interface SonioxResponse {
 export interface SpeakerSegment {
   speaker: number
   text: string
+  translatedText?: string // Translated text (when translation enabled)
   isFinal: boolean // Is this segment complete (speaker changed or session ended)
 }
 
@@ -43,6 +53,8 @@ export interface PartialResult {
   combined: string
   /** Current speaker number */
   currentSpeaker?: number
+  /** Whether translation is enabled */
+  translationEnabled?: boolean
 }
 
 /**
@@ -58,7 +70,9 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   // Speaker-aware segments
   private completedSegments: SpeakerSegment[] = []
   private currentSegmentText: string[] = [] // Text for current speaker (final tokens)
+  private currentSegmentTranslation: string[] = [] // Translation for current speaker (final tokens)
   private interimText: string[] = [] // Non-final tokens (may change)
+  private interimTranslation: string[] = [] // Non-final translation tokens
   private currentSpeaker?: number
   private startTime = 0
   private preConnectTime = 0
@@ -142,7 +156,9 @@ export class StreamingSonioxRecognizer extends EventEmitter {
     // Reset state for new session
     this.completedSegments = []
     this.currentSegmentText = []
+    this.currentSegmentTranslation = []
     this.interimText = []
+    this.interimTranslation = []
     this.currentSpeaker = undefined
     this.startTime = Date.now()
 
@@ -197,7 +213,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   private sendConfig(): void {
     if (!this.ws || this.isConfigSent) return
 
-    const config = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const config: Record<string, any> = {
       api_key: this.config.apiKey,
       model: this.config.model,
       audio_format: 'pcm_s16le',
@@ -209,10 +226,22 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       // Enable speaker diarization
       enable_speaker_diarization: this.config.enableSpeakerDiarization
     }
+
+    // Add translation config if enabled
+    if (this.config.translation?.enabled && this.config.translation.targetLanguage) {
+      config.translation = {
+        type: 'one_way',
+        target_language: this.config.translation.targetLanguage
+      }
+    }
+
     this.ws.send(JSON.stringify(config))
     this.isConfigSent = true
+    const translationInfo = this.config.translation?.enabled
+      ? `, translation: ${this.config.translation.targetLanguage}`
+      : ''
     console.log(
-      `[StreamingSoniox] Config sent (endpoint detection: on, speaker diarization: ${this.config.enableSpeakerDiarization})`
+      `[StreamingSoniox] Config sent (endpoint detection: on, speaker diarization: ${this.config.enableSpeakerDiarization}${translationInfo})`
     )
   }
 
@@ -277,6 +306,7 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       if (response.tokens) {
         // Reset interim for each response
         this.interimText = []
+        this.interimTranslation = []
 
         for (const token of response.tokens) {
           // If token has no speaker, keep the current speaker (don't default to 0)
@@ -284,31 +314,52 @@ export class StreamingSonioxRecognizer extends EventEmitter {
           const tokenSpeaker = token.speaker ?? this.currentSpeaker ?? 0
 
           // Check if speaker changed (only if both are defined and different)
+          // Note: translation tokens follow their original tokens, so we use the speaker from original tokens
+          const isTranslation = token.translation_status === 'translation'
+
           if (
+            !isTranslation &&
             this.currentSpeaker !== undefined &&
             token.speaker !== undefined &&
             tokenSpeaker !== this.currentSpeaker
           ) {
             // Finalize current segment before switching
             const segmentText = this.currentSegmentText.join('')
+            const segmentTranslation = this.currentSegmentTranslation.join('')
             if (segmentText.trim()) {
               this.completedSegments.push({
                 speaker: this.currentSpeaker,
                 text: segmentText,
+                translatedText: segmentTranslation || undefined,
                 isFinal: true
               })
             }
             // Start new segment
             this.currentSegmentText = []
+            this.currentSegmentTranslation = []
           }
 
-          this.currentSpeaker = tokenSpeaker
+          // Only update current speaker from non-translation tokens
+          if (!isTranslation) {
+            this.currentSpeaker = tokenSpeaker
+          }
 
-          if (token.is_final) {
-            this.currentSegmentText.push(token.text)
+          // Handle translation tokens separately from original tokens
+          if (isTranslation) {
+            // This is a translation token
+            if (token.is_final) {
+              this.currentSegmentTranslation.push(token.text)
+            } else {
+              this.interimTranslation.push(token.text)
+            }
           } else {
-            // Non-final tokens - show immediately but may change
-            this.interimText.push(token.text)
+            // This is an original transcription token (translation_status: 'none' or 'original')
+            if (token.is_final) {
+              this.currentSegmentText.push(token.text)
+            } else {
+              // Non-final tokens - show immediately but may change
+              this.interimText.push(token.text)
+            }
           }
         }
 
@@ -318,6 +369,9 @@ export class StreamingSonioxRecognizer extends EventEmitter {
             ? {
                 speaker: this.currentSpeaker,
                 text: this.currentSegmentText.join('') + this.interimText.join(''),
+                translatedText:
+                  this.currentSegmentTranslation.join('') + this.interimTranslation.join('') ||
+                  undefined,
                 isFinal: false
               }
             : null
@@ -334,7 +388,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
           segments: [...this.completedSegments],
           currentSegment,
           combined: allTexts.join(''),
-          currentSpeaker: this.currentSpeaker
+          currentSpeaker: this.currentSpeaker,
+          translationEnabled: this.config.translation?.enabled
         }
         this.emit('partial', result)
       }

@@ -136,9 +136,7 @@ function showMeetingWindow(): void {
   // Pre-connect to recognition service to reduce latency
   const config = getConfig()
   if (!meetingTranscription) {
-    meetingTranscription = new MeetingTranscriptionManager(
-      config.recognition?.soniox || {}
-    )
+    meetingTranscription = new MeetingTranscriptionManager(config.recognition?.soniox || {})
   }
   // Fire and forget - don't block window showing
   meetingTranscription.preConnect().catch((err) => {
@@ -168,7 +166,8 @@ async function initializeApp(): Promise<void> {
   hotkeyManager = new HotkeyManager()
 
   // Check if using streaming Soniox
-  const useStreamingSoniox = config.recognition?.backend === 'soniox' && config.recognition?.soniox?.apiKey
+  const useStreamingSoniox =
+    config.recognition?.backend === 'soniox' && config.recognition?.soniox?.apiKey
 
   if (useStreamingSoniox) {
     console.log('[Main] Using streaming Soniox mode')
@@ -213,7 +212,9 @@ async function initializeApp(): Promise<void> {
 
         // Get final result
         const result = await streamingSoniox?.endSession()
-        console.log(`[Main] Recognition done in ${result?.durationMs}ms (${Date.now() - stopTime}ms after stop): "${result?.text}"`)
+        console.log(
+          `[Main] Recognition done in ${result?.durationMs}ms (${Date.now() - stopTime}ms after stop): "${result?.text}"`
+        )
 
         if (result?.text) {
           await inputSimulator?.typeText(result.text)
@@ -320,25 +321,21 @@ ipcMain.handle('download-model', async (_event, modelType) => {
 ipcMain.handle('get-system-audio-sources', async () => {
   if (!meetingTranscription) {
     const config = getConfig()
-    meetingTranscription = new MeetingTranscriptionManager(
-      config.recognition?.soniox || {}
-    )
+    meetingTranscription = new MeetingTranscriptionManager(config.recognition?.soniox || {})
   }
   return meetingTranscription.getSystemAudioSources()
 })
 
 ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   const config = getConfig()
-  
+
   if (!meetingTranscription) {
-    meetingTranscription = new MeetingTranscriptionManager(
-      config.recognition?.soniox || {}
-    )
+    meetingTranscription = new MeetingTranscriptionManager(config.recognition?.soniox || {})
   }
 
   // Set up event forwarding to renderer
   meetingTranscription.removeAllListeners()
-  
+
   meetingTranscription.on('transcript', (segment) => {
     meetingWindow?.webContents.send('meeting-transcript', segment)
   })

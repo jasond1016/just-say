@@ -24,11 +24,14 @@ const api = {
 
   // Model Management
   getLocalModels: (): Promise<string[]> => ipcRenderer.invoke('get-local-models'),
-  downloadModel: (modelType: string): Promise<void> => ipcRenderer.invoke('download-model', modelType),
+  downloadModel: (modelType: string): Promise<void> =>
+    ipcRenderer.invoke('download-model', modelType),
 
   // Meeting Transcription
   startMeetingTranscription: (options: {
     includeMicrophone: boolean
+    translationEnabled?: boolean
+    targetLanguage?: string
   }): Promise<void> => ipcRenderer.invoke('start-meeting-transcription', options),
 
   stopMeetingTranscription: (): Promise<void> => ipcRenderer.invoke('stop-meeting-transcription'),
