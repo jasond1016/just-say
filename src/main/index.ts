@@ -158,8 +158,7 @@ async function initializeApp(): Promise<void> {
 
   // Setup tray with callbacks
   setupTray({
-    showSettings: () => mainWindow?.show(),
-    showMeetingWindow: () => showMeetingWindow()
+    showMainWindow: () => mainWindow?.show()
   })
 
   // Initialize modules
