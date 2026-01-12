@@ -112,6 +112,14 @@ export function MeetingTranscription(): React.JSX.Element {
     // Handle transcript segment
     const handleTranscript = useCallback((segment: TranscriptSegment) => {
         if (segment.isFinal) {
+            // Final segment: merge currentSegment into segments before clearing
+            setSegments((prev) => {
+                // If there's a currentSpeakerSegment with content, add it to segments
+                if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
+                    return [...prev, segment.currentSpeakerSegment]
+                }
+                return prev
+            })
             setCurrentSegment(null)
             return
         }

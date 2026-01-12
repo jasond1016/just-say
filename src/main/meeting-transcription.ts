@@ -261,7 +261,9 @@ export class MeetingTranscriptionManager extends EventEmitter {
             text: result.text,
             timestamp: Date.now(),
             isFinal: true,
-            source: 'mixed'
+            source: 'mixed',
+            speakerSegments: result.segments,
+            currentSpeakerSegment: result.currentSegment
           }
           this.transcriptHistory.push(finalSegment)
           this.emit('transcript', finalSegment)

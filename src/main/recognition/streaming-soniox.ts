@@ -257,28 +257,63 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   /**
    * End the streaming session and get final result.
    */
-  async endSession(): Promise<{ text: string; durationMs: number }> {
-    const getFullText = (): string => {
-      const segmentTexts = this.completedSegments.map((s) => s.text)
+  async endSession(): Promise<{
+    text: string
+    durationMs: number
+    segments: SpeakerSegment[]
+    currentSegment: SpeakerSegment | null
+  }> {
+    const getFinalResult = (): {
+      text: string
+      segments: SpeakerSegment[]
+      currentSegment: SpeakerSegment | null
+    } => {
       const currentText = this.currentSegmentText.join('')
-      return [...segmentTexts, currentText].join('').trim()
+      const interim = this.interimText.join('')
+      const currentTranslation = this.currentSegmentTranslation.join('')
+      const interimTranslation = this.interimTranslation.join('')
+
+      // Build current segment with all remaining text (including interim)
+      const currentSegment: SpeakerSegment | null =
+        this.currentSpeaker !== undefined && (currentText || interim)
+          ? {
+              speaker: this.currentSpeaker,
+              text: currentText + interim,
+              translatedText: (currentTranslation + interimTranslation) || undefined,
+              isFinal: true
+            }
+          : null
+
+      const segmentTexts = this.completedSegments.map((s) => s.text)
+      const fullText = [...segmentTexts, currentSegment?.text || ''].join('').trim()
+
+      return {
+        text: fullText,
+        segments: [...this.completedSegments],
+        currentSegment
+      }
     }
 
     return new Promise((resolve) => {
+      const buildResult = () => {
+        const result = getFinalResult()
+        return { ...result, durationMs: Date.now() - this.startTime }
+      }
+
       if (!this.isConnected || !this.ws) {
-        resolve({ text: getFullText(), durationMs: Date.now() - this.startTime })
+        resolve(buildResult())
         return
       }
 
       const timeout = setTimeout(() => {
         this.ws?.close()
-        resolve({ text: getFullText(), durationMs: Date.now() - this.startTime })
+        resolve(buildResult())
       }, 5000)
 
       // Listen for finished signal
       const finishHandler = (): void => {
         clearTimeout(timeout)
-        resolve({ text: getFullText(), durationMs: Date.now() - this.startTime })
+        resolve(buildResult())
       }
       this.once('finished', finishHandler)
 
