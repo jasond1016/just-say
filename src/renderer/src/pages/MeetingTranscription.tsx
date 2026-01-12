@@ -5,10 +5,16 @@ import {
     stopSystemAudioCapture
 } from '../system-audio-capture'
 
+interface SentencePair {
+    original: string
+    translated?: string
+}
+
 interface SpeakerSegment {
     speaker: number
     text: string
     translatedText?: string
+    sentencePairs?: SentencePair[]
 }
 
 interface TranscriptSegment {
@@ -44,12 +50,6 @@ export function MeetingTranscription(): React.JSX.Element {
     // Get speaker color class
     const getSpeakerClass = (speaker: number): string => {
         return `speaker-${speaker % 8}`
-    }
-
-    // Format text with line breaks after sentences
-    const formatText = (text: string): string => {
-        if (!text) return ''
-        return text.replace(/([.!?。！？]["']?\s)/g, '$1<br>').replace(/([.!?。！？]["']?)$/g, '$1')
     }
 
     // Start transcription
@@ -211,45 +211,55 @@ export function MeetingTranscription(): React.JSX.Element {
                         </div>
                     ) : (
                         <>
-                            {segments.map((seg, idx) => (
-                                <div key={idx} className={`transcript-segment ${getSpeakerClass(seg.speaker)}`}>
-                                    <div className="transcript-segment__meta">
-                                        <span className={`transcript-segment__speaker ${getSpeakerClass(seg.speaker)}`}>
-                                            说话人 {seg.speaker + 1}
-                                        </span>
+                            {segments.map((seg, idx) => {
+                                // Use sentencePairs if available (aligned by <end> tokens), otherwise fallback
+                                const pairs = seg.sentencePairs || (seg.text ? [{ original: seg.text, translated: seg.translatedText }] : [])
+                                return (
+                                    <div key={idx} className={`transcript-segment ${getSpeakerClass(seg.speaker)}`}>
+                                        <div className="transcript-segment__meta">
+                                            <span className={`transcript-segment__speaker ${getSpeakerClass(seg.speaker)}`}>
+                                                说话人 {seg.speaker + 1}
+                                            </span>
+                                        </div>
+                                        <div className="transcript-segment__sentences">
+                                            {pairs.map((pair, sentIdx) => (
+                                                <div key={sentIdx} className="sentence-pair">
+                                                    <div className="sentence-original">{pair.original}</div>
+                                                    {pair.translated && (
+                                                        <div className="sentence-translated">{pair.translated}</div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
+                                )
+                            })}
+                            {currentSegment && (() => {
+                                const pairs = currentSegment.sentencePairs || (currentSegment.text ? [{ original: currentSegment.text, translated: currentSegment.translatedText }] : [])
+                                return (
                                     <div
-                                        className="transcript-segment__text"
-                                        dangerouslySetInnerHTML={{ __html: formatText(seg.text) }}
-                                    />
-                                    {seg.translatedText && (
-                                        <div className="transcript-segment__translation">
-                                            <span className="translation-label">译</span>
-                                            <span dangerouslySetInnerHTML={{ __html: formatText(seg.translatedText) }} />
+                                        className={`transcript-segment transcript-segment--partial ${getSpeakerClass(currentSegment.speaker)}`}
+                                    >
+                                        <div className="transcript-segment__meta">
+                                            <span
+                                                className={`transcript-segment__speaker ${getSpeakerClass(currentSegment.speaker)}`}
+                                            >
+                                                说话人 {currentSegment.speaker + 1}
+                                            </span>
                                         </div>
-                                    )}
-                                </div>
-                            ))}
-                            {currentSegment && (
-                                <div
-                                    className={`transcript-segment transcript-segment--partial ${getSpeakerClass(currentSegment.speaker)}`}
-                                >
-                                    <div className="transcript-segment__meta">
-                                        <span
-                                            className={`transcript-segment__speaker ${getSpeakerClass(currentSegment.speaker)}`}
-                                        >
-                                            说话人 {currentSegment.speaker + 1}
-                                        </span>
+                                        <div className="transcript-segment__sentences">
+                                            {pairs.map((pair, sentIdx) => (
+                                                <div key={sentIdx} className="sentence-pair">
+                                                    <div className="sentence-original">{pair.original}</div>
+                                                    {pair.translated && (
+                                                        <div className="sentence-translated">{pair.translated}</div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
-                                    <div className="transcript-segment__text">{currentSegment.text}</div>
-                                    {currentSegment.translatedText && (
-                                        <div className="transcript-segment__translation">
-                                            <span className="translation-label">译</span>
-                                            <span>{currentSegment.translatedText}</span>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
+                                )
+                            })()}
                         </>
                     )}
                 </div>

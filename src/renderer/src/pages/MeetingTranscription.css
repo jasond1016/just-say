@@ -191,6 +191,38 @@
     background: currentColor;
 }
 
+/* Sentence-by-sentence interleaved display */
+.transcript-segment__sentences {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.sentence-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.sentence-original {
+    font-size: var(--font-size-md);
+    line-height: var(--line-height-relaxed);
+    color: var(--text-primary);
+}
+
+.sentence-translated {
+    font-size: var(--font-size-sm);
+    line-height: var(--line-height-normal);
+    color: var(--accent-secondary);
+    padding-left: var(--space-md);
+    opacity: 0.85;
+}
+
+.sentence-pair + .sentence-pair {
+    margin-top: var(--space-xs);
+}
+
+/* Legacy styles kept for backwards compatibility */
 .transcript-segment__text {
     font-size: var(--font-size-md);
     line-height: var(--line-height-relaxed);

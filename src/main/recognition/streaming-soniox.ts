@@ -35,12 +35,20 @@ interface SonioxResponse {
   message?: string
 }
 
+// A sentence pair: original text and its translation (aligned by <end> token)
+export interface SentencePair {
+  original: string
+  translated?: string
+}
+
 // A segment of text from a specific speaker
 export interface SpeakerSegment {
   speaker: number
   text: string
   translatedText?: string // Translated text (when translation enabled)
   isFinal: boolean // Is this segment complete (speaker changed or session ended)
+  /** Sentence pairs aligned by <end> tokens for interleaved display */
+  sentencePairs?: SentencePair[]
 }
 
 // Partial result with speaker-aware segments
@@ -77,6 +85,11 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   private startTime = 0
   private preConnectTime = 0
   private readonly WS_ENDPOINT = 'wss://stt-rt.soniox.com/transcribe-websocket'
+
+  // Sentence pairs for current segment (aligned by <end> tokens)
+  private completedSentencePairs: SentencePair[] = []
+  private currentSentenceText: string[] = [] // Text for current sentence (before <end>)
+  private currentSentenceTranslation: string[] = [] // Translation for current sentence
 
   constructor(config?: StreamingSonioxConfig) {
     super()
@@ -273,6 +286,17 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       const currentTranslation = this.currentSegmentTranslation.join('')
       const interimTranslation = this.interimTranslation.join('')
 
+      // Finalize any remaining sentence
+      const finalSentencePairs = [...this.completedSentencePairs]
+      const remainingSentence = this.currentSentenceText.join('') + interim
+      const remainingTranslation = this.currentSentenceTranslation.join('') + interimTranslation
+      if (remainingSentence.trim()) {
+        finalSentencePairs.push({
+          original: remainingSentence,
+          translated: remainingTranslation || undefined
+        })
+      }
+
       // Build current segment with all remaining text (including interim)
       const currentSegment: SpeakerSegment | null =
         this.currentSpeaker !== undefined && (currentText || interim)
@@ -280,7 +304,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
               speaker: this.currentSpeaker,
               text: currentText + interim,
               translatedText: (currentTranslation + interimTranslation) || undefined,
-              isFinal: true
+              isFinal: true,
+              sentencePairs: finalSentencePairs.length > 0 ? finalSentencePairs : undefined
             }
           : null
 
@@ -358,6 +383,16 @@ export class StreamingSonioxRecognizer extends EventEmitter {
             token.speaker !== undefined &&
             tokenSpeaker !== this.currentSpeaker
           ) {
+            // Finalize current sentence if any
+            const sentenceText = this.currentSentenceText.join('')
+            const sentenceTranslation = this.currentSentenceTranslation.join('')
+            if (sentenceText.trim()) {
+              this.completedSentencePairs.push({
+                original: sentenceText,
+                translated: sentenceTranslation || undefined
+              })
+            }
+
             // Finalize current segment before switching
             const segmentText = this.currentSegmentText.join('')
             const segmentTranslation = this.currentSegmentTranslation.join('')
@@ -366,12 +401,16 @@ export class StreamingSonioxRecognizer extends EventEmitter {
                 speaker: this.currentSpeaker,
                 text: segmentText,
                 translatedText: segmentTranslation || undefined,
-                isFinal: true
+                isFinal: true,
+                sentencePairs: this.completedSentencePairs.length > 0 ? [...this.completedSentencePairs] : undefined
               })
             }
             // Start new segment
             this.currentSegmentText = []
             this.currentSegmentTranslation = []
+            this.completedSentencePairs = []
+            this.currentSentenceText = []
+            this.currentSentenceTranslation = []
           }
 
           // Only update current speaker from non-translation tokens
@@ -379,11 +418,32 @@ export class StreamingSonioxRecognizer extends EventEmitter {
             this.currentSpeaker = tokenSpeaker
           }
 
+          // Check for <end> token (endpoint detection marker)
+          const isEndToken = token.text === '<end>' && token.is_final
+
+          if (isEndToken && !isTranslation) {
+            // Finalize current sentence pair when we see <end>
+            const sentenceText = this.currentSentenceText.join('')
+            const sentenceTranslation = this.currentSentenceTranslation.join('')
+            if (sentenceText.trim()) {
+              this.completedSentencePairs.push({
+                original: sentenceText,
+                translated: sentenceTranslation || undefined
+              })
+            }
+            // Reset for next sentence
+            this.currentSentenceText = []
+            this.currentSentenceTranslation = []
+            // Don't add <end> to visible text
+            continue
+          }
+
           // Handle translation tokens separately from original tokens
           if (isTranslation) {
             // This is a translation token
             if (token.is_final) {
               this.currentSegmentTranslation.push(token.text)
+              this.currentSentenceTranslation.push(token.text)
             } else {
               this.interimTranslation.push(token.text)
             }
@@ -391,6 +451,7 @@ export class StreamingSonioxRecognizer extends EventEmitter {
             // This is an original transcription token (translation_status: 'none' or 'original')
             if (token.is_final) {
               this.currentSegmentText.push(token.text)
+              this.currentSentenceText.push(token.text)
             } else {
               // Non-final tokens - show immediately but may change
               this.interimText.push(token.text)
@@ -398,7 +459,21 @@ export class StreamingSonioxRecognizer extends EventEmitter {
           }
         }
 
-        // Build current segment for display
+        // Build current sentence pair (incomplete, still being transcribed)
+        const currentSentence: SentencePair | null =
+          this.currentSentenceText.length > 0 || this.interimText.length > 0
+            ? {
+                original: this.currentSentenceText.join('') + this.interimText.join(''),
+                translated: this.currentSentenceTranslation.join('') + this.interimTranslation.join('') || undefined
+              }
+            : null
+
+        // Build current segment for display with sentence pairs
+        const allSentencePairs = [
+          ...this.completedSentencePairs,
+          ...(currentSentence && currentSentence.original.trim() ? [currentSentence] : [])
+        ]
+
         const currentSegment: SpeakerSegment | null =
           this.currentSpeaker !== undefined
             ? {
@@ -407,7 +482,8 @@ export class StreamingSonioxRecognizer extends EventEmitter {
                 translatedText:
                   this.currentSegmentTranslation.join('') + this.interimTranslation.join('') ||
                   undefined,
-                isFinal: false
+                isFinal: false,
+                sentencePairs: allSentencePairs.length > 0 ? allSentencePairs : undefined
               }
             : null
 
