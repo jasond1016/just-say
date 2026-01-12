@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen, desktopCapturer } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -363,4 +363,29 @@ ipcMain.handle('stop-meeting-transcription', async () => {
   if (meetingTranscription) {
     await meetingTranscription.stopTranscription()
   }
+})
+
+// Desktop capturer IPC handler (for renderer to get screen sources)
+ipcMain.handle('get-desktop-capturer-sources', async (_event, options: { types: string[] }) => {
+  return desktopCapturer.getSources(options as Electron.SourcesOptions)
+})
+
+// System audio capture IPC handlers (audio captured in renderer, sent to main)
+ipcMain.on('system-audio-chunk', (_event, chunk: ArrayBuffer) => {
+  if (meetingTranscription) {
+    meetingTranscription.handleRendererAudioChunk(Buffer.from(chunk))
+  }
+})
+
+ipcMain.on('system-audio-started', () => {
+  console.log('[Main] System audio capture started in renderer')
+})
+
+ipcMain.on('system-audio-stopped', () => {
+  console.log('[Main] System audio capture stopped in renderer')
+})
+
+ipcMain.on('system-audio-error', (_event, message: string) => {
+  console.error('[Main] System audio capture error:', message)
+  mainWindow?.webContents.send('meeting-status', 'error')
 })

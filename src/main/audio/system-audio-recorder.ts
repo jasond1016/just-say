@@ -232,8 +232,8 @@ export class SystemAudioRecorder extends EventEmitter {
         if (inAudioSection && line.includes('"')) {
           const match = line.match(/"([^"]+)"/)
           if (match && !match[1].includes('@device')) {
-            // Look for stereo mix or loopback devices
             const name = match[1]
+            // Prioritize stereo mix or loopback devices as default
             const isLoopback =
               name.toLowerCase().includes('stereo mix') ||
               name.toLowerCase().includes('loopback') ||

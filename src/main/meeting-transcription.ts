@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events'
-import { SystemAudioRecorder, SystemAudioSource } from './audio/system-audio-recorder'
 import { StreamingAudioRecorder } from './audio/streaming-recorder'
 import {
   StreamingSonioxRecognizer,
@@ -8,6 +7,12 @@ import {
   PartialResult
 } from './recognition/streaming-soniox'
 import { profiler } from './utils/profiler'
+
+export interface SystemAudioSource {
+  id: string
+  name: string
+  isDefault?: boolean
+}
 
 export interface MeetingTranscriptionOptions {
   includeMicrophone: boolean // Whether to also capture microphone input
@@ -36,11 +41,13 @@ export interface TranscriptSegment {
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
 
 /**
- * Manages meeting transcription by capturing system audio (and optionally microphone)
+ * Manages meeting transcription by receiving system audio from renderer process
  * and sending it to the speech recognition service.
+ *
+ * Note: System audio capture is now done in the renderer process using desktopCapturer
+ * and sent to main process via IPC. This avoids the need for ffmpeg.
  */
 export class MeetingTranscriptionManager extends EventEmitter {
-  private systemRecorder: SystemAudioRecorder
   private micRecorder: StreamingAudioRecorder | null = null
   private recognizer: StreamingSonioxRecognizer | null = null
   private sonioxConfig: StreamingSonioxConfig
@@ -53,10 +60,12 @@ export class MeetingTranscriptionManager extends EventEmitter {
   private mixBuffer: Buffer[] = []
   private mixInterval: NodeJS.Timeout | null = null
 
+  // Flag to track if we're using renderer audio
+  private usingRendererAudio = false
+
   constructor(sonioxConfig: StreamingSonioxConfig) {
     super()
     this.sonioxConfig = sonioxConfig
-    this.systemRecorder = new SystemAudioRecorder()
   }
 
   /**
@@ -95,9 +104,11 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
   /**
    * Get available system audio sources
+   * Note: This is now handled in the renderer process via desktopCapturer
    */
   async getSystemAudioSources(): Promise<SystemAudioSource[]> {
-    return this.systemRecorder.getAvailableSources()
+    // Sources are now provided by renderer process
+    return []
   }
 
   /**
@@ -180,20 +191,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
       profiler.markConnectionEstablished()
       console.log('[MeetingTranscription] Recognizer session started')
 
-      // Set up system audio source
-      if (options.systemAudioSource) {
-        this.systemRecorder.setSource(options.systemAudioSource)
-      }
+      // System audio is now captured in renderer process and sent via IPC
+      // Set flag to indicate we're ready to receive audio from renderer
+      this.usingRendererAudio = true
 
       // Set up audio data handlers
       if (options.includeMicrophone) {
-        // Mixed mode: capture both system audio and microphone
+        // Mixed mode: capture microphone in main process, system audio from renderer
         this.micRecorder = new StreamingAudioRecorder()
-
-        // Collect chunks for mixing
-        this.systemRecorder.on('data', (chunk: Buffer) => {
-          this.mixBuffer.push(chunk)
-        })
 
         this.micRecorder.on('data', (chunk: Buffer) => {
           this.mixBuffer.push(chunk)
@@ -204,22 +209,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
           this.sendMixedAudio()
         }, 50) // Send every 50ms for lower latency
 
-        // Start both recorders
-        await Promise.all([this.systemRecorder.startRecording(), this.micRecorder.startRecording()])
-
-        console.log('[MeetingTranscription] Both recorders started (mixed mode)')
-      } else {
-        // System audio only mode
-        this.systemRecorder.on('data', (chunk: Buffer) => {
-          profiler.markAudioSent(chunk.length)
-          this.recognizer?.sendAudioChunk(chunk)
-        })
-
-        await this.systemRecorder.startRecording()
-        console.log('[MeetingTranscription] System audio recorder started')
+        // Start microphone recorder
+        await this.micRecorder.startRecording()
+        console.log('[MeetingTranscription] Microphone recorder started (mixed mode)')
       }
+      // For system audio only mode, audio will be received via handleRendererAudioChunk
 
       this.setStatus('transcribing')
+      console.log('[MeetingTranscription] Ready to receive audio from renderer')
     } catch (err) {
       console.error('[MeetingTranscription] Start error:', err)
       this.setStatus('error')
@@ -246,10 +243,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
         this.mixInterval = null
       }
 
-      // Stop recorders
-      this.systemRecorder.stopRecording()
-      this.systemRecorder.removeAllListeners('data')
+      // Mark that we're no longer receiving renderer audio
+      this.usingRendererAudio = false
 
+      // Stop microphone recorder if active
       if (this.micRecorder) {
         this.micRecorder.stopRecording()
         this.micRecorder.removeAllListeners('data')
@@ -315,29 +312,48 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.recognizer?.sendAudioChunk(combined)
   }
 
+  /**
+   * Handle audio chunk from renderer process (system audio via desktopCapturer)
+   */
+  handleRendererAudioChunk(chunk: Buffer): void {
+    if (!this.usingRendererAudio || this.status !== 'transcribing') {
+      return
+    }
+
+    if (this.mixInterval) {
+      // Mixed mode: add to mix buffer
+      this.mixBuffer.push(chunk)
+    } else {
+      // Direct mode: send to recognizer
+      profiler.markAudioSent(chunk.length)
+      this.recognizer?.sendAudioChunk(chunk)
+    }
+  }
+
   private async cleanup(): Promise<void> {
     if (this.mixInterval) {
       clearInterval(this.mixInterval)
       this.mixInterval = null
     }
 
-    try {
-      this.systemRecorder.stopRecording()
-      this.systemRecorder.removeAllListeners('data')
-    } catch {}
+    this.usingRendererAudio = false
 
     if (this.micRecorder) {
       try {
         this.micRecorder.stopRecording()
         this.micRecorder.removeAllListeners('data')
-      } catch {}
+      } catch {
+        // Ignore cleanup errors
+      }
       this.micRecorder = null
     }
 
     if (this.recognizer) {
       try {
         this.recognizer.close()
-      } catch {}
+      } catch {
+        // Ignore cleanup errors
+      }
       this.recognizer = null
     }
 

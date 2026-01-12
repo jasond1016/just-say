@@ -1,4 +1,9 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import { DesktopCapturerSource, SourcesOptions } from 'electron'
+
+interface DesktopCapturerAPI {
+  getSources: (options: SourcesOptions) => Promise<DesktopCapturerSource[]>
+}
 
 interface MeetingTranscriptSegment {
   text: string
@@ -39,11 +44,18 @@ interface JustSayAPI {
   getSystemAudioSources: () => Promise<Array<{ id: string; name: string; isDefault?: boolean }>>
   onMeetingTranscript: (callback: (segment: MeetingTranscriptSegment) => void) => void
   onMeetingStatus: (callback: (status: string) => void) => void
+
+  // System audio capture (renderer-side)
+  sendSystemAudioChunk: (chunk: ArrayBuffer) => void
+  notifySystemAudioStarted: () => void
+  notifySystemAudioStopped: () => void
+  notifySystemAudioError: (message: string) => void
 }
 
 declare global {
   interface Window {
     electron: ElectronAPI
     api: JustSayAPI
+    desktopCapturer: DesktopCapturerAPI
   }
 }
