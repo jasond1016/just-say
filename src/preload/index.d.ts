@@ -56,6 +56,14 @@ interface JustSayAPI {
   notifyMicrophoneStarted: () => void
   notifyMicrophoneStopped: () => void
   notifyMicrophoneError: (message: string) => void
+
+  // Push-to-talk audio capture (hidden window)
+  onStartPttCapture: (callback: () => void) => void
+  onStopPttCapture: (callback: () => void) => void
+  sendPttAudioChunk: (chunk: ArrayBuffer) => void
+  notifyPttStarted: () => void
+  notifyPttStopped: () => void
+  notifyPttError: (message: string) => void
 }
 
 declare global {

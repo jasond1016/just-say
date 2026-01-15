@@ -6,7 +6,7 @@ import { setupTray, updateTrayStatus } from './tray'
 import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig } from './config'
 import { AudioRecorder } from './audio/recorder'
-import { StreamingAudioRecorder } from './audio/streaming-recorder'
+import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
 import { RecognitionController } from './recognition'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
@@ -20,7 +20,7 @@ let meetingWindow: BrowserWindow | null = null
 // Core modules
 let hotkeyManager: HotkeyManager | null = null
 let audioRecorder: AudioRecorder | null = null
-let streamingRecorder: StreamingAudioRecorder | null = null
+let webStreamingRecorder: WebStreamingAudioRecorder | null = null
 let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
@@ -172,9 +172,14 @@ async function initializeApp(): Promise<void> {
     config.recognition?.backend === 'soniox' && config.recognition?.soniox?.apiKey
 
   if (useStreamingSoniox) {
-    console.log('[Main] Using streaming Soniox mode')
-    streamingRecorder = new StreamingAudioRecorder()
+    console.log('[Main] Using streaming Soniox mode with Web Audio')
+    webStreamingRecorder = new WebStreamingAudioRecorder()
     streamingSoniox = new StreamingSonioxRecognizer(config.recognition?.soniox)
+
+    // Pre-initialize the hidden window for faster first recording
+    webStreamingRecorder.initialize().catch((err) => {
+      console.error('[Main] Failed to pre-initialize audio capture window:', err)
+    })
 
     // Streaming mode: start WebSocket connection and recording together
     hotkeyManager.on('recordStart', async () => {
@@ -188,12 +193,12 @@ async function initializeApp(): Promise<void> {
         await streamingSoniox?.startSession()
 
         // Forward audio chunks to Soniox
-        streamingRecorder?.on('data', (chunk: Buffer) => {
+        webStreamingRecorder?.on('data', (chunk: Buffer) => {
           streamingSoniox?.sendAudioChunk(chunk)
         })
 
         // Start recording
-        await streamingRecorder?.startRecording()
+        await webStreamingRecorder?.startRecording()
       } catch (error) {
         console.error('[Main] Streaming start error:', error)
         updateTrayStatus('idle')
@@ -209,8 +214,8 @@ async function initializeApp(): Promise<void> {
 
       try {
         // Stop recording
-        streamingRecorder?.stopRecording()
-        streamingRecorder?.removeAllListeners('data')
+        webStreamingRecorder?.stopRecording()
+        webStreamingRecorder?.removeAllListeners('data')
 
         // Get final result
         const result = await streamingSoniox?.endSession()

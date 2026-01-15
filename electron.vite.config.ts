@@ -24,7 +24,8 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
-          indicator: resolve(__dirname, 'src/renderer/indicator.html')
+          indicator: resolve(__dirname, 'src/renderer/indicator.html'),
+          'audio-capture': resolve(__dirname, 'src/renderer/audio-capture.html')
         }
       }
     }

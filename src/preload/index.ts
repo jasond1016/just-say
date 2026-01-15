@@ -82,6 +82,26 @@ const api = {
   },
   notifyMicrophoneError: (message: string): void => {
     ipcRenderer.send('microphone-error', message)
+  },
+
+  // Push-to-talk audio capture (hidden window)
+  onStartPttCapture: (callback: () => void): void => {
+    ipcRenderer.on('start-ptt-capture', () => callback())
+  },
+  onStopPttCapture: (callback: () => void): void => {
+    ipcRenderer.on('stop-ptt-capture', () => callback())
+  },
+  sendPttAudioChunk: (chunk: ArrayBuffer): void => {
+    ipcRenderer.send('ptt-audio-chunk', chunk)
+  },
+  notifyPttStarted: (): void => {
+    ipcRenderer.send('ptt-started')
+  },
+  notifyPttStopped: (): void => {
+    ipcRenderer.send('ptt-stopped')
+  },
+  notifyPttError: (message: string): void => {
+    ipcRenderer.send('ptt-error', message)
   }
 }
 
