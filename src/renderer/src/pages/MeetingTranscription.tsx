@@ -4,6 +4,10 @@ import {
     startSystemAudioCapture,
     stopSystemAudioCapture
 } from '../system-audio-capture'
+import {
+    startMicrophoneCapture,
+    stopMicrophoneCapture
+} from '../microphone-capture'
 
 interface SentencePair {
     original: string
@@ -62,9 +66,14 @@ export function MeetingTranscription(): React.JSX.Element {
                 targetLanguage: enableTranslation ? targetLanguage : undefined
             })
 
-            // Then start system audio capture in renderer process
+            // Start system audio capture in renderer process
             // Audio data will be sent to main process via IPC
             await startSystemAudioCapture(null)
+
+            // Start microphone capture if enabled
+            if (includeMic) {
+                await startMicrophoneCapture()
+            }
 
             setStatus('transcribing')
             setSegments([])
@@ -80,13 +89,15 @@ export function MeetingTranscription(): React.JSX.Element {
             setStatus('error')
             // Clean up if start failed
             stopSystemAudioCapture()
+            stopMicrophoneCapture()
         }
     }
 
     // Stop transcription
     const stopTranscription = async (): Promise<void> => {
-        // Stop system audio capture in renderer process
+        // Stop audio captures in renderer process
         stopSystemAudioCapture()
+        stopMicrophoneCapture()
 
         try {
             await window.api.stopMeetingTranscription()

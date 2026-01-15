@@ -68,6 +68,20 @@ const api = {
   },
   notifySystemAudioError: (message: string): void => {
     ipcRenderer.send('system-audio-error', message)
+  },
+
+  // Microphone capture (renderer-side) - send audio data to main
+  sendMicrophoneAudioChunk: (chunk: ArrayBuffer): void => {
+    ipcRenderer.send('microphone-audio-chunk', chunk)
+  },
+  notifyMicrophoneStarted: (): void => {
+    ipcRenderer.send('microphone-started')
+  },
+  notifyMicrophoneStopped: (): void => {
+    ipcRenderer.send('microphone-stopped')
+  },
+  notifyMicrophoneError: (message: string): void => {
+    ipcRenderer.send('microphone-error', message)
   }
 }
 

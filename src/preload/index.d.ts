@@ -50,6 +50,12 @@ interface JustSayAPI {
   notifySystemAudioStarted: () => void
   notifySystemAudioStopped: () => void
   notifySystemAudioError: (message: string) => void
+
+  // Microphone capture (renderer-side)
+  sendMicrophoneAudioChunk: (chunk: ArrayBuffer) => void
+  notifyMicrophoneStarted: () => void
+  notifyMicrophoneStopped: () => void
+  notifyMicrophoneError: (message: string) => void
 }
 
 declare global {

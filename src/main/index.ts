@@ -389,3 +389,23 @@ ipcMain.on('system-audio-error', (_event, message: string) => {
   console.error('[Main] System audio capture error:', message)
   mainWindow?.webContents.send('meeting-status', 'error')
 })
+
+// Microphone capture IPC handlers (audio captured in renderer, sent to main)
+ipcMain.on('microphone-audio-chunk', (_event, chunk: ArrayBuffer) => {
+  if (meetingTranscription) {
+    meetingTranscription.handleMicrophoneAudioChunk(Buffer.from(chunk))
+  }
+})
+
+ipcMain.on('microphone-started', () => {
+  console.log('[Main] Microphone capture started in renderer')
+})
+
+ipcMain.on('microphone-stopped', () => {
+  console.log('[Main] Microphone capture stopped in renderer')
+})
+
+ipcMain.on('microphone-error', (_event, message: string) => {
+  console.error('[Main] Microphone capture error:', message)
+  meetingWindow?.webContents.send('meeting-status', 'error')
+})
