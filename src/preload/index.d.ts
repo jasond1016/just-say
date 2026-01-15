@@ -64,6 +64,14 @@ interface JustSayAPI {
   notifyPttStarted: () => void
   notifyPttStopped: () => void
   notifyPttError: (message: string) => void
+
+  // Non-streaming recording (hidden window)
+  onStartRecording: (callback: () => void) => void
+  onStopRecording: (callback: () => void) => void
+  sendRecordingAudioChunk: (chunk: ArrayBuffer) => void
+  notifyRecordingStarted: () => void
+  notifyRecordingStopped: () => void
+  notifyRecordingError: (message: string) => void
 }
 
 declare global {

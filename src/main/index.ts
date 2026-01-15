@@ -5,7 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { setupTray, updateTrayStatus } from './tray'
 import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig } from './config'
-import { AudioRecorder } from './audio/recorder'
+import { WebAudioRecorder } from './audio/web-recorder'
 import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
 import { RecognitionController } from './recognition'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
@@ -19,7 +19,7 @@ let meetingWindow: BrowserWindow | null = null
 
 // Core modules
 let hotkeyManager: HotkeyManager | null = null
-let audioRecorder: AudioRecorder | null = null
+let audioRecorder: WebAudioRecorder | null = null
 let webStreamingRecorder: WebStreamingAudioRecorder | null = null
 let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
@@ -162,7 +162,7 @@ async function initializeApp(): Promise<void> {
   })
 
   // Initialize modules
-  audioRecorder = new AudioRecorder()
+  audioRecorder = new WebAudioRecorder()
   recognitionController = new RecognitionController(config)
   inputSimulator = new InputSimulator()
   hotkeyManager = new HotkeyManager()
@@ -235,6 +235,11 @@ async function initializeApp(): Promise<void> {
     })
   } else {
     // Non-streaming mode (local, api, network)
+    // Pre-initialize the hidden window for faster first recording
+    audioRecorder?.initialize().catch((err) => {
+      console.error('[Main] Failed to pre-initialize audio recorder window:', err)
+    })
+
     hotkeyManager.on('recordStart', async () => {
       console.log('[Main] Recording started')
       updateTrayStatus('recording')

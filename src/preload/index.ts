@@ -102,6 +102,26 @@ const api = {
   },
   notifyPttError: (message: string): void => {
     ipcRenderer.send('ptt-error', message)
+  },
+
+  // Non-streaming recording (hidden window)
+  onStartRecording: (callback: () => void): void => {
+    ipcRenderer.on('start-recording', () => callback())
+  },
+  onStopRecording: (callback: () => void): void => {
+    ipcRenderer.on('stop-recording', () => callback())
+  },
+  sendRecordingAudioChunk: (chunk: ArrayBuffer): void => {
+    ipcRenderer.send('recording-audio-chunk', chunk)
+  },
+  notifyRecordingStarted: (): void => {
+    ipcRenderer.send('recording-started')
+  },
+  notifyRecordingStopped: (): void => {
+    ipcRenderer.send('recording-stopped')
+  },
+  notifyRecordingError: (message: string): void => {
+    ipcRenderer.send('recording-error', message)
   }
 }
 
