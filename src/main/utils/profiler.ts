@@ -208,13 +208,13 @@ class TranscriptionProfiler {
     // Connection
     const connLatency = this.getConnectionLatency()
     if (connLatency !== null) {
-      console.log(`🔌 Connection Latency: ${connLatency}ms`)
+      console.log(`[*] Connection Latency: ${connLatency}ms`)
     }
 
     // Audio stats
     const audioStats = this.getAudioStats()
     if (audioStats) {
-      console.log(`\n📊 Audio Stats:`)
+      console.log(`\n[Audio Stats]`)
       console.log(`   Total sent: ${(audioStats.totalBytes / 1024).toFixed(1)} KB`)
       console.log(`   Avg chunk: ${audioStats.avgChunkSize} bytes`)
       console.log(`   Rate: ${audioStats.chunksPerSecond} chunks/sec`)
@@ -223,7 +223,7 @@ class TranscriptionProfiler {
     // Response latency (time from audio capture to recognition result)
     const respLatency = this.getResponseLatencyStats()
     if (respLatency) {
-      console.log(`\n⏱️  Audio → Recognition Latency:`)
+      console.log(`\n[Audio -> Recognition Latency]`)
       console.log(`   Avg: ${respLatency.avgMs}ms`)
       console.log(`   P50: ${respLatency.p50Ms}ms`)
       console.log(`   P95: ${respLatency.p95Ms}ms`)
@@ -234,14 +234,14 @@ class TranscriptionProfiler {
     // Inter-response time
     const interResp = this.getInterResponseStats()
     if (interResp) {
-      console.log(`\n🔄 Time Between Responses:`)
+      console.log(`\n[Time Between Responses]`)
       console.log(`   Avg: ${interResp.avgMs}ms`)
       console.log(`   P50: ${interResp.p50Ms}ms`)
       console.log(`   P95: ${interResp.p95Ms}ms`)
     }
 
     // Summary
-    console.log(`\n📈 Summary:`)
+    console.log(`\n[Summary]`)
     console.log(`   Audio chunks sent: ${this.audioEvents.length}`)
     console.log(`   Responses received: ${this.totalResponsesReceived}`)
     console.log(
