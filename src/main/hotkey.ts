@@ -53,8 +53,6 @@ export class HotkeyManager extends EventEmitter {
       }
     })
   }
-  }
-  }
 
   start(): void {
     uIOhook.start()
