@@ -24,13 +24,7 @@ cd python
 uv sync
 ```
 
-### 3. 安装 FFmpeg
-
-- **Windows**: 下载 [FFmpeg](https://ffmpeg.org/download.html) 并添加到 PATH
-- **macOS**: `brew install ffmpeg`
-- **Linux**: `sudo apt install ffmpeg`
-
-### 4. 运行
+### 3. 运行
 
 ```bash
 pnpm dev

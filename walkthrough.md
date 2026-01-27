@@ -6,13 +6,13 @@
 
 | 功能        | 文件                                                                                 | 说明                       |
 | ----------- | ------------------------------------------------------------------------------------ | -------------------------- |
-| 快捷键监听  | [hotkey.ts](file:///d:/my_projects/JustSay/src/main/hotkey.ts)                       | 右 Alt 按住说话模式        |
-| 音频录制    | [audio/recorder.ts](file:///d:/my_projects/JustSay/src/main/audio/recorder.ts)       | 使用 FFmpeg 录制           |
-| 本地识别    | [recognition/local.ts](file:///d:/my_projects/JustSay/src/main/recognition/local.ts) | Faster-Whisper Python 服务 |
-| 文本输入    | [input/simulator.ts](file:///d:/my_projects/JustSay/src/main/input/simulator.ts)     | PowerShell SendKeys        |
-| 系统托盘    | [tray.ts](file:///d:/my_projects/JustSay/src/main/tray.ts)                           | 状态显示、右键菜单         |
-| 录音指示器  | [indicator.html](file:///d:/my_projects/JustSay/src/renderer/indicator.html)         | 屏幕中下方悬浮窗           |
-| 模型管理 UI | [Settings.tsx](file:///d:/my_projects/JustSay/src/renderer/src/pages/Settings.tsx)   | 模型下载与切换             |
+| 快捷键监听  | [hotkey.ts](./src/main/hotkey.ts)                       | 右 Alt 按住说话模式        |
+| 音频录制    | [audio/web-recorder.ts](./src/main/audio/web-recorder.ts)       | 使用 Web Audio API 录制           |
+| 本地识别    | [recognition/local.ts](./src/main/recognition/local.ts) | Faster-Whisper Python 服务 |
+| 文本输入    | [input/simulator.ts](./src/main/input/simulator.ts)     | PowerShell SendKeys        |
+| 系统托盘    | [tray.ts](./src/main/tray.ts)                           | 状态显示、右键菜单         |
+| 录音指示器  | [indicator.html](./src/renderer/indicator.html)         | 屏幕中下方悬浮窗           |
+| 模型管理 UI | [Settings.tsx](./src/renderer/src/pages/Settings.tsx)   | 模型下载与切换             |
 
 ### ✅ 识别后端
 
@@ -33,9 +33,8 @@
 
 ## 下一步测试
 
-1. 确保 FFmpeg 在 PATH 中
-2. 确保 Python 环境有 faster-whisper
-3. 按住 Right Alt 测试录音和识别
+1. 确保 Python 环境有 faster-whisper
+2. 按住 Right Alt 测试录音和识别
 
 ## 待完善功能
 
