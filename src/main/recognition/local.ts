@@ -4,6 +4,7 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import { EventEmitter } from 'events'
 import { SpeechRecognizer, RecognitionResult } from './index'
+import { getWhisperServer, WhisperServerClient } from './whisperServer'
 
 export interface DownloadProgress {
   model: string
@@ -25,6 +26,7 @@ export interface LocalRecognizerConfig {
   language?: string
   threads?: number
   computeType?: string
+  useHttpServer?: boolean // Use HTTP server mode (recommended)
 }
 
 export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
@@ -32,6 +34,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private pythonPath: string
   private scriptPath: string
   private static cachedGpuInfo: GpuInfo | null = null
+  private whisperServer: WhisperServerClient | null = null
 
   constructor(config?: LocalRecognizerConfig) {
     super()
@@ -41,6 +44,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       language: 'auto',
       threads: 4,
       computeType: 'auto',
+      useHttpServer: true, // Default to HTTP server mode
       ...config
     } as LocalRecognizerConfig
 
@@ -55,6 +59,16 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     // Find python - prefer venv
     this.pythonPath = this.findPython(projectRoot)
+
+    // Initialize HTTP server client if enabled
+    if (this.config.useHttpServer) {
+      this.whisperServer = getWhisperServer({
+        modelType: this.config.modelType,
+        device: this.config.device === 'auto' ? 'cpu' : this.config.device,
+        computeType: this.config.computeType === 'auto' ? 'int8' : this.config.computeType,
+        autoStart: true
+      })
+    }
   }
 
   private findPython(projectRoot: string): string {
@@ -109,6 +123,47 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   }
 
   async recognize(audioBuffer: Buffer): Promise<RecognitionResult> {
+    // Use HTTP server mode if enabled (faster, model stays in memory)
+    if (this.config.useHttpServer && this.whisperServer) {
+      return this.recognizeViaServer(audioBuffer)
+    }
+
+    // Fallback to legacy spawn mode
+    return this.recognizeViaSpawn(audioBuffer)
+  }
+
+  /**
+   * Recognize via HTTP server (fast path - model stays in memory)
+   */
+  private async recognizeViaServer(audioBuffer: Buffer): Promise<RecognitionResult> {
+    const { device, computeType } = await this.resolveAutoSettings()
+    const wavBuffer = this.createWavBuffer(audioBuffer)
+
+    console.log('[LocalRecognizer] Recognizing via HTTP server')
+
+    const result = await this.whisperServer!.transcribe(wavBuffer, {
+      modelType: this.config.modelType,
+      device,
+      computeType,
+      language: this.config.language
+    })
+
+    if (!result.success) {
+      throw new Error(result.error || 'Transcription failed')
+    }
+
+    return {
+      text: result.text || '',
+      language: result.language,
+      confidence: result.language_probability,
+      durationMs: (result.processing_time || 0) * 1000
+    }
+  }
+
+  /**
+   * Recognize via spawning Python process (legacy mode)
+   */
+  private async recognizeViaSpawn(audioBuffer: Buffer): Promise<RecognitionResult> {
     // Resolve auto settings before running
     const { device, computeType } = await this.resolveAutoSettings()
 
@@ -388,6 +443,34 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       console.log(`[LocalRecognizer] Deleted model: ${modelType}`)
     } catch (error) {
       throw new Error(`Failed to delete model: ${error}`)
+    }
+  }
+
+  /**
+   * Stop the HTTP server (call on app quit)
+   */
+  async stopServer(): Promise<void> {
+    if (this.whisperServer) {
+      await this.whisperServer.stop()
+    }
+  }
+
+  /**
+   * Check if HTTP server is running
+   */
+  async isServerRunning(): Promise<boolean> {
+    if (!this.whisperServer) {
+      return false
+    }
+    return this.whisperServer.isHealthy()
+  }
+
+  /**
+   * Start the HTTP server manually
+   */
+  async startServer(): Promise<void> {
+    if (this.whisperServer) {
+      await this.whisperServer.start()
     }
   }
 }
