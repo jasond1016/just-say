@@ -11,10 +11,17 @@ export interface DownloadProgress {
   status: string
 }
 
+export interface GpuInfo {
+  cuda_available: boolean
+  device_name: string | null
+  recommended_device: 'cpu' | 'cuda'
+  recommended_compute_type: string
+}
+
 export interface LocalRecognizerConfig {
   modelPath?: string
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
-  device?: 'cpu' | 'cuda'
+  device?: 'cpu' | 'cuda' | 'auto'
   language?: string
   threads?: number
   computeType?: string
@@ -24,17 +31,18 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private config: LocalRecognizerConfig
   private pythonPath: string
   private scriptPath: string
+  private static cachedGpuInfo: GpuInfo | null = null
 
   constructor(config?: LocalRecognizerConfig) {
     super()
     this.config = {
       modelType: 'tiny',
-      device: 'cpu',
+      device: 'auto',
       language: 'auto',
       threads: 4,
-      computeType: 'int8',
+      computeType: 'auto',
       ...config
-    }
+    } as LocalRecognizerConfig
 
     // Script is in project root/python folder
     let projectRoot: string
@@ -73,9 +81,39 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     return 'python'
   }
 
+  private createWavBuffer(pcmBuffer: Buffer, sampleRate: number = 16000): Buffer {
+    const numChannels = 1
+    const bitsPerSample = 16
+    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8
+    const blockAlign = (numChannels * bitsPerSample) / 8
+    const dataSize = pcmBuffer.length
+    const headerSize = 44
+    const fileSize = headerSize + dataSize - 8
+
+    const header = Buffer.alloc(headerSize)
+    header.write('RIFF', 0)
+    header.writeUInt32LE(fileSize, 4)
+    header.write('WAVE', 8)
+    header.write('fmt ', 12)
+    header.writeUInt32LE(16, 16) // fmt chunk size
+    header.writeUInt16LE(1, 20) // PCM format
+    header.writeUInt16LE(numChannels, 22)
+    header.writeUInt32LE(sampleRate, 24)
+    header.writeUInt32LE(byteRate, 28)
+    header.writeUInt16LE(blockAlign, 32)
+    header.writeUInt16LE(bitsPerSample, 34)
+    header.write('data', 36)
+    header.writeUInt32LE(dataSize, 40)
+
+    return Buffer.concat([header, pcmBuffer])
+  }
+
   async recognize(audioBuffer: Buffer): Promise<RecognitionResult> {
+    // Resolve auto settings before running
+    const { device, computeType } = await this.resolveAutoSettings()
+
     return new Promise((resolve, reject) => {
-      // Write audio to temp file
+      // Write audio to temp file with proper WAV header
       const tempDir = join(app.getPath('temp'), 'justsay')
       const audioPath = join(tempDir, `input_${Date.now()}.wav`)
 
@@ -83,7 +121,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         fs.mkdirSync(tempDir, { recursive: true })
       }
 
-      fs.writeFileSync(audioPath, audioBuffer)
+      const wavBuffer = this.createWavBuffer(audioBuffer)
+      fs.writeFileSync(audioPath, wavBuffer)
 
       // Build args
       const modelsPath = join(app.getPath('userData'), 'models')
@@ -98,9 +137,9 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         '--model',
         this.config.modelType || 'tiny',
         '--device',
-        this.config.device || 'cpu',
+        device,
         '--compute-type',
-        this.config.computeType || 'int8',
+        computeType,
         '--download-root',
         modelsPath
       ]
@@ -109,43 +148,53 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         args.push('--language', this.config.language)
       }
 
-      // console.log('[LocalRecognizer] Running:', this.pythonPath, args.slice(0, 4).join(' '), '...')
       console.log('[LocalRecognizer] Running:', this.pythonPath, args.join(' '))
 
-      const proc = spawn(this.pythonPath, args)
+      const proc = spawn(this.pythonPath, args, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      })
       let stdout = ''
       let stderr = ''
 
       proc.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString()
+        stdout += data.toString('utf8')
       })
 
       proc.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString()
+        stderr += data.toString('utf8')
       })
 
       proc.on('close', (code) => {
-        // Cleanup
+        // Cleanup temp file
         try {
           fs.unlinkSync(audioPath)
         } catch {
           /* ignore */
         }
 
-        if (code === 0) {
-          try {
-            const result = JSON.parse(stdout.trim())
+        // Try to parse result first - CUDA may crash on cleanup but still produce valid output
+        try {
+          const result = JSON.parse(stdout.trim())
+          if (result.success) {
             resolve({
               text: result.text || '',
               language: result.language,
               confidence: result.language_probability,
               durationMs: 0
             })
-          } catch {
-            resolve({ text: stdout.trim(), durationMs: 0 })
+            return
+          } else if (result.error) {
+            reject(new Error(result.error))
+            return
           }
+        } catch {
+          // Not valid JSON, check exit code
+        }
+
+        if (code === 0) {
+          resolve({ text: stdout.trim(), durationMs: 0 })
         } else {
-          reject(new Error(`Failed (code ${code}): ${stderr}`))
+          reject(new Error(`Failed (code ${code}): ${stderr || stdout}`))
         }
       })
 
@@ -167,6 +216,82 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       return false
     }
   }
+
+  async detectGpu(): Promise<GpuInfo> {
+    if (LocalRecognizer.cachedGpuInfo) {
+      return LocalRecognizer.cachedGpuInfo
+    }
+
+    return new Promise((resolve) => {
+      const args = [this.scriptPath, '--detect-gpu']
+      const proc = spawn(this.pythonPath, args, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      })
+      let stdout = ''
+
+      proc.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString('utf8')
+      })
+
+      proc.on('close', (code) => {
+        if (code === 0) {
+          try {
+            const info = JSON.parse(stdout.trim()) as GpuInfo
+            LocalRecognizer.cachedGpuInfo = info
+            console.log('[LocalRecognizer] GPU detection:', info)
+            resolve(info)
+            return
+          } catch {
+            // Parse error, fall through
+          }
+        }
+        // Default fallback
+        const fallback: GpuInfo = {
+          cuda_available: false,
+          device_name: null,
+          recommended_device: 'cpu',
+          recommended_compute_type: 'int8'
+        }
+        LocalRecognizer.cachedGpuInfo = fallback
+        resolve(fallback)
+      })
+
+      proc.on('error', () => {
+        const fallback: GpuInfo = {
+          cuda_available: false,
+          device_name: null,
+          recommended_device: 'cpu',
+          recommended_compute_type: 'int8'
+        }
+        resolve(fallback)
+      })
+    })
+  }
+
+  private async resolveAutoSettings(): Promise<{ device: 'cpu' | 'cuda'; computeType: string }> {
+    const gpuInfo = await this.detectGpu()
+
+    // Determine device: auto-detect, or validate user choice
+    let device: 'cpu' | 'cuda'
+    if (!this.config.device || this.config.device === 'auto') {
+      device = gpuInfo.recommended_device
+    } else if (this.config.device === 'cuda' && !gpuInfo.cuda_available) {
+      console.log('[LocalRecognizer] CUDA requested but not available, falling back to CPU')
+      device = 'cpu'
+    } else {
+      device = this.config.device as 'cpu' | 'cuda'
+    }
+
+    // Determine compute type based on device
+    let computeType: string
+    if (!this.config.computeType || this.config.computeType === 'auto' || this.config.computeType === 'default') {
+      computeType = device === 'cuda' ? 'float16' : 'int8'
+    } else {
+      computeType = this.config.computeType
+    }
+
+    return { device, computeType }
+  }
   async downloadModel(modelType: string): Promise<void> {
     const modelsPath = join(app.getPath('userData'), 'models')
     if (!fs.existsSync(modelsPath)) {
@@ -184,12 +309,14 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       ]
 
       console.log('[LocalRecognizer] Downloading model:', modelType)
-      const proc = spawn(this.pythonPath, args)
+      const proc = spawn(this.pythonPath, args, {
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+      })
 
       let stderrBuffer = ''
 
       proc.stderr.on('data', (data: Buffer) => {
-        stderrBuffer += data.toString()
+        stderrBuffer += data.toString('utf8')
 
         // Parse progress JSON lines from stderr
         const lines = stderrBuffer.split('\n')

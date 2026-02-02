@@ -15,18 +15,34 @@ import threading
 
 def add_nvidia_paths():
     """Add NVIDIA library paths to DLL search path for Windows."""
-    if os.name == 'nt':
-        for p in sys.path:
-            nvidia_path = os.path.join(p, 'nvidia')
-            if os.path.isdir(nvidia_path):
-                for comp in ['cudnn', 'cublas']:
-                    bin_path = os.path.join(nvidia_path, comp, 'bin')
-                    if os.path.isdir(bin_path):
-                        try:
-                            os.add_dll_directory(bin_path)
-                            os.environ['PATH'] = bin_path + os.pathsep + os.environ['PATH']
-                        except Exception:
-                            pass
+    if os.name != 'nt':
+        return
+    
+    import site
+    
+    # Get all possible site-packages directories
+    possible_paths = site.getsitepackages() if hasattr(site, 'getsitepackages') else []
+    
+    # Also check sys.path
+    for p in sys.path:
+        if 'site-packages' in p and os.path.isdir(p) and p not in possible_paths:
+            possible_paths.append(p)
+    
+    for site_packages in possible_paths:
+        nvidia_path = os.path.join(site_packages, 'nvidia')
+        if not os.path.isdir(nvidia_path):
+            continue
+        
+        # Find all bin directories under nvidia
+        for item in os.listdir(nvidia_path):
+            bin_path = os.path.join(nvidia_path, item, 'bin')
+            if os.path.isdir(bin_path):
+                try:
+                    os.add_dll_directory(bin_path)
+                except Exception:
+                    pass
+                os.environ['PATH'] = bin_path + os.pathsep + os.environ.get('PATH', '')
+        return  # Found nvidia, done
 
 add_nvidia_paths()
 
@@ -81,6 +97,29 @@ def create_progress_hook(download_root: str):
     return thread, stop_event
 
 
+def detect_gpu():
+    """Detect CUDA availability and return GPU info."""
+    result = {
+        'cuda_available': False,
+        'device_name': None,
+        'recommended_device': 'cpu',
+        'recommended_compute_type': 'int8'
+    }
+    
+    try:
+        import ctranslate2
+        cuda_device_count = ctranslate2.get_cuda_device_count()
+        if cuda_device_count > 0:
+            result['cuda_available'] = True
+            result['device_name'] = f'CUDA device (count: {cuda_device_count})'
+            result['recommended_device'] = 'cuda'
+            result['recommended_compute_type'] = 'float16'
+    except Exception:
+        pass
+    
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description='Faster-Whisper Recognition')
     parser.add_argument('--audio', help='Audio file path')
@@ -92,8 +131,13 @@ def main():
     parser.add_argument('--language', help='Language code')
     parser.add_argument('--download-only', action='store_true', help='Download model and exit')
     parser.add_argument('--download-root', help='Cache directory for models')
+    parser.add_argument('--detect-gpu', action='store_true', help='Detect GPU and exit')
 
     args = parser.parse_args()
+
+    if args.detect_gpu:
+        print(json.dumps(detect_gpu(), ensure_ascii=False))
+        return 0
 
     # Audio is required unless download-only
     if not args.download_only:
