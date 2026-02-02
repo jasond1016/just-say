@@ -13,6 +13,16 @@ const api = {
   getConfig: (): Promise<unknown> => ipcRenderer.invoke('get-config'),
   setConfig: (config: unknown): Promise<void> => ipcRenderer.invoke('set-config', config),
 
+  // Secure API Key management
+  getApiKey: (provider: 'soniox' | 'groq'): Promise<string | undefined> =>
+    ipcRenderer.invoke('get-api-key', provider),
+  setApiKey: (provider: 'soniox' | 'groq', apiKey: string): Promise<void> =>
+    ipcRenderer.invoke('set-api-key', provider, apiKey),
+  deleteApiKey: (provider: 'soniox' | 'groq'): Promise<void> =>
+    ipcRenderer.invoke('delete-api-key', provider),
+  hasApiKey: (provider: 'soniox' | 'groq'): Promise<boolean> =>
+    ipcRenderer.invoke('has-api-key', provider),
+
   // App control
   showSettings: (): Promise<void> => ipcRenderer.invoke('show-settings'),
   showMeetingWindow: (): Promise<void> => ipcRenderer.invoke('show-meeting-window'),

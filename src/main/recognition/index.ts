@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { AppConfig } from '../config'
+import { getApiKey } from '../secureStore'
 import { LocalRecognizer, DownloadProgress } from './local'
 import { ApiRecognizer } from './api'
 import { NetworkRecognizer } from './network'
@@ -37,12 +38,22 @@ export class RecognitionController extends EventEmitter {
     switch (backend) {
       case 'api':
         return new ApiRecognizer(this.config.recognition?.api)
-      case 'soniox':
-        return new SonioxRecognizer(this.config.recognition?.soniox)
+      case 'soniox': {
+        const sonioxApiKey = getApiKey('soniox')
+        return new SonioxRecognizer({
+          ...this.config.recognition?.soniox,
+          apiKey: sonioxApiKey
+        })
+      }
       case 'network':
         return new NetworkRecognizer(this.config.recognition?.network)
-      case 'groq':
-        return new GroqRecognizer(this.config.recognition?.groq)
+      case 'groq': {
+        const groqApiKey = getApiKey('groq')
+        return new GroqRecognizer({
+          ...this.config.recognition?.groq,
+          apiKey: groqApiKey
+        })
+      }
       default:
         return new LocalRecognizer(this.config.recognition?.local)
     }

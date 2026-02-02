@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { setupTray, updateTrayStatus } from './tray'
 import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig } from './config'
+import { initSecureStore, getApiKey, setApiKey, deleteApiKey, hasApiKey } from './secureStore'
 import { WebAudioRecorder } from './audio/web-recorder'
 import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
 import { RecognitionController, DownloadProgress } from './recognition'
@@ -149,8 +150,9 @@ function showMeetingWindow(): void {
 }
 
 async function initializeApp(): Promise<void> {
-  // Initialize config
+  // Initialize config and secure store
   initConfig()
+  initSecureStore()
   const config = getConfig()
 
   // Create windows
@@ -435,4 +437,21 @@ ipcMain.on('microphone-stopped', () => {
 ipcMain.on('microphone-error', (_event, message: string) => {
   console.error('[Main] Microphone capture error:', message)
   meetingWindow?.webContents.send('meeting-status', 'error')
+})
+
+// Secure API Key IPC handlers
+ipcMain.handle('get-api-key', (_event, provider: 'soniox' | 'groq') => {
+  return getApiKey(provider)
+})
+
+ipcMain.handle('set-api-key', (_event, provider: 'soniox' | 'groq', apiKey: string) => {
+  setApiKey(provider, apiKey)
+})
+
+ipcMain.handle('delete-api-key', (_event, provider: 'soniox' | 'groq') => {
+  deleteApiKey(provider)
+})
+
+ipcMain.handle('has-api-key', (_event, provider: 'soniox' | 'groq') => {
+  return hasApiKey(provider)
 })

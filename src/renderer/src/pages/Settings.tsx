@@ -13,10 +13,50 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const [config, setConfig] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
+  const [sonioxApiKey, setSonioxApiKey] = useState('')
+  const [groqApiKey, setGroqApiKey] = useState('')
+  const [hasSonioxKey, setHasSonioxKey] = useState(false)
+  const [hasGroqKey, setHasGroqKey] = useState(false)
 
   useEffect(() => {
     loadConfig()
+    loadApiKeys()
   }, [])
+
+  const loadApiKeys = async (): Promise<void> => {
+    const [sonioxKey, groqKey, hasSoniox, hasGroq] = await Promise.all([
+      window.api.getApiKey('soniox'),
+      window.api.getApiKey('groq'),
+      window.api.hasApiKey('soniox'),
+      window.api.hasApiKey('groq')
+    ])
+    if (sonioxKey) setSonioxApiKey(sonioxKey)
+    if (groqKey) setGroqApiKey(groqKey)
+    setHasSonioxKey(hasSoniox)
+    setHasGroqKey(hasGroq)
+  }
+
+  const handleSonioxApiKeyChange = async (value: string): Promise<void> => {
+    setSonioxApiKey(value)
+    if (value.trim()) {
+      await window.api.setApiKey('soniox', value)
+      setHasSonioxKey(true)
+    } else {
+      await window.api.deleteApiKey('soniox')
+      setHasSonioxKey(false)
+    }
+  }
+
+  const handleGroqApiKeyChange = async (value: string): Promise<void> => {
+    setGroqApiKey(value)
+    if (value.trim()) {
+      await window.api.setApiKey('groq', value)
+      setHasGroqKey(true)
+    } else {
+      await window.api.deleteApiKey('groq')
+      setHasGroqKey(false)
+    }
+  }
 
   const loadConfig = async (): Promise<void> => {
     try {
@@ -272,17 +312,17 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                 <div className="settings-row">
                   <div className="settings-row__info">
                     <div className="settings-row__label">Soniox API Key</div>
-                    <div className="settings-row__desc">输入您的 Soniox API 密钥</div>
+                    <div className="settings-row__desc">
+                      {hasSonioxKey ? '已安全存储 (加密)' : '输入您的 Soniox API 密钥'}
+                    </div>
                   </div>
                   <input
                     type="password"
                     className="form-input"
                     style={{ width: 240 }}
-                    value={config.recognition?.soniox?.apiKey || ''}
+                    value={sonioxApiKey}
                     placeholder="sk-..."
-                    onChange={(e) =>
-                      updateConfig({ recognition: { soniox: { apiKey: e.target.value } } })
-                    }
+                    onChange={(e) => handleSonioxApiKeyChange(e.target.value)}
                   />
                 </div>
               )}
@@ -292,17 +332,17 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   <div className="settings-row">
                     <div className="settings-row__info">
                       <div className="settings-row__label">Groq API Key</div>
-                      <div className="settings-row__desc">输入您的 Groq API 密钥</div>
+                      <div className="settings-row__desc">
+                        {hasGroqKey ? '已安全存储 (加密)' : '输入您的 Groq API 密钥'}
+                      </div>
                     </div>
                     <input
                       type="password"
                       className="form-input"
                       style={{ width: 240 }}
-                      value={config.recognition?.groq?.apiKey || ''}
+                      value={groqApiKey}
                       placeholder="gsk_..."
-                      onChange={(e) =>
-                        updateConfig({ recognition: { groq: { apiKey: e.target.value } } })
-                      }
+                      onChange={(e) => handleGroqApiKeyChange(e.target.value)}
                     />
                   </div>
                   <div className="settings-row">

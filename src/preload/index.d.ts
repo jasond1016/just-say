@@ -24,6 +24,13 @@ interface MeetingTranscriptSegment {
 interface JustSayAPI {
   getConfig: () => Promise<unknown>
   setConfig: (config: unknown) => Promise<void>
+
+  // Secure API Key management
+  getApiKey: (provider: 'soniox' | 'groq') => Promise<string | undefined>
+  setApiKey: (provider: 'soniox' | 'groq', apiKey: string) => Promise<void>
+  deleteApiKey: (provider: 'soniox' | 'groq') => Promise<void>
+  hasApiKey: (provider: 'soniox' | 'groq') => Promise<boolean>
+
   showSettings: () => Promise<void>
   showMeetingWindow: () => Promise<void>
   quit: () => Promise<void>
