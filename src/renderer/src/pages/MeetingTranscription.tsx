@@ -105,6 +105,38 @@ export function MeetingTranscription(): React.JSX.Element {
             console.error('Stop error:', err)
         }
 
+        // Auto-save transcript if there's content
+        if (segments.length > 0 || currentSegment) {
+            try {
+                // Collect all segments including current
+                const allSegments = [...segments]
+                if (currentSegment) {
+                    allSegments.push(currentSegment)
+                }
+
+                const transcriptData = {
+                    duration_seconds: seconds,
+                    translation_enabled: enableTranslation,
+                    target_language: enableTranslation ? targetLanguage : undefined,
+                    include_microphone: includeMic,
+                    segments: allSegments.map((seg) => ({
+                        speaker: seg.speaker,
+                        text: seg.text,
+                        translated_text: seg.translatedText,
+                        sentence_pairs: seg.sentencePairs?.map((pair) => ({
+                            original: pair.original,
+                            translated: pair.translated
+                        }))
+                    }))
+                }
+
+                const saved = await window.api.saveTranscript(transcriptData)
+                console.log('Transcript saved:', saved.id)
+            } catch (saveErr) {
+                console.error('Failed to save transcript:', saveErr)
+            }
+        }
+
         setStatus('idle')
         setCurrentSegment(null)
 

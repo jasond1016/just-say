@@ -8,6 +8,7 @@ interface SidebarProps {
 const navItems = [
     { id: 'ptt', icon: '🎤', label: '按键说话' },
     { id: 'meeting', icon: '📝', label: '会议转录' },
+    { id: 'history', icon: '📂', label: '历史记录' },
 ]
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.Element {
@@ -29,7 +30,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps): React.JSX.E
                 <div className="sidebar__divider" />
 
                 <button
-                    className={`nav-item ${activeView === 'settings' ? 'active' : ''} stagger-3`}
+                    className={`nav-item ${activeView === 'settings' ? 'active' : ''} stagger-4`}
                     onClick={() => onViewChange('settings')}
                     style={{ animationFillMode: 'backwards' }}
                 >

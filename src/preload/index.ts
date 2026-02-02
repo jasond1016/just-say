@@ -143,7 +143,67 @@ const api = {
   },
   notifyRecordingError: (message: string): void => {
     ipcRenderer.send('recording-error', message)
-  }
+  },
+
+  // Transcript storage
+  saveTranscript: (data: {
+    title?: string
+    note?: string
+    duration_seconds: number
+    translation_enabled: boolean
+    target_language?: string
+    include_microphone: boolean
+    segments: {
+      speaker: number
+      text: string
+      translated_text?: string
+      sentence_pairs?: { original: string; translated?: string }[]
+    }[]
+  }): Promise<{
+    id: string
+    title: string
+    note: string | null
+    duration_seconds: number
+    created_at: string
+    updated_at: string
+    translation_enabled: 0 | 1
+    target_language: string | null
+    include_microphone: 0 | 1
+  }> => ipcRenderer.invoke('save-transcript', data),
+
+  listTranscripts: (options?: {
+    page?: number
+    pageSize?: number
+    orderBy?: string
+    order?: string
+  }): Promise<{
+    items: unknown[]
+    total: number
+    page: number
+    pageSize: number
+    totalPages: number
+  }> => ipcRenderer.invoke('list-transcripts', options),
+
+  searchTranscripts: (options: {
+    query: string
+    page?: number
+    pageSize?: number
+  }): Promise<{
+    items: unknown[]
+    total: number
+    page: number
+    pageSize: number
+    totalPages: number
+  }> => ipcRenderer.invoke('search-transcripts', options),
+
+  getTranscript: (id: string): Promise<unknown> => ipcRenderer.invoke('get-transcript', id),
+
+  updateTranscript: (id: string, data: { title?: string; note?: string }): Promise<boolean> =>
+    ipcRenderer.invoke('update-transcript', id, data),
+
+  deleteTranscript: (id: string): Promise<boolean> => ipcRenderer.invoke('delete-transcript', id),
+
+  exportTranscript: (id: string): Promise<string | null> => ipcRenderer.invoke('export-transcript', id)
 }
 
 if (process.contextIsolated) {

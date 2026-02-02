@@ -1,0 +1,189 @@
+.transcript-detail {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.transcript-detail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.transcript-detail__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.transcript-detail__loading,
+.transcript-detail__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 80px 20px;
+  color: var(--text-secondary, #666);
+}
+
+.transcript-detail__error h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary, #1a1a1a);
+  margin: 0 0 8px 0;
+}
+
+.transcript-detail__meta {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.transcript-detail__title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary, #1a1a1a);
+  margin: 0 0 8px 0;
+}
+
+.transcript-detail__note {
+  font-size: 14px;
+  color: var(--text-secondary, #666);
+  margin: 0 0 16px 0;
+  line-height: 1.5;
+}
+
+.transcript-detail__info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.transcript-detail__info-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary, #666);
+}
+
+.transcript-detail__badge {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--bg-tertiary, #f5f5f5);
+  color: var(--text-secondary, #666);
+}
+
+.transcript-detail__badge--translation {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.transcript-detail__badge--mic {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.transcript-detail__edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.transcript-detail__edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.form-input,
+.form-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 6px;
+  font-size: 14px;
+  background: var(--bg-secondary, #fff);
+  color: var(--text-primary, #1a1a1a);
+  transition: all 0.2s ease;
+}
+
+.form-input:focus,
+.form-textarea:focus {
+  outline: none;
+  border-color: var(--primary-color, #007AFF);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.1);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.transcript-detail__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Transcript segment styles (similar to MeetingTranscription) */
+.transcript-segment {
+  background: var(--bg-secondary, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.transcript-segment__meta {
+  padding: 10px 16px;
+  background: var(--bg-tertiary, #f5f5f5);
+  border-bottom: 1px solid var(--border-color, #e0e0e0);
+}
+
+.transcript-segment__speaker {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary, #666);
+}
+
+.transcript-segment__sentences {
+  padding: 12px 16px;
+}
+
+.sentence-pair {
+  margin-bottom: 12px;
+}
+
+.sentence-pair:last-child {
+  margin-bottom: 0;
+}
+
+.sentence-original {
+  font-size: 14px;
+  color: var(--text-primary, #1a1a1a);
+  line-height: 1.6;
+}
+
+.sentence-translated {
+  font-size: 13px;
+  color: var(--text-secondary, #666);
+  line-height: 1.6;
+  margin-top: 4px;
+  padding-left: 16px;
+  border-left: 2px solid var(--primary-color, #007AFF);
+}
+
+/* Speaker color variants */
+.transcript-segment.speaker-0 .transcript-segment__speaker { color: #e91e63; }
+.transcript-segment.speaker-1 .transcript-segment__speaker { color: #9c27b0; }
+.transcript-segment.speaker-2 .transcript-segment__speaker { color: #673ab7; }
+.transcript-segment.speaker-3 .transcript-segment__speaker { color: #3f51b5; }
+.transcript-segment.speaker-4 .transcript-segment__speaker { color: #2196f3; }
+.transcript-segment.speaker-5 .transcript-segment__speaker { color: #00bcd4; }
+.transcript-segment.speaker-6 .transcript-segment__speaker { color: #4caf50; }
+.transcript-segment.speaker-7 .transcript-segment__speaker { color: #ff9800; }

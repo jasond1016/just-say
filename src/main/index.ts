@@ -6,6 +6,16 @@ import { setupTray, updateTrayStatus } from './tray'
 import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig } from './config'
 import { initSecureStore, getApiKey, setApiKey, deleteApiKey, hasApiKey } from './secureStore'
+import { initDatabase } from './database'
+import {
+  createTranscript,
+  getTranscriptWithSegments,
+  listTranscripts,
+  searchTranscripts,
+  updateTranscript,
+  deleteTranscript,
+  exportTranscript
+} from './database/transcriptStore'
 import { WebAudioRecorder } from './audio/web-recorder'
 import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
 import { RecognitionController, DownloadProgress } from './recognition'
@@ -150,9 +160,10 @@ function showMeetingWindow(): void {
 }
 
 async function initializeApp(): Promise<void> {
-  // Initialize config and secure store
+  // Initialize config, secure store, and database
   initConfig()
   initSecureStore()
+  initDatabase()
   const config = getConfig()
 
   // Create windows
@@ -454,4 +465,46 @@ ipcMain.handle('delete-api-key', (_event, provider: 'soniox' | 'groq') => {
 
 ipcMain.handle('has-api-key', (_event, provider: 'soniox' | 'groq') => {
   return hasApiKey(provider)
+})
+
+// Transcript storage IPC handlers
+ipcMain.handle('save-transcript', (_event, data: {
+  title?: string
+  note?: string
+  duration_seconds: number
+  translation_enabled: boolean
+  target_language?: string
+  include_microphone: boolean
+  segments: {
+    speaker: number
+    text: string
+    translated_text?: string
+    sentence_pairs?: { original: string; translated?: string }[]
+  }[]
+}) => {
+  return createTranscript(data)
+})
+
+ipcMain.handle('list-transcripts', (_event, options?: { page?: number; pageSize?: number; orderBy?: string; order?: string }) => {
+  return listTranscripts(options as { page?: number; pageSize?: number; orderBy?: 'created_at' | 'updated_at' | 'duration_seconds'; order?: 'ASC' | 'DESC' } | undefined)
+})
+
+ipcMain.handle('search-transcripts', (_event, options: { query: string; page?: number; pageSize?: number }) => {
+  return searchTranscripts(options)
+})
+
+ipcMain.handle('get-transcript', (_event, id: string) => {
+  return getTranscriptWithSegments(id)
+})
+
+ipcMain.handle('update-transcript', (_event, id: string, data: { title?: string; note?: string }) => {
+  return updateTranscript(id, data)
+})
+
+ipcMain.handle('delete-transcript', (_event, id: string) => {
+  return deleteTranscript(id)
+})
+
+ipcMain.handle('export-transcript', (_event, id: string) => {
+  return exportTranscript(id)
 })

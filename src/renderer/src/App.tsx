@@ -6,9 +6,11 @@ import { StatusBar } from './components/StatusBar'
 import { PushToTalk } from './pages/PushToTalk'
 import { MeetingTranscription } from './pages/MeetingTranscription'
 import { Settings } from './pages/Settings'
+import { TranscriptHistory } from './pages/TranscriptHistory'
+import { TranscriptDetail } from './pages/TranscriptDetail'
 
 type ThemeOption = 'system' | 'light' | 'dark'
-type ViewType = 'ptt' | 'meeting' | 'settings'
+type ViewType = 'ptt' | 'meeting' | 'settings' | 'history' | 'detail'
 
 interface AppConfig {
   ui?: {
@@ -24,6 +26,7 @@ interface AppConfig {
 
 function App(): React.JSX.Element {
   const [activeView, setActiveView] = useState<ViewType>('ptt')
+  const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null)
   const [theme, setTheme] = useState<ThemeOption>('system')
   const [pttStatus, setPttStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -112,10 +115,32 @@ function App(): React.JSX.Element {
         ? 'OpenAI'
         : 'Local'
 
+  const handleNavigateToDetail = useCallback((id: string) => {
+    setSelectedTranscriptId(id)
+    setActiveView('detail')
+  }, [])
+
+  const handleBackFromDetail = useCallback(() => {
+    setSelectedTranscriptId(null)
+    setActiveView('history')
+  }, [])
+
+  const handleBackFromHistory = useCallback(() => {
+    setActiveView('ptt')
+  }, [])
+
   return (
     <Layout
       sidebar={
-        <Sidebar activeView={activeView} onViewChange={(v) => setActiveView(v as ViewType)} />
+        <Sidebar
+          activeView={activeView}
+          onViewChange={(v) => {
+            setActiveView(v as ViewType)
+            if (v !== 'detail') {
+              setSelectedTranscriptId(null)
+            }
+          }}
+        />
       }
       statusBar={<StatusBar status={pttStatus} engine={engine} hotkey={hotkey} />}
     >
@@ -123,6 +148,18 @@ function App(): React.JSX.Element {
       {activeView === 'meeting' && <MeetingTranscription />}
       {activeView === 'settings' && (
         <Settings currentTheme={theme} onThemeChange={handleThemeChange} />
+      )}
+      {activeView === 'history' && (
+        <TranscriptHistory
+          onNavigateToDetail={handleNavigateToDetail}
+          onBack={handleBackFromHistory}
+        />
+      )}
+      {activeView === 'detail' && selectedTranscriptId && (
+        <TranscriptDetail
+          id={selectedTranscriptId}
+          onBack={handleBackFromDetail}
+        />
       )}
     </Layout>
   )
