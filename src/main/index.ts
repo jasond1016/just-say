@@ -44,6 +44,7 @@ function createMainWindow(): BrowserWindow {
   window.setMenu(null)
 
   window.on('ready-to-show', () => {
+    window.maximize()
     window.show()
   })
 
