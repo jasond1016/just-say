@@ -32,7 +32,7 @@ describe('clearAltModifier - cross-platform behavior', () => {
     
     // Simulate the clearAltModifier logic
     const clearAltModifier = async () => {
-      return new Promise((resolve) => {
+      return new Promise<void>((resolve) => {
         mockExec('xdotool keyup Alt_L Alt_R 2>/dev/null || xdotool key --clearmodifiers 2>/dev/null || true', () => {
           mockExec('xdotool key --delay 10 a 2>/dev/null || true', () => {
             resolve()
@@ -52,7 +52,7 @@ describe('clearAltModifier - cross-platform behavior', () => {
     mockPlatform.mockReturnValue('win32')
     
     const clearAltModifier = async () => {
-      return new Promise((resolve) => {
+      return new Promise<void>((resolve) => {
         const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESCAPE}')`
         mockExec(`powershell -Command "${script.replace(/"/g, '\\"')}"`, () => resolve())
       })
@@ -69,7 +69,7 @@ describe('clearAltModifier - cross-platform behavior', () => {
     mockPlatform.mockReturnValue('darwin')
     
     const clearAltModifier = async () => {
-      return new Promise((resolve) => {
+      return new Promise<void>((resolve) => {
         mockExec(`osascript -e 'tell application "System Events" to key up option using command down' 2>/dev/null`, () => resolve())
       })
     }
@@ -96,7 +96,7 @@ describe('clearAltModifier - cross-platform behavior', () => {
     })
     
     const clearAltModifier = async () => {
-      return new Promise((resolve) => {
+      return new Promise<void>((resolve) => {
         mockExec('xdotool keyup Alt_L Alt_R 2>/dev/null || xdotool key --clearmodifiers 2>/dev/null || true', () => {
           resolve()
         })
