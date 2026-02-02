@@ -33,6 +33,17 @@ const api = {
   getLocalModels: (): Promise<string[]> => ipcRenderer.invoke('get-local-models'),
   downloadModel: (modelType: string): Promise<void> =>
     ipcRenderer.invoke('download-model', modelType),
+  deleteModel: (modelType: string): Promise<void> => ipcRenderer.invoke('delete-model', modelType),
+  onDownloadProgress: (
+    callback: (progress: { model: string; percent: number; status: string }) => void
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      progress: { model: string; percent: number; status: string }
+    ): void => callback(progress)
+    ipcRenderer.on('download-progress', handler)
+    return () => ipcRenderer.removeListener('download-progress', handler)
+  },
 
   // Meeting Transcription
   startMeetingTranscription: (options: {

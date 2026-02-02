@@ -2,7 +2,14 @@ import { spawn, execSync } from 'child_process'
 import { join } from 'path'
 import { app } from 'electron'
 import * as fs from 'fs'
+import { EventEmitter } from 'events'
 import { SpeechRecognizer, RecognitionResult } from './index'
+
+export interface DownloadProgress {
+  model: string
+  percent: number
+  status: string
+}
 
 export interface LocalRecognizerConfig {
   modelPath?: string
@@ -13,12 +20,13 @@ export interface LocalRecognizerConfig {
   computeType?: string
 }
 
-export class LocalRecognizer implements SpeechRecognizer {
+export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private config: LocalRecognizerConfig
   private pythonPath: string
   private scriptPath: string
 
   constructor(config?: LocalRecognizerConfig) {
+    super()
     this.config = {
       modelType: 'tiny',
       device: 'cpu',
@@ -178,19 +186,43 @@ export class LocalRecognizer implements SpeechRecognizer {
       console.log('[LocalRecognizer] Downloading model:', modelType)
       const proc = spawn(this.pythonPath, args)
 
-      let stderr = ''
+      let stderrBuffer = ''
 
       proc.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString()
-        console.log('[Download Progress]', data.toString().trim())
+        stderrBuffer += data.toString()
+
+        // Parse progress JSON lines from stderr
+        const lines = stderrBuffer.split('\n')
+        stderrBuffer = lines.pop() || '' // Keep incomplete line
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const msg = JSON.parse(line)
+            if (msg.type === 'progress') {
+              this.emit('download-progress', {
+                model: modelType,
+                percent: msg.percent,
+                status: msg.status
+              } as DownloadProgress)
+            }
+          } catch {
+            // Not JSON, log as regular output
+            console.log('[Download]', line.trim())
+          }
+        }
       })
 
       proc.on('close', (code) => {
         if (code === 0) {
           resolve()
         } else {
-          reject(new Error(`Download failed: ${stderr}`))
+          reject(new Error(`Download failed: ${stderrBuffer}`))
         }
+      })
+
+      proc.on('error', (err) => {
+        reject(new Error(`Process error: ${err.message}`))
       })
     })
   }
@@ -203,16 +235,32 @@ export class LocalRecognizer implements SpeechRecognizer {
 
     try {
       const files = fs.readdirSync(modelsPath)
-      // Filter for hugginface cache folders
-      // Format: models--systran--faster-whisper-{type}
+      // Filter for huggingface cache folders
+      // Format: models--Systran--faster-whisper-{type}
       const models = files
-        .filter((f) => f.startsWith('models--systran--faster-whisper-'))
-        .map((f) => f.replace('models--systran--faster-whisper-', ''))
+        .filter((f) => f.toLowerCase().startsWith('models--systran--faster-whisper-'))
+        .map((f) => f.substring('models--Systran--faster-whisper-'.length))
 
       return models
     } catch (error) {
       console.error('Error listing models:', error)
       return []
+    }
+  }
+
+  async deleteModel(modelType: string): Promise<void> {
+    const modelsPath = join(app.getPath('userData'), 'models')
+    const modelDir = join(modelsPath, `models--Systran--faster-whisper-${modelType}`)
+
+    if (!fs.existsSync(modelDir)) {
+      throw new Error(`Model ${modelType} not found`)
+    }
+
+    try {
+      fs.rmSync(modelDir, { recursive: true, force: true })
+      console.log(`[LocalRecognizer] Deleted model: ${modelType}`)
+    } catch (error) {
+      throw new Error(`Failed to delete model: ${error}`)
     }
   }
 }

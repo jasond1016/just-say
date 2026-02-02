@@ -11,6 +11,7 @@ import json
 import sys
 import os
 import time
+import threading
 
 def add_nvidia_paths():
     """Add NVIDIA library paths to DLL search path for Windows."""
@@ -28,6 +29,56 @@ def add_nvidia_paths():
                             pass
 
 add_nvidia_paths()
+
+
+def output_progress(percent: float, status: str = "downloading"):
+    """Output progress update as JSON to stderr (stdout reserved for final result)."""
+    print(json.dumps({
+        'type': 'progress',
+        'percent': round(percent, 1),
+        'status': status
+    }, ensure_ascii=False), file=sys.stderr, flush=True)
+
+
+def create_progress_hook(download_root: str):
+    """Create a progress monitoring thread for huggingface downloads."""
+    stop_event = threading.Event()
+    
+    def monitor_download():
+        if not download_root:
+            return
+        
+        blobs_dir = os.path.join(download_root, 'blobs')
+        incomplete_suffix = '.incomplete'
+        last_size = 0
+        
+        while not stop_event.is_set():
+            try:
+                if os.path.exists(blobs_dir):
+                    total_size = 0
+                    incomplete_count = 0
+                    for f in os.listdir(blobs_dir):
+                        fpath = os.path.join(blobs_dir, f)
+                        if os.path.isfile(fpath):
+                            size = os.path.getsize(fpath)
+                            total_size += size
+                            if f.endswith(incomplete_suffix):
+                                incomplete_count += 1
+                    
+                    if total_size != last_size:
+                        mb = total_size / (1024 * 1024)
+                        output_progress(mb, f"downloading ({mb:.1f} MB)")
+                        last_size = total_size
+                    
+                    if incomplete_count == 0 and total_size > 0:
+                        break
+            except Exception:
+                pass
+            
+            stop_event.wait(0.5)
+    
+    thread = threading.Thread(target=monitor_download, daemon=True)
+    return thread, stop_event
 
 
 def main():
@@ -61,6 +112,15 @@ def main():
         # Model path or name
         model_id = args.model_path if args.model_path and os.path.exists(args.model_path) else args.model
 
+        # Start progress monitor for downloads
+        progress_thread = None
+        stop_event = None
+        if args.download_only and args.download_root:
+            model_cache = os.path.join(args.download_root, f'models--Systran--faster-whisper-{args.model}')
+            progress_thread, stop_event = create_progress_hook(model_cache)
+            progress_thread.start()
+            output_progress(0, "starting download")
+
         model = WhisperModel(
             model_id, 
             device=args.device, 
@@ -68,7 +128,14 @@ def main():
             download_root=args.download_root
         )
 
+        # Stop progress monitor
+        if stop_event:
+            stop_event.set()
+        if progress_thread:
+            progress_thread.join(timeout=1)
+
         if args.download_only:
+            output_progress(100, "complete")
             print(json.dumps({'success': True, 'text': 'Model downloaded', 'duration': 0}, ensure_ascii=False))
             return 0
 

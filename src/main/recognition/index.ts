@@ -1,8 +1,11 @@
+import { EventEmitter } from 'events'
 import { AppConfig } from '../config'
-import { LocalRecognizer } from './local'
+import { LocalRecognizer, DownloadProgress } from './local'
 import { ApiRecognizer } from './api'
 import { NetworkRecognizer } from './network'
 import { SonioxRecognizer } from './soniox'
+
+export type { DownloadProgress } from './local'
 
 export interface RecognitionResult {
   text: string
@@ -16,11 +19,12 @@ export interface SpeechRecognizer {
   healthCheck(): Promise<boolean>
 }
 
-export class RecognitionController {
+export class RecognitionController extends EventEmitter {
   private recognizer: SpeechRecognizer
   private config: AppConfig
 
   constructor(config: AppConfig) {
+    super()
     this.config = config
     this.recognizer = this.createRecognizer()
   }
@@ -69,8 +73,26 @@ export class RecognitionController {
 
   async downloadModel(modelType: string): Promise<void> {
     if (this.recognizer instanceof LocalRecognizer) {
-      return this.recognizer.downloadModel(modelType)
+      // Forward progress events
+      const onProgress = (progress: DownloadProgress): void => {
+        this.emit('download-progress', progress)
+      }
+      this.recognizer.on('download-progress', onProgress)
+
+      try {
+        await this.recognizer.downloadModel(modelType)
+      } finally {
+        this.recognizer.off('download-progress', onProgress)
+      }
+      return
     }
     throw new Error('Current backend does not support model downloading')
+  }
+
+  async deleteModel(modelType: string): Promise<void> {
+    if (this.recognizer instanceof LocalRecognizer) {
+      return this.recognizer.deleteModel(modelType)
+    }
+    throw new Error('Current backend does not support model deletion')
   }
 }

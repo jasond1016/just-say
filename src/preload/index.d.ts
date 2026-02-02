@@ -33,6 +33,10 @@ interface JustSayAPI {
   removeAllListeners: (channel: string) => void
   getLocalModels: () => Promise<string[]>
   downloadModel: (modelType: string) => Promise<void>
+  deleteModel: (modelType: string) => Promise<void>
+  onDownloadProgress: (
+    callback: (progress: { model: string; percent: number; status: string }) => void
+  ) => () => void
 
   // Meeting transcription
   startMeetingTranscription: (options: {

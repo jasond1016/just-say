@@ -7,7 +7,7 @@ import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig } from './config'
 import { WebAudioRecorder } from './audio/web-recorder'
 import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
-import { RecognitionController } from './recognition'
+import { RecognitionController, DownloadProgress } from './recognition'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
 import { MeetingTranscriptionManager } from './meeting-transcription'
@@ -331,7 +331,23 @@ ipcMain.handle('get-local-models', async () => {
 })
 
 ipcMain.handle('download-model', async (_event, modelType) => {
-  await recognitionController?.downloadModel(modelType)
+  if (!recognitionController) return
+
+  // Forward progress events to renderer
+  const onProgress = (progress: DownloadProgress): void => {
+    mainWindow?.webContents.send('download-progress', progress)
+  }
+  recognitionController.on('download-progress', onProgress)
+
+  try {
+    await recognitionController.downloadModel(modelType)
+  } finally {
+    recognitionController.off('download-progress', onProgress)
+  }
+})
+
+ipcMain.handle('delete-model', async (_event, modelType) => {
+  await recognitionController?.deleteModel(modelType)
 })
 
 // Meeting transcription IPC handlers
