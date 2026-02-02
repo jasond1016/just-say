@@ -17,7 +17,7 @@ export interface AppConfig {
     maxDurationSec?: number
   }
   recognition?: {
-    backend?: 'local' | 'api' | 'network' | 'soniox'
+    backend?: 'local' | 'api' | 'network' | 'soniox' | 'groq'
     language?: string
     punctuation?: boolean
     local?: {
@@ -43,6 +43,10 @@ export interface AppConfig {
       apiKey?: string
       model?: string
       languageHints?: string[]
+    }
+    groq?: {
+      apiKey?: string
+      model?: 'whisper-large-v3-turbo' | 'whisper-large-v3'
     }
   }
   output?: {

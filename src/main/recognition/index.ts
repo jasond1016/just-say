@@ -4,6 +4,7 @@ import { LocalRecognizer, DownloadProgress } from './local'
 import { ApiRecognizer } from './api'
 import { NetworkRecognizer } from './network'
 import { SonioxRecognizer } from './soniox'
+import { GroqRecognizer } from './groq'
 
 export type { DownloadProgress } from './local'
 
@@ -40,6 +41,8 @@ export class RecognitionController extends EventEmitter {
         return new SonioxRecognizer(this.config.recognition?.soniox)
       case 'network':
         return new NetworkRecognizer(this.config.recognition?.network)
+      case 'groq':
+        return new GroqRecognizer(this.config.recognition?.groq)
       default:
         return new LocalRecognizer(this.config.recognition?.local)
     }

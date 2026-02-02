@@ -257,6 +257,7 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   <option value="local">本地 (Faster-Whisper)</option>
                   <option value="soniox">Soniox (流式)</option>
                   <option value="api">OpenAI API</option>
+                  <option value="groq">Groq (快速云端)</option>
                 </select>
               </div>
 
@@ -284,6 +285,44 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                     }
                   />
                 </div>
+              )}
+
+              {config.recognition?.backend === 'groq' && (
+                <>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">Groq API Key</div>
+                      <div className="settings-row__desc">输入您的 Groq API 密钥</div>
+                    </div>
+                    <input
+                      type="password"
+                      className="form-input"
+                      style={{ width: 240 }}
+                      value={config.recognition?.groq?.apiKey || ''}
+                      placeholder="gsk_..."
+                      onChange={(e) =>
+                        updateConfig({ recognition: { groq: { apiKey: e.target.value } } })
+                      }
+                    />
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">模型</div>
+                      <div className="settings-row__desc">whisper-large-v3-turbo 更快且便宜</div>
+                    </div>
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 200 }}
+                      value={config.recognition?.groq?.model || 'whisper-large-v3-turbo'}
+                      onChange={(e) =>
+                        updateConfig({ recognition: { groq: { model: e.target.value } } })
+                      }
+                    >
+                      <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+                      <option value="whisper-large-v3">whisper-large-v3</option>
+                    </select>
+                  </div>
+                </>
               )}
             </div>
           )}
