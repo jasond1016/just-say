@@ -30,7 +30,7 @@ export function initDatabase(): Database.Database {
       translation_enabled INTEGER DEFAULT 0,
       target_language TEXT,
       include_microphone INTEGER DEFAULT 0
-    )
+    );
 
     -- Speaker segments table
     CREATE TABLE IF NOT EXISTS transcript_segments (
@@ -41,7 +41,7 @@ export function initDatabase(): Database.Database {
       translated_text TEXT,
       segment_order INTEGER NOT NULL,
       FOREIGN KEY (transcript_id) REFERENCES transcripts(id) ON DELETE CASCADE
-    )
+    );
 
     -- Sentence pairs table (aligned translation)
     CREATE TABLE IF NOT EXISTS sentence_pairs (
@@ -51,7 +51,7 @@ export function initDatabase(): Database.Database {
       translated TEXT,
       pair_order INTEGER NOT NULL,
       FOREIGN KEY (segment_id) REFERENCES transcript_segments(id) ON DELETE CASCADE
-    )
+    );
 
     -- Full-text search (FTS5)
     CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
@@ -61,14 +61,14 @@ export function initDatabase(): Database.Database {
       content,
       content_translated,
       tokenize = 'porter'
-    )
+    );
   `)
 
   // Create indexes
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_transcripts_created_at ON transcripts(created_at DESC)
-    CREATE INDEX IF NOT EXISTS idx_transcript_segments_transcript_id ON transcript_segments(transcript_id)
-    CREATE INDEX IF NOT EXISTS idx_sentence_pairs_segment_id ON sentence_pairs(segment_id)
+    CREATE INDEX IF NOT EXISTS idx_transcripts_created_at ON transcripts(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_transcript_segments_transcript_id ON transcript_segments(transcript_id);
+    CREATE INDEX IF NOT EXISTS idx_sentence_pairs_segment_id ON sentence_pairs(segment_id);
   `)
 
   console.log('[Database] Initialized at:', dbPath)
