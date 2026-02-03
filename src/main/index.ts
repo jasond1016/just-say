@@ -60,9 +60,13 @@ function createMainWindow(): BrowserWindow {
   })
 
   window.on('close', (e) => {
-    // Minimize to tray instead of closing
-    e.preventDefault()
-    window.hide()
+    const config = getConfig()
+    if (config.general?.minimizeToTray !== false) {
+      // Minimize to tray instead of closing
+      e.preventDefault()
+      window.hide()
+    }
+    // If minimizeToTray is false, allow the window to close normally
   })
 
   window.webContents.setWindowOpenHandler((details) => {

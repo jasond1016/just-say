@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 
 // Test the deepMerge function logic
 describe('deepMerge', () => {
@@ -30,6 +30,7 @@ describe('deepMerge', () => {
     nested?: {
       a?: string
       b?: number
+      c?: number
     }
     array?: string[]
   }
@@ -102,7 +103,7 @@ describe('deepMerge', () => {
       nested: { a: 'hello' }
     }
     const source: Partial<TestConfig> = {
-      nested: { b: 'world' }
+      nested: { b: 2 }
     }
 
     const result = deepMerge(target, source)
