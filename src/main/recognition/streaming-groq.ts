@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events'
 import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
 import { VADState } from './vad-utils'
+import { findTextOverlap, mergeText } from './text-utils'
 
 export interface StreamingGroqConfig {
   apiKey?: string
@@ -424,7 +425,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
   private deduplicateChunkBoundary(prevFinal: string, newText: string): string {
     if (!prevFinal) return newText
 
-    const overlap = this.findTextOverlap(prevFinal, newText)
+    const overlap = findTextOverlap(prevFinal, newText)
     return overlap > 0 ? newText.slice(overlap) : newText
   }
 
@@ -432,69 +433,16 @@ export class StreamingGroqRecognizer extends EventEmitter {
     const finalJoined = this.getFinalText()
     if (!finalJoined) return previewText
 
-    const overlap = this.findTextOverlap(finalJoined, previewText)
+    const overlap = findTextOverlap(finalJoined, previewText)
     return overlap > 0 ? previewText.slice(overlap) : previewText
   }
 
-  private findTextOverlap(left: string, right: string): number {
-    const maxOverlap = Math.min(200, left.length, right.length)
-    for (let i = maxOverlap; i > 0; i--) {
-      if (left.slice(-i) === right.slice(0, i)) {
-        return i
-      }
-    }
-    return 0
-  }
-
   private getFinalText(): string {
-    return this.finalText.reduce((acc, part) => this.mergeText(acc, part), '')
+    return this.finalText.reduce((acc, part) => mergeText(acc, part), '')
   }
 
   private getFinalTranslationText(): string {
-    return this.finalTranslation.reduce((acc, part) => this.mergeText(acc, part), '')
-  }
-
-  private mergeText(left: string, right: string): string {
-    if (!left) return right
-    if (!right) return left
-
-    if (/\s$/.test(left) || /^\s/.test(right)) {
-      return left + right
-    }
-
-    if (this.shouldInsertSpace(left, right)) {
-      return `${left} ${right}`
-    }
-
-    return left + right
-  }
-
-  private shouldInsertSpace(left: string, right: string): boolean {
-    const tail = left[left.length - 1]
-    const head = right[0]
-    if (!tail || !head) return false
-    if (this.isCjkChar(tail) || this.isCjkChar(head)) return false
-
-    const tailWord = this.isWordChar(tail)
-    const headWord = this.isWordChar(head)
-    if (tailWord && headWord) return true
-    if (this.isSentencePunct(tail) && headWord) return true
-
-    return false
-  }
-
-  private isWordChar(char: string): boolean {
-    return /[\p{L}\p{N}]/u.test(char)
-  }
-
-  private isCjkChar(char: string): boolean {
-    return /[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/.test(
-      char
-    )
-  }
-
-  private isSentencePunct(char: string): boolean {
-    return /[.!?;:]/.test(char)
+    return this.finalTranslation.reduce((acc, part) => mergeText(acc, part), '')
   }
 
   private getDurationMsFromBytes(bytes: number): number {
@@ -679,7 +627,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
   private emitPartialResult(isTranslationUpdate = false): void {
     const finalJoined = this.getFinalText()
     const translationJoined = this.getFinalTranslationText()
-    const combinedText = this.mergeText(finalJoined, this.nonFinalText)
+    const combinedText = mergeText(finalJoined, this.nonFinalText)
 
     // Build current segment (speaker 0 since Groq doesn't provide diarization)
     const currentSegment: SpeakerSegment = {
@@ -746,7 +694,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
 
     // Build final result
     const finalJoined = this.getFinalText()
-    const fullText = this.mergeText(finalJoined, this.nonFinalText).trim()
+    const fullText = mergeText(finalJoined, this.nonFinalText).trim()
     const fullTranslation = this.getFinalTranslationText().trim()
 
     const finalSegment: SpeakerSegment | null =

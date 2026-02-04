@@ -19,6 +19,8 @@ interface SpeakerSegment {
     text: string
     translatedText?: string
     sentencePairs?: SentencePair[]
+    stableText?: string
+    previewText?: string
 }
 
 interface TranscriptSegment {
@@ -42,6 +44,7 @@ export function MeetingTranscription(): React.JSX.Element {
 
     const transcriptRef = useRef<HTMLDivElement>(null)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
+    const lastCurrentTextRef = useRef<string>('')
 
     // Format duration as HH:MM:SS
     const formatDuration = (s: number): string => {
@@ -54,6 +57,24 @@ export function MeetingTranscription(): React.JSX.Element {
     // Get speaker color class
     const getSpeakerClass = (speaker: number): string => {
         return `speaker-${speaker % 8}`
+    }
+
+    const splitStablePreview = (prev: string, next: string): { stable: string; preview: string } => {
+        if (!next) {
+            return { stable: '', preview: '' }
+        }
+
+        if (!prev) {
+            return { stable: '', preview: next }
+        }
+
+        const max = Math.min(prev.length, next.length)
+        let idx = 0
+        while (idx < max && prev[idx] === next[idx]) {
+            idx += 1
+        }
+
+        return { stable: next.slice(0, idx), preview: next.slice(idx) }
     }
 
     // Start transcription
@@ -164,6 +185,7 @@ export function MeetingTranscription(): React.JSX.Element {
                 return prev
             })
             setCurrentSegment(null)
+            lastCurrentTextRef.current = ''
             return
         }
 
@@ -177,9 +199,19 @@ export function MeetingTranscription(): React.JSX.Element {
         }
 
         if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
-            setCurrentSegment(segment.currentSpeakerSegment)
+            const { stable, preview } = splitStablePreview(
+                lastCurrentTextRef.current,
+                segment.currentSpeakerSegment.text
+            )
+            lastCurrentTextRef.current = segment.currentSpeakerSegment.text
+            setCurrentSegment({
+                ...segment.currentSpeakerSegment,
+                stableText: stable,
+                previewText: preview
+            })
         } else {
             setCurrentSegment(null)
+            lastCurrentTextRef.current = ''
         }
     }, [])
 
@@ -256,7 +288,9 @@ export function MeetingTranscription(): React.JSX.Element {
                         <>
                             {segments.map((seg, idx) => {
                                 // Use sentencePairs if available (aligned by <end> tokens), otherwise fallback
-                                const pairs = seg.sentencePairs || (seg.text ? [{ original: seg.text, translated: seg.translatedText }] : [])
+                                const pairs = (seg.sentencePairs && seg.sentencePairs.length > 0)
+                                    ? seg.sentencePairs
+                                    : (seg.text ? [{ original: seg.text, translated: seg.translatedText }] : [])
                                 return (
                                     <div key={idx} className={`transcript-segment ${getSpeakerClass(seg.speaker)}`}>
                                         <div className="transcript-segment__meta">
@@ -278,7 +312,12 @@ export function MeetingTranscription(): React.JSX.Element {
                                 )
                             })}
                             {currentSegment && (() => {
-                                const pairs = currentSegment.sentencePairs || (currentSegment.text ? [{ original: currentSegment.text, translated: currentSegment.translatedText }] : [])
+                                const hasSentencePairs = currentSegment.sentencePairs && currentSegment.sentencePairs.length > 0
+                                const pairs = hasSentencePairs
+                                    ? currentSegment.sentencePairs
+                                    : (currentSegment.text ? [{ original: currentSegment.text, translated: currentSegment.translatedText }] : [])
+                                const stableText = currentSegment.stableText ?? ''
+                                const previewText = currentSegment.previewText ?? ''
                                 return (
                                     <div
                                         className={`transcript-segment transcript-segment--partial ${getSpeakerClass(currentSegment.speaker)}`}
@@ -293,7 +332,18 @@ export function MeetingTranscription(): React.JSX.Element {
                                         <div className="transcript-segment__sentences">
                                             {pairs.map((pair, sentIdx) => (
                                                 <div key={sentIdx} className="sentence-pair">
-                                                    <div className="sentence-original">{pair.original}</div>
+                                                    <div className="sentence-original">
+                                                        {hasSentencePairs ? (
+                                                            pair.original
+                                                        ) : (
+                                                            <>
+                                                                <span>{stableText}</span>
+                                                                {previewText && (
+                                                                    <span className="sentence-preview">{previewText}</span>
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </div>
                                                     {pair.translated && (
                                                         <div className="sentence-translated">{pair.translated}</div>
                                                     )}
