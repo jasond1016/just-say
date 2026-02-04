@@ -4,7 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setupTray, updateTrayStatus } from './tray'
 import { HotkeyManager } from './hotkey'
-import { initConfig, getConfig, setConfig } from './config'
+import { initConfig, getConfig, setConfig, AppConfig } from './config'
 import { initSecureStore, getApiKey, setApiKey, deleteApiKey, hasApiKey } from './secureStore'
 import { initDatabase } from './database'
 import {
@@ -37,6 +37,17 @@ let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
 let meetingTranscription: MeetingTranscriptionManager | null = null
+
+function getRecognitionSignature(config: AppConfig): string {
+  return JSON.stringify({
+    recognition: config.recognition ?? null,
+    sampleRate: config.audio?.sampleRate ?? null
+  })
+}
+
+function shouldRecreateRecognition(prev: AppConfig, next: AppConfig): boolean {
+  return getRecognitionSignature(prev) !== getRecognitionSignature(next)
+}
 
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -333,9 +344,12 @@ app.on('before-quit', () => {
 ipcMain.handle('get-config', () => getConfig())
 
 ipcMain.handle('set-config', (_event, config) => {
+  const prevConfig = getConfig()
   setConfig(config)
-  // Recreate recognition controller with new config
-  recognitionController = new RecognitionController(getConfig())
+  const nextConfig = getConfig()
+  if (!recognitionController || shouldRecreateRecognition(prevConfig, nextConfig)) {
+    recognitionController = new RecognitionController(nextConfig)
+  }
 })
 
 ipcMain.handle('show-settings', () => {

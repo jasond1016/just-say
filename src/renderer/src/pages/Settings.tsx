@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ModelManager } from '../components/Settings/ModelManager'
 import { getMicrophoneDevices } from '../microphone-capture'
 
@@ -53,10 +53,17 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     'idle' | 'testing' | 'success' | 'failed'
   >('idle')
   const [connectionMessage, setConnectionMessage] = useState<string>('')
+  const [localServerHostDraft, setLocalServerHostDraft] = useState('')
+  const [localServerPortDraft, setLocalServerPortDraft] = useState('')
+  const connectionRequestRef = useRef(0)
+  const draftCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [audioDevices, setAudioDevices] = useState<
     Array<{ id: string; name: string; isDefault?: boolean }>
   >([])
   const [audioDevicesLoading, setAudioDevicesLoading] = useState(false)
+  const currentServerHost = config?.recognition?.local?.serverHost || '127.0.0.1'
+  const currentServerPort = config?.recognition?.local?.serverPort || 8765
+  const currentServerMode = config?.recognition?.local?.serverMode || 'local'
 
   useEffect(() => {
     loadConfig()
@@ -86,11 +93,20 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     if (!config) return
     setConnectionStatus('idle')
     setConnectionMessage('')
+    connectionRequestRef.current += 1
   }, [
-    config?.recognition?.local?.serverHost,
-    config?.recognition?.local?.serverPort,
+    localServerHostDraft,
+    localServerPortDraft,
     config?.recognition?.local?.serverMode
   ])
+
+  useEffect(() => {
+    if (!config) return
+    const nextHost = currentServerHost
+    const nextPort = currentServerPort
+    setLocalServerHostDraft(nextHost)
+    setLocalServerPortDraft(String(nextPort))
+  }, [config?.recognition?.local?.serverHost, config?.recognition?.local?.serverPort, currentServerHost, currentServerPort])
 
   const loadApiKeys = async (): Promise<void> => {
     const [sonioxKey, groqKey, hasSoniox, hasGroq] = await Promise.all([
@@ -142,8 +158,8 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     if (!config) return
     try {
       const newConfig = deepMerge(config, updates)
-      await window.api.setConfig(newConfig)
       setConfig(newConfig)
+      await window.api.setConfig(newConfig)
     } catch (err) {
       console.error('Failed to save config:', err)
     }
@@ -162,16 +178,93 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     })
   }
 
+  useEffect(() => {
+    if (!config) return
+    if (currentServerMode !== 'remote') return
+
+    const host = localServerHostDraft.trim()
+    const parsedPort = parseInt(localServerPortDraft, 10)
+    const hostChanged = !!host && host !== currentServerHost
+    const portValid = Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535
+    const portChanged = portValid && parsedPort !== currentServerPort
+
+    if (!hostChanged && !portChanged) return
+
+    if (draftCommitTimerRef.current) {
+      clearTimeout(draftCommitTimerRef.current)
+    }
+
+    draftCommitTimerRef.current = setTimeout(() => {
+      const updates: { serverHost?: string; serverPort?: number } = {}
+      if (hostChanged) {
+        updates.serverHost = host
+      }
+      if (portChanged) {
+        updates.serverPort = parsedPort
+      }
+      if (Object.keys(updates).length > 0) {
+        void updateConfig({ recognition: { local: updates } })
+      }
+    }, 500)
+
+    return () => {
+      if (draftCommitTimerRef.current) {
+        clearTimeout(draftCommitTimerRef.current)
+      }
+    }
+  }, [
+    config,
+    currentServerHost,
+    currentServerMode,
+    currentServerPort,
+    localServerHostDraft,
+    localServerPortDraft
+  ])
+
+  const commitLocalServerHost = async (nextValue?: string): Promise<void> => {
+    if (!config) return
+    const trimmed = (nextValue ?? localServerHostDraft).trim()
+    if (!trimmed) {
+      setLocalServerHostDraft(currentServerHost)
+      return
+    }
+    if (trimmed === currentServerHost) return
+    await updateConfig({ recognition: { local: { serverHost: trimmed } } })
+  }
+
+  const commitLocalServerPort = async (nextValue?: string): Promise<void> => {
+    if (!config) return
+    const parsed = parseInt(nextValue ?? localServerPortDraft, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+      setLocalServerPortDraft(String(currentServerPort))
+      return
+    }
+    if (parsed === currentServerPort) return
+    await updateConfig({ recognition: { local: { serverPort: parsed } } })
+  }
+
   const handleTestConnection = async (): Promise<void> => {
-    if (!localServerHost || !localServerHost.trim()) {
+    const host = localServerHostDraft.trim()
+    const port = parseInt(localServerPortDraft, 10)
+    const requestId = connectionRequestRef.current + 1
+    connectionRequestRef.current = requestId
+    if (!host) {
       setConnectionStatus('failed')
       setConnectionMessage('请先填写服务器地址')
+      return
+    }
+    if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+      setConnectionStatus('failed')
+      setConnectionMessage('请填写正确的端口')
       return
     }
     setConnectionStatus('testing')
     setConnectionMessage('')
     try {
-      const ok = await window.api.testWhisperServer(localServerHost, localServerPort)
+      const ok = await window.api.testWhisperServer(host, port)
+      if (requestId !== connectionRequestRef.current) {
+        return
+      }
       if (ok) {
         setConnectionStatus('success')
         setConnectionMessage('连接成功')
@@ -180,6 +273,9 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
         setConnectionMessage('连接失败，请确认服务端已启动并可访问')
       }
     } catch (err) {
+      if (requestId !== connectionRequestRef.current) {
+        return
+      }
       setConnectionStatus('failed')
       setConnectionMessage(`连接失败: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -226,8 +322,6 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const recognitionBackend = (config.recognition?.backend || 'local') as RecognitionBackend
   const isLocalBackend = !config.recognition?.backend || config.recognition?.backend === 'local'
   const localServerMode = config.recognition?.local?.serverMode || 'local'
-  const localServerHost = config.recognition?.local?.serverHost || '127.0.0.1'
-  const localServerPort = config.recognition?.local?.serverPort || 8765
   const isRemoteServerMode = localServerMode === 'remote'
   const recognitionLanguage = config.recognition?.language || 'auto'
   const recognitionLanguageLocked = recognitionLanguage !== 'auto'
@@ -494,13 +588,16 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                         <input
                           className="form-input"
                           style={{ width: 240 }}
-                          value={localServerHost}
+                          value={localServerHostDraft}
                           placeholder="192.168.1.10"
-                          onChange={(e) =>
-                            updateConfig({
-                              recognition: { local: { serverHost: e.target.value } }
-                            })
-                          }
+                          onChange={(e) => setLocalServerHostDraft(e.target.value)}
+                          onBlur={() => commitLocalServerHost()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              void commitLocalServerHost()
+                              e.currentTarget.blur()
+                            }
+                          }}
                         />
                       </div>
                       <div className="settings-row">
@@ -512,17 +609,14 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                           className="form-input"
                           style={{ width: 120 }}
                           type="number"
-                          value={localServerPort}
-                          onChange={(e) => {
-                            const nextPort = parseInt(e.target.value, 10)
-                            updateConfig({
-                              recognition: {
-                                local: {
-                                  serverPort:
-                                    Number.isFinite(nextPort) && nextPort > 0 ? nextPort : 8765
-                                }
-                              }
-                            })
+                          value={localServerPortDraft}
+                          onChange={(e) => setLocalServerPortDraft(e.target.value)}
+                          onBlur={() => commitLocalServerPort()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              void commitLocalServerPort()
+                              e.currentTarget.blur()
+                            }
                           }}
                         />
                       </div>
