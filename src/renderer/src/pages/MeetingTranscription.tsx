@@ -314,7 +314,7 @@ export function MeetingTranscription(): React.JSX.Element {
                             {currentSegment && (() => {
                                 const hasSentencePairs = currentSegment.sentencePairs && currentSegment.sentencePairs.length > 0
                                 const pairs = hasSentencePairs
-                                    ? currentSegment.sentencePairs
+                                    ? currentSegment.sentencePairs ?? []
                                     : (currentSegment.text ? [{ original: currentSegment.text, translated: currentSegment.translatedText }] : [])
                                 const stableText = currentSegment.stableText ?? ''
                                 const previewText = currentSegment.previewText ?? ''

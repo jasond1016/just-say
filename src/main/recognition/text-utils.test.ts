@@ -13,7 +13,7 @@ describe('text utils', () => {
     })
 
     it('respects maxOverlap limit', () => {
-      expect(findTextOverlap('abcdef', 'cdefgh', 3)).toBe(3)
+      expect(findTextOverlap('12345', '34567', 3)).toBe(3)
     })
   })
 
