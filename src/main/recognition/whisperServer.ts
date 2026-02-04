@@ -18,6 +18,8 @@ export interface WhisperServerConfig {
   device?: 'cpu' | 'cuda'
   computeType?: string
   autoStart?: boolean
+  mode?: 'local' | 'remote'
+  downloadRoot?: string
 }
 
 export interface TranscribeResult {
@@ -38,7 +40,16 @@ export interface GpuInfo {
 }
 
 class WhisperServerClient {
-  private config: Required<WhisperServerConfig>
+  private config: {
+    host: string
+    port: number
+    modelType: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+    device: 'cpu' | 'cuda'
+    computeType: string
+    autoStart: boolean
+    mode: 'local' | 'remote'
+    downloadRoot?: string
+  }
   private serverProcess: ChildProcess | null = null
   private pythonPath: string
   private scriptPath: string
@@ -53,6 +64,7 @@ class WhisperServerClient {
       device: 'cpu',
       computeType: 'int8',
       autoStart: true,
+      mode: 'local',
       ...config
     }
 
@@ -88,8 +100,12 @@ class WhisperServerClient {
     return `http://${this.config.host}:${this.config.port}`
   }
 
-  private get modelsPath(): string {
-    const path = join(app.getPath('userData'), 'models')
+  private get modelsPath(): string | undefined {
+    if (this.config.mode !== 'local') {
+      return undefined
+    }
+
+    const path = this.config.downloadRoot || join(app.getPath('userData'), 'models')
     if (!fs.existsSync(path)) {
       fs.mkdirSync(path, { recursive: true })
     }
@@ -100,6 +116,10 @@ class WhisperServerClient {
    * Start the whisper server process
    */
   async start(): Promise<void> {
+    if (this.config.mode === 'remote') {
+      throw new Error('Remote mode does not start local server')
+    }
+
     if (this.serverProcess) {
       return // Already running
     }
@@ -126,6 +146,11 @@ class WhisperServerClient {
       return
     }
 
+    const downloadRoot = this.modelsPath
+    if (!downloadRoot) {
+      throw new Error('Local models path is not available')
+    }
+
     const args = [
       this.scriptPath,
       '--host',
@@ -135,10 +160,10 @@ class WhisperServerClient {
       '--device',
       this.config.device,
       '--compute-type',
-      this.config.computeType,
-      '--download-root',
-      this.modelsPath
+      this.config.computeType
     ]
+
+    args.push('--download-root', downloadRoot)
 
     // Pre-load model on startup
     if (this.config.modelType) {
@@ -193,6 +218,10 @@ class WhisperServerClient {
    * Stop the server process
    */
   async stop(): Promise<void> {
+    if (this.config.mode === 'remote') {
+      return
+    }
+
     if (!this.serverProcess) {
       return
     }
@@ -247,12 +276,16 @@ class WhisperServerClient {
     computeType: string = 'int8'
   ): Promise<void> {
     await this.ensureRunning()
-    await this.httpPost('/model/load', {
+    const payload: Record<string, unknown> = {
       model: modelType,
       device,
-      compute_type: computeType,
-      download_root: this.modelsPath
-    })
+      compute_type: computeType
+    }
+    const downloadRoot = this.modelsPath
+    if (downloadRoot) {
+      payload.download_root = downloadRoot
+    }
+    await this.httpPost('/model/load', payload)
   }
 
   /**
@@ -280,18 +313,30 @@ class WhisperServerClient {
     const params = new URLSearchParams({
       model: options?.modelType || this.config.modelType,
       device: options?.device || this.config.device,
-      compute_type: options?.computeType || this.config.computeType,
-      download_root: this.modelsPath
+      compute_type: options?.computeType || this.config.computeType
     })
 
     if (options?.language) {
       params.set('language', options.language)
     }
 
+    const downloadRoot = this.modelsPath
+    if (downloadRoot) {
+      params.set('download_root', downloadRoot)
+    }
+
     return this.httpPostBinary(`/transcribe?${params.toString()}`, audioBuffer)
   }
 
   private async ensureRunning(): Promise<void> {
+    if (this.config.mode === 'remote') {
+      const healthy = await this.isHealthy()
+      if (!healthy) {
+        throw new Error('Remote server not available')
+      }
+      return
+    }
+
     if (this.config.autoStart && !(await this.isHealthy())) {
       await this.start()
     }
@@ -399,14 +444,18 @@ class WhisperServerClient {
       config.host !== undefined ||
       config.port !== undefined ||
       config.device !== undefined ||
-      config.computeType !== undefined
+      config.computeType !== undefined ||
+      config.mode !== undefined ||
+      config.downloadRoot !== undefined
 
     Object.assign(this.config, config)
 
     if (needsRestart && this.serverProcess) {
       await this.stop()
-      await this.start()
-    } else if (config.modelType && this.serverProcess) {
+      if (this.config.mode === 'local') {
+        await this.start()
+      }
+    } else if (config.modelType && this.serverProcess && this.config.mode === 'local') {
       // Just reload the model
       await this.loadModel(config.modelType, this.config.device, this.config.computeType)
     }
@@ -419,6 +468,10 @@ let _instance: WhisperServerClient | null = null
 export function getWhisperServer(config?: WhisperServerConfig): WhisperServerClient {
   if (!_instance) {
     _instance = new WhisperServerClient(config)
+  } else if (config) {
+    void _instance.updateConfig(config).catch((err) => {
+      console.error('[WhisperServer] Failed to update config:', err)
+    })
   }
   return _instance
 }

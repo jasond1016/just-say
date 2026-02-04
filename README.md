@@ -50,6 +50,13 @@ pnpm build:mac   # macOS
 pnpm build:linux # Linux
 ```
 
+## LAN Whisper Server / 内网服务器模式
+
+1. On Linux server:
+   `python whisper_server.py --host 0.0.0.0 --port 8765`
+2. Open firewall for port 8765.
+3. In Settings -> Recognition backend = Local -> 运行模式 = 内网服务器, fill host/port.
+
 ## License
 
 MIT

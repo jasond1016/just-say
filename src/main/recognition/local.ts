@@ -27,6 +27,9 @@ export interface LocalRecognizerConfig {
   threads?: number
   computeType?: string
   useHttpServer?: boolean // Use HTTP server mode (recommended)
+  serverMode?: 'local' | 'remote'
+  serverHost?: string
+  serverPort?: number
   sampleRate?: number
 }
 
@@ -46,9 +49,16 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       threads: 4,
       computeType: 'auto',
       useHttpServer: true, // Default to HTTP server mode
+      serverMode: 'local',
+      serverHost: '127.0.0.1',
+      serverPort: 8765,
       sampleRate: 16000,
       ...config
     } as LocalRecognizerConfig
+
+    if (this.config.serverMode === 'remote') {
+      this.config.useHttpServer = true
+    }
 
     // Script is in project root/python folder
     let projectRoot: string
@@ -64,11 +74,19 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     // Initialize HTTP server client if enabled
     if (this.config.useHttpServer) {
+      const serverMode = this.config.serverMode || 'local'
+      const serverHost =
+        serverMode === 'remote' ? this.config.serverHost || '127.0.0.1' : '127.0.0.1'
+      const serverPort = this.config.serverPort || 8765
+
       this.whisperServer = getWhisperServer({
+        mode: serverMode,
+        host: serverHost,
+        port: serverPort,
         modelType: this.config.modelType,
         device: this.config.device === 'auto' ? 'cpu' : this.config.device,
         computeType: this.config.computeType === 'auto' ? 'int8' : this.config.computeType,
-        autoStart: true
+        autoStart: serverMode === 'local'
       })
     }
   }
@@ -129,6 +147,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   }
 
   async recognize(audioBuffer: Buffer): Promise<RecognitionResult> {
+    if (this.isRemoteMode() && (!this.config.useHttpServer || !this.whisperServer)) {
+      throw new Error('Remote server mode requires HTTP server')
+    }
+
     // Use HTTP server mode if enabled (faster, model stays in memory)
     if (this.config.useHttpServer && this.whisperServer) {
       return this.recognizeViaServer(audioBuffer)
@@ -144,6 +166,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private async recognizeViaServer(audioBuffer: Buffer): Promise<RecognitionResult> {
     const { device, computeType } = await this.resolveAutoSettings()
     const wavBuffer = this.createWavBuffer(audioBuffer)
+    const autoComputeType =
+      !this.config.computeType ||
+      this.config.computeType === 'auto' ||
+      this.config.computeType === 'default'
 
     console.log('[LocalRecognizer] Recognizing via HTTP server')
 
@@ -155,7 +181,32 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     })
 
     if (!result.success) {
-      throw new Error(result.error || 'Transcription failed')
+      const errMessage = result.error || 'Transcription failed'
+      if (
+        autoComputeType &&
+        device === 'cuda' &&
+        computeType === 'float16' &&
+        errMessage.includes('CUBLAS_STATUS_INVALID_VALUE')
+      ) {
+        console.warn('[LocalRecognizer] CUDA float16 failed, retrying with int8_float16')
+        const retry = await this.whisperServer!.transcribe(wavBuffer, {
+          modelType: this.config.modelType,
+          device,
+          computeType: 'int8_float16',
+          language: this.config.language
+        })
+        if (retry.success) {
+          return {
+            text: retry.text || '',
+            language: retry.language,
+            confidence: retry.language_probability,
+            durationMs: (retry.processing_time || 0) * 1000
+          }
+        }
+        throw new Error(retry.error || errMessage)
+      }
+
+      throw new Error(errMessage)
     }
 
     return {
@@ -266,6 +317,13 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   }
 
   async healthCheck(): Promise<boolean> {
+    if (this.isRemoteMode()) {
+      if (!this.whisperServer) {
+        return false
+      }
+      return this.whisperServer.isHealthy()
+    }
+
     try {
       execSync(`${this.pythonPath} -c "import faster_whisper; print('OK')"`, {
         encoding: 'utf8',
@@ -281,6 +339,15 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   async detectGpu(): Promise<GpuInfo> {
     if (LocalRecognizer.cachedGpuInfo) {
       return LocalRecognizer.cachedGpuInfo
+    }
+
+    if (this.isRemoteMode()) {
+      if (!this.whisperServer) {
+        throw new Error('Remote server not configured')
+      }
+      const info = await this.whisperServer.detectGpu()
+      LocalRecognizer.cachedGpuInfo = info
+      return info
     }
 
     return new Promise((resolve) => {
@@ -354,6 +421,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     return { device, computeType }
   }
   async downloadModel(modelType: string): Promise<void> {
+    if (this.isRemoteMode()) {
+      throw new Error('Remote mode does not support local model management')
+    }
+
     const modelsPath = join(app.getPath('userData'), 'models')
     if (!fs.existsSync(modelsPath)) {
       fs.mkdirSync(modelsPath, { recursive: true })
@@ -416,6 +487,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   }
 
   async getModels(): Promise<string[]> {
+    if (this.isRemoteMode()) {
+      throw new Error('Remote mode does not support local model management')
+    }
+
     const modelsPath = join(app.getPath('userData'), 'models')
     if (!fs.existsSync(modelsPath)) {
       return []
@@ -437,6 +512,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   }
 
   async deleteModel(modelType: string): Promise<void> {
+    if (this.isRemoteMode()) {
+      throw new Error('Remote mode does not support local model management')
+    }
+
     const modelsPath = join(app.getPath('userData'), 'models')
     const modelDir = join(modelsPath, `models--Systran--faster-whisper-${modelType}`)
 
@@ -475,8 +554,15 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
    * Start the HTTP server manually
    */
   async startServer(): Promise<void> {
+    if (this.isRemoteMode()) {
+      throw new Error('Remote mode does not support starting local server')
+    }
     if (this.whisperServer) {
       await this.whisperServer.start()
     }
+  }
+
+  private isRemoteMode(): boolean {
+    return this.config.serverMode === 'remote'
   }
 }

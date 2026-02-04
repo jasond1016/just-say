@@ -26,6 +26,9 @@ export interface AppConfig {
       device?: 'cpu' | 'cuda'
       threads?: number
       computeType?: string
+      serverMode?: 'local' | 'remote'
+      serverHost?: string
+      serverPort?: number
     }
     api?: {
       provider?: string
@@ -87,7 +90,9 @@ const defaultConfig: AppConfig = {
       modelType: 'tiny',
       device: 'cpu',
       threads: 4,
-      computeType: 'int8'
+      computeType: 'int8',
+      serverMode: 'local',
+      serverPort: 8765
     }
   },
   output: {

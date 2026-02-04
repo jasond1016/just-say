@@ -19,6 +19,7 @@ import {
 import { WebAudioRecorder } from './audio/web-recorder'
 import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
 import { RecognitionController, DownloadProgress } from './recognition'
+import { WhisperServerClient } from './recognition/whisperServer'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
 import { MeetingTranscriptionManager } from './meeting-transcription'
@@ -371,6 +372,13 @@ ipcMain.handle('download-model', async (_event, modelType) => {
 
 ipcMain.handle('delete-model', async (_event, modelType) => {
   await recognitionController?.deleteModel(modelType)
+})
+
+ipcMain.handle('test-whisper-remote', async (_event, options?: { host?: string; port?: number }) => {
+  const host = options?.host || '127.0.0.1'
+  const port = typeof options?.port === 'number' ? options.port : 8765
+  const client = new WhisperServerClient({ mode: 'remote', host, port, autoStart: false })
+  return client.isHealthy()
 })
 
 // Meeting transcription IPC handlers

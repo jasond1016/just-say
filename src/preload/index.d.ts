@@ -41,6 +41,7 @@ interface JustSayAPI {
   getLocalModels: () => Promise<string[]>
   downloadModel: (modelType: string) => Promise<void>
   deleteModel: (modelType: string) => Promise<void>
+  testWhisperServer: (host: string, port: number) => Promise<boolean>
   onDownloadProgress: (
     callback: (progress: { model: string; percent: number; status: string }) => void
   ) => () => void

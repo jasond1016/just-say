@@ -49,6 +49,10 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const [groqApiKey, setGroqApiKey] = useState('')
   const [hasSonioxKey, setHasSonioxKey] = useState(false)
   const [hasGroqKey, setHasGroqKey] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<
+    'idle' | 'testing' | 'success' | 'failed'
+  >('idle')
+  const [connectionMessage, setConnectionMessage] = useState<string>('')
   const [audioDevices, setAudioDevices] = useState<
     Array<{ id: string; name: string; isDefault?: boolean }>
   >([])
@@ -77,6 +81,16 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
       loadAudioDevices()
     }
   }, [activeTab, loadAudioDevices])
+
+  useEffect(() => {
+    if (!config) return
+    setConnectionStatus('idle')
+    setConnectionMessage('')
+  }, [
+    config?.recognition?.local?.serverHost,
+    config?.recognition?.local?.serverPort,
+    config?.recognition?.local?.serverMode
+  ])
 
   const loadApiKeys = async (): Promise<void> => {
     const [sonioxKey, groqKey, hasSoniox, hasGroq] = await Promise.all([
@@ -148,6 +162,29 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     })
   }
 
+  const handleTestConnection = async (): Promise<void> => {
+    if (!localServerHost || !localServerHost.trim()) {
+      setConnectionStatus('failed')
+      setConnectionMessage('请先填写服务器地址')
+      return
+    }
+    setConnectionStatus('testing')
+    setConnectionMessage('')
+    try {
+      const ok = await window.api.testWhisperServer(localServerHost, localServerPort)
+      if (ok) {
+        setConnectionStatus('success')
+        setConnectionMessage('连接成功')
+      } else {
+        setConnectionStatus('failed')
+        setConnectionMessage('连接失败，请确认服务端已启动并可访问')
+      }
+    } catch (err) {
+      setConnectionStatus('failed')
+      setConnectionMessage(`连接失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   if (loading) {
     return (
       <div className="content-view">
@@ -187,6 +224,11 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     audioDevices.some((device) => device.id === selectedAudioDevice)
   const sampleRateOptions = [8000, 16000, 22050, 44100, 48000]
   const recognitionBackend = (config.recognition?.backend || 'local') as RecognitionBackend
+  const isLocalBackend = !config.recognition?.backend || config.recognition?.backend === 'local'
+  const localServerMode = config.recognition?.local?.serverMode || 'local'
+  const localServerHost = config.recognition?.local?.serverHost || '127.0.0.1'
+  const localServerPort = config.recognition?.local?.serverPort || 8765
+  const isRemoteServerMode = localServerMode === 'remote'
   const recognitionLanguage = config.recognition?.language || 'auto'
   const recognitionLanguageLocked = recognitionLanguage !== 'auto'
   const recognitionLanguageSupport = getRecognitionLanguageSupport(recognitionBackend)
@@ -420,11 +462,120 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                 </select>
               </div>
 
-              {(!config.recognition?.backend || config.recognition?.backend === 'local') && (
-                <ModelManager
-                  currentModel={config.recognition?.local?.modelType || 'tiny'}
-                  onModelChange={handleModelChange}
-                />
+              {isLocalBackend && (
+                <>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">运行模式</div>
+                      <div className="settings-row__desc">本地运行或使用内网服务器</div>
+                    </div>
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 180 }}
+                      value={localServerMode}
+                      onChange={(e) =>
+                        updateConfig({
+                          recognition: { local: { serverMode: e.target.value } }
+                        })
+                      }
+                    >
+                      <option value="local">本地</option>
+                      <option value="remote">内网服务器</option>
+                    </select>
+                  </div>
+
+                  {isRemoteServerMode && (
+                    <>
+                      <div className="settings-row">
+                        <div className="settings-row__info">
+                          <div className="settings-row__label">服务器地址</div>
+                          <div className="settings-row__desc">填写内网服务器 IP 或域名</div>
+                        </div>
+                        <input
+                          className="form-input"
+                          style={{ width: 240 }}
+                          value={localServerHost}
+                          placeholder="192.168.1.10"
+                          onChange={(e) =>
+                            updateConfig({
+                              recognition: { local: { serverHost: e.target.value } }
+                            })
+                          }
+                        />
+                      </div>
+                      <div className="settings-row">
+                        <div className="settings-row__info">
+                          <div className="settings-row__label">端口</div>
+                          <div className="settings-row__desc">默认 8765</div>
+                        </div>
+                        <input
+                          className="form-input"
+                          style={{ width: 120 }}
+                          type="number"
+                          value={localServerPort}
+                          onChange={(e) => {
+                            const nextPort = parseInt(e.target.value, 10)
+                            updateConfig({
+                              recognition: {
+                                local: {
+                                  serverPort:
+                                    Number.isFinite(nextPort) && nextPort > 0 ? nextPort : 8765
+                                }
+                              }
+                            })
+                          }}
+                        />
+                      </div>
+                      <div className="settings-row">
+                        <div className="settings-row__info">
+                          <div className="settings-row__label">测试连接</div>
+                          <div className="settings-row__desc">检查 /health 是否可用</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <button
+                            onClick={handleTestConnection}
+                            disabled={connectionStatus === 'testing'}
+                          >
+                            {connectionStatus === 'testing' ? '测试中...' : '测试连接'}
+                          </button>
+                          {connectionMessage && (
+                            <span
+                              style={{
+                                color: connectionStatus === 'success' ? '#4caf50' : '#ff6b6b'
+                              }}
+                            >
+                              {connectionMessage}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="settings-row">
+                        <div className="settings-row__info">
+                          <div className="settings-row__label">服务端启动</div>
+                          <div className="settings-row__desc">
+                            Linux 服务器运行：python whisper_server.py --host 0.0.0.0 --port 8765
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {!isRemoteServerMode && (
+                    <ModelManager
+                      currentModel={config.recognition?.local?.modelType || 'tiny'}
+                      onModelChange={handleModelChange}
+                    />
+                  )}
+
+                  {isRemoteServerMode && (
+                    <div className="settings-row">
+                      <div className="settings-row__info">
+                        <div className="settings-row__label">本地模型</div>
+                        <div className="settings-row__desc">远程模式不支持本地模型管理</div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {config.recognition?.backend === 'soniox' && (

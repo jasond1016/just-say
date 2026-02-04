@@ -44,6 +44,8 @@ const api = {
   downloadModel: (modelType: string): Promise<void> =>
     ipcRenderer.invoke('download-model', modelType),
   deleteModel: (modelType: string): Promise<void> => ipcRenderer.invoke('delete-model', modelType),
+  testWhisperServer: (host: string, port: number): Promise<boolean> =>
+    ipcRenderer.invoke('test-whisper-remote', { host, port }),
   onDownloadProgress: (
     callback: (progress: { model: string; percent: number; status: string }) => void
   ): (() => void) => {
