@@ -14,18 +14,22 @@
 | 协议 | WebSocket 流式 | REST API + 音频缓冲 |
 | 转录+翻译 | 一个连接同时完成 | 两步：Whisper → Chat |
 | 说话人分离 | ✅ 支持 | ❌ 不支持（固定 speaker 0） |
-| 原文延迟 | ~0.7-1s | ~2.5s（缓冲1.5s + API 1s） |
-| 译文延迟 | 同时 | ~3s（原文后 0.5s） |
+| 原文延迟 | ~0.7-1s | ~1.6s（缓冲0.6s + API 1s） |
+| 译文延迟 | 同时 | ~2.1s（原文后 0.5s） |
 
 ## 文件清单
 
 ### 新建文件
-- **`src/main/recognition/streaming-groq.ts`** (~420 行)
+- **`src/main/recognition/streaming-groq.ts`** (~500 行)
   - `StreamingGroqRecognizer` 类，实现与 `StreamingSonioxRecognizer` 相同的接口
   - 音频缓冲与智能端点检测
   - Groq Whisper API 转录
   - Groq Chat API 翻译（异步）
   - 渐进式结果发送
+
+- **`src/main/recognition/vad-utils.ts`** (~80 行)
+  - `calculateRMS()` - 计算 16-bit PCM 音频的 RMS 能量值
+  - `VADState` 类 - 带防抖的语音活动检测状态机
 
 ### 修改文件
 - **`src/main/meeting-transcription.ts`**
@@ -45,11 +49,31 @@
 
 ## 核心实现
 
-### 1. 端点检测参数
+### 1. VAD 端点检测（基于 RMS 能量）
+
+使用轻量级 VAD（Voice Activity Detection）检测真正的语音活动，而非简单的音频流中断检测。
+
+**VAD 工具模块** (`src/main/recognition/vad-utils.ts`):
+- `calculateRMS()` - 计算 16-bit PCM 音频的 RMS 能量值
+- `VADState` 类 - 带防抖的状态机（连续 3 个静音块才确认静音）
+
+**端点检测参数**（已优化）:
 ```typescript
-MAX_CHUNK_DURATION_MS = 30000  // 30秒强制处理
-SILENCE_THRESHOLD_MS = 1500   // 1.5秒静音触发
-MIN_CHUNK_DURATION_MS = 2000  // 2秒最小缓冲
+MAX_CHUNK_DURATION_MS = 15000  // 15秒强制处理（原30秒）
+SILENCE_THRESHOLD_MS = 600     // 0.6秒静音触发（原1.5秒）
+MIN_CHUNK_DURATION_MS = 1000   // 1秒最小缓冲（原2秒）
+VAD_SILENCE_THRESHOLD = 0.01   // RMS 静音阈值
+```
+
+**工作原理**:
+```typescript
+sendAudioChunk(chunk: Buffer): void {
+  // 使用 VAD 检测语音活动
+  const isSpeech = this.vadState.processChunk(chunk)
+  if (isSpeech) {
+    this.lastSpeechTime = Date.now()  // 只在检测到语音时更新
+  }
+}
 ```
 
 ### 2. 处理流程
@@ -127,10 +151,10 @@ private async processBufferedAudio(): Promise<void> {
 ```
 
 **用户体验对比**：
-- 原方案（串行）：说话暂停 → 1.5s → 转录(1s) → 翻译(0.5s) → 显示 = **3秒**
+- 原方案（串行）：说话暂停 → 0.6s → 转录(1s) → 翻译(0.5s) → 显示 = **2.1秒**
 - 优化方案（并行）：
-  - 看到原文：1.5s + 1s = **2.5秒**
-  - 看到译文：1.5s + 1s + 0.5s = **3秒**（译文在原文之后出现）
+  - 看到原文：0.6s + 1s = **1.6秒**
+  - 看到译文：0.6s + 1s + 0.5s = **2.1秒**（译文在原文之后出现）
 
 ## API 端点
 
@@ -146,9 +170,9 @@ private async processBufferedAudio(): Promise<void> {
 
 ## 后续改进方向
 
-1. **降低延迟**
-   - 减少静音阈值（如 1000ms）
-   - VAD（Voice Activity Detection）替代简单静音检测
+1. **进一步降低延迟**
+   - 调整 VAD 静音阈值（`VAD_SILENCE_THRESHOLD`）适应不同音频环境
+   - 使用 Silero VAD 等 ML 模型获得更高精度（CPU 开销较高）
 
 2. **增强功能**
    - 添加 API 重试逻辑（429 速率限制处理）

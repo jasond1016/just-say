@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
+import { VADState } from './vad-utils'
 
 export interface StreamingGroqConfig {
   apiKey?: string
@@ -37,12 +38,16 @@ export class StreamingGroqRecognizer extends EventEmitter {
   // Audio buffering
   private audioBuffer: Buffer[] = []
   private bufferStartTime = 0
-  private lastAudioTime = 0
+  private lastSpeechTime = 0
 
-  // Endpoint detection parameters
-  private readonly MAX_CHUNK_DURATION_MS = 30000 // 30s max
-  private readonly SILENCE_THRESHOLD_MS = 1500 // 1.5s silence triggers processing
-  private readonly MIN_CHUNK_DURATION_MS = 2000 // 2s minimum before processing
+  // VAD (Voice Activity Detection)
+  private vadState: VADState
+
+  // Endpoint detection parameters (optimized for faster response)
+  private readonly MAX_CHUNK_DURATION_MS = 15000 // 15s max (reduced from 30s)
+  private readonly SILENCE_THRESHOLD_MS = 600 // 0.6s silence triggers processing (reduced from 1.5s)
+  private readonly MIN_CHUNK_DURATION_MS = 1000 // 1s minimum before processing (reduced from 2s)
+  private readonly VAD_SILENCE_THRESHOLD = 0.01 // RMS threshold for silence detection
 
   // State tracking
   private isActive = false
@@ -78,6 +83,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
       sampleRate: 16000,
       ...config
     }
+    this.vadState = new VADState(this.VAD_SILENCE_THRESHOLD, 3)
   }
 
   /**
@@ -111,13 +117,14 @@ export class StreamingGroqRecognizer extends EventEmitter {
     this.isActive = true
     this.audioBuffer = []
     this.bufferStartTime = 0
-    this.lastAudioTime = Date.now()
+    this.lastSpeechTime = Date.now()
     this.startTime = Date.now()
     this.processingChunk = false
     this.completedSegments = []
     this.accumulatedText = []
     this.accumulatedTranslation = []
     this.pendingTranslations.clear()
+    this.vadState.reset()
 
     // Start silence detection interval
     this.silenceCheckInterval = setInterval(() => {
@@ -134,7 +141,12 @@ export class StreamingGroqRecognizer extends EventEmitter {
     if (!this.isActive) return
 
     this.audioBuffer.push(chunk)
-    this.lastAudioTime = Date.now()
+
+    // Use VAD to detect speech activity
+    const isSpeech = this.vadState.processChunk(chunk)
+    if (isSpeech) {
+      this.lastSpeechTime = Date.now() // Only update when speech is detected
+    }
 
     // Start buffer timer if this is first chunk
     if (this.audioBuffer.length === 1) {
@@ -152,7 +164,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
     if (this.processingChunk || this.audioBuffer.length === 0) return
 
     const bufferDuration = Date.now() - this.bufferStartTime
-    const silenceDuration = Date.now() - this.lastAudioTime
+    const silenceDuration = Date.now() - this.lastSpeechTime // Based on actual VAD detection
 
     const shouldProcess =
       (bufferDuration >= this.MIN_CHUNK_DURATION_MS &&
