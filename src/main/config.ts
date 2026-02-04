@@ -50,6 +50,7 @@ export interface AppConfig {
     groq?: {
       apiKey?: string
       model?: 'whisper-large-v3-turbo' | 'whisper-large-v3'
+      chatModel?: string // For translation, default: 'llama-3.3-70b-versatile'
     }
   }
   output?: {

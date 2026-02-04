@@ -23,6 +23,8 @@ import { WhisperServerClient } from './recognition/whisperServer'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
 import { MeetingTranscriptionManager } from './meeting-transcription'
+import { StreamingGroqConfig } from './recognition/streaming-groq'
+import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -167,15 +169,45 @@ function showMeetingWindow(): void {
   // Pre-connect to recognition service to reduce latency
   const config = getConfig()
   if (!meetingTranscription) {
-    meetingTranscription = new MeetingTranscriptionManager({
-      ...(config.recognition?.soniox || {}),
-      sampleRate: config.audio?.sampleRate
-    })
+    meetingTranscription = createMeetingTranscriptionManager(config)
   }
   // Fire and forget - don't block window showing
   meetingTranscription.preConnect().catch((err) => {
     console.error('[Main] Pre-connect failed:', err)
   })
+}
+
+/**
+ * Create MeetingTranscriptionManager based on global backend setting.
+ * Supports both Soniox (streaming WebSocket) and Groq (REST API with buffering).
+ */
+function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscriptionManager {
+  const backend = config.recognition?.backend
+  const sampleRate = config.audio?.sampleRate
+
+  if (backend === 'groq') {
+    // Groq backend: uses Whisper API for transcription + Chat API for translation
+    const groqApiKey = getApiKey('groq')
+    const groqConfig: StreamingGroqConfig = {
+      apiKey: groqApiKey || undefined,
+      whisperModel: config.recognition?.groq?.model || 'whisper-large-v3-turbo',
+      chatModel: config.recognition?.groq?.chatModel || 'llama-3.3-70b-versatile',
+      language: config.recognition?.language,
+      sampleRate: sampleRate
+    }
+    console.log('[Main] Creating MeetingTranscriptionManager with Groq backend')
+    return new MeetingTranscriptionManager('groq', undefined, groqConfig)
+  } else {
+    // Default: Soniox backend (streaming WebSocket)
+    const sonioxApiKey = getApiKey('soniox')
+    const sonioxConfig: StreamingSonioxConfig = {
+      ...(config.recognition?.soniox || {}),
+      apiKey: sonioxApiKey || config.recognition?.soniox?.apiKey,
+      sampleRate: sampleRate
+    }
+    console.log('[Main] Creating MeetingTranscriptionManager with Soniox backend')
+    return new MeetingTranscriptionManager('soniox', sonioxConfig, undefined)
+  }
 }
 
 async function initializeApp(): Promise<void> {
@@ -399,10 +431,7 @@ ipcMain.handle('test-whisper-remote', async (_event, options?: { host?: string; 
 ipcMain.handle('get-system-audio-sources', async () => {
   if (!meetingTranscription) {
     const config = getConfig()
-    meetingTranscription = new MeetingTranscriptionManager({
-      ...(config.recognition?.soniox || {}),
-      sampleRate: config.audio?.sampleRate
-    })
+    meetingTranscription = createMeetingTranscriptionManager(config)
   }
   return meetingTranscription.getSystemAudioSources()
 })
@@ -411,10 +440,7 @@ ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   const config = getConfig()
 
   if (!meetingTranscription) {
-    meetingTranscription = new MeetingTranscriptionManager({
-      ...(config.recognition?.soniox || {}),
-      sampleRate: config.audio?.sampleRate
-    })
+    meetingTranscription = createMeetingTranscriptionManager(config)
   }
 
   // Set up event forwarding to renderer

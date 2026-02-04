@@ -5,7 +5,10 @@ import {
   SpeakerSegment,
   PartialResult
 } from './recognition/streaming-soniox'
+import { StreamingGroqRecognizer, StreamingGroqConfig } from './recognition/streaming-groq'
 import { profiler } from './utils/profiler'
+
+export type MeetingBackend = 'soniox' | 'groq'
 
 export interface SystemAudioSource {
   id: string
@@ -48,8 +51,10 @@ export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 
  * This avoids the need for ffmpeg.
  */
 export class MeetingTranscriptionManager extends EventEmitter {
-  private recognizer: StreamingSonioxRecognizer | null = null
-  private sonioxConfig: StreamingSonioxConfig
+  private recognizer: StreamingSonioxRecognizer | StreamingGroqRecognizer | null = null
+  private backend: MeetingBackend
+  private sonioxConfig?: StreamingSonioxConfig
+  private groqConfig?: StreamingGroqConfig
 
   private status: MeetingStatus = 'idle'
   private transcriptHistory: TranscriptSegment[] = []
@@ -65,9 +70,15 @@ export class MeetingTranscriptionManager extends EventEmitter {
   // Flag to track if we're using microphone from renderer
   private usingMicrophone = false
 
-  constructor(sonioxConfig: StreamingSonioxConfig) {
+  constructor(
+    backend: MeetingBackend,
+    sonioxConfig?: StreamingSonioxConfig,
+    groqConfig?: StreamingGroqConfig
+  ) {
     super()
+    this.backend = backend
     this.sonioxConfig = sonioxConfig
+    this.groqConfig = groqConfig
   }
 
   /**
@@ -80,8 +91,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
       return
     }
 
-    console.log('[MeetingTranscription] Pre-connecting to recognition service...')
-    this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+    console.log(`[MeetingTranscription] Pre-connecting to ${this.backend} recognition service...`)
+
+    // Create appropriate recognizer based on backend
+    if (this.backend === 'groq') {
+      this.recognizer = new StreamingGroqRecognizer(this.groqConfig)
+    } else {
+      this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+    }
 
     // Set up error handler for pre-connection
     this.recognizer.on('error', (err: Error) => {
@@ -145,18 +162,29 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
       // Use pre-connected recognizer or create new one
       // Merge translation options if provided
-      const recognizerConfig = {
-        ...this.sonioxConfig,
-        translation:
-          options.translationEnabled && options.targetLanguage
-            ? { enabled: true, targetLanguage: options.targetLanguage }
-            : undefined
-      }
-      if (!this.recognizer?.isPreConnected()) {
-        this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
+      if (this.backend === 'groq') {
+        const recognizerConfig: StreamingGroqConfig = {
+          ...this.groqConfig,
+          translation:
+            options.translationEnabled && options.targetLanguage
+              ? { enabled: true, targetLanguage: options.targetLanguage }
+              : undefined
+        }
+        this.recognizer = new StreamingGroqRecognizer(recognizerConfig)
       } else {
-        // Update config for pre-connected recognizer
-        this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
+        const recognizerConfig: StreamingSonioxConfig = {
+          ...this.sonioxConfig,
+          translation:
+            options.translationEnabled && options.targetLanguage
+              ? { enabled: true, targetLanguage: options.targetLanguage }
+              : undefined
+        }
+        if (!this.recognizer?.isPreConnected()) {
+          this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
+        } else {
+          // Update config for pre-connected recognizer
+          this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
+        }
       }
 
       // Set up recognizer events (clear any from pre-connect first)

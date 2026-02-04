@@ -726,6 +726,25 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                       <option value="whisper-large-v3">whisper-large-v3</option>
                     </select>
                   </div>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">翻译模型</div>
+                      <div className="settings-row__desc">用于会议转录的实时翻译</div>
+                    </div>
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 200 }}
+                      value={config.recognition?.groq?.chatModel || 'moonshotai/kimi-k2-instruct-0905'}
+                      onChange={(e) =>
+                        updateConfig({ recognition: { groq: { chatModel: e.target.value } } })
+                      }
+                    >
+                      <option value="moonshotai/kimi-k2-instruct-0905">Kimi K2 (推荐)</option>
+                      <option value="llama-3.3-70b-versatile">Llama 3.3 70B</option>
+                      <option value="llama-3.1-70b-versatile">Llama 3.1 70B</option>
+                      <option value="mixtral-8x7b-32768">Mixtral 8x7B (更快)</option>
+                    </select>
+                  </div>
                 </>
               )}
             </div>
