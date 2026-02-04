@@ -5,6 +5,7 @@ export interface StreamingSonioxConfig {
   apiKey?: string
   model?: string
   languageHints?: string[]
+  sampleRate?: number
   /** Enable speaker diarization. Each token will include a speaker number. Default: true */
   enableSpeakerDiarization?: boolean
   /** One-way translation config */
@@ -231,7 +232,10 @@ export class StreamingSonioxRecognizer extends EventEmitter {
       api_key: this.config.apiKey,
       model: this.config.model,
       audio_format: 'pcm_s16le',
-      sample_rate: 16000,
+      sample_rate:
+        typeof this.config.sampleRate === 'number' && Number.isFinite(this.config.sampleRate)
+          ? this.config.sampleRate
+          : 16000,
       num_channels: 1,
       language_hints: this.config.languageHints,
       // Enable endpoint detection for faster finalization

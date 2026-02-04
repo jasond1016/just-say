@@ -8,6 +8,33 @@ let audioContext: AudioContext | null = null
 let scriptProcessor: ScriptProcessorNode | null = null
 let sourceNode: MediaStreamAudioSourceNode | null = null
 
+const DEFAULT_SAMPLE_RATE = 16000
+
+interface AudioSettings {
+  deviceId?: string
+  sampleRate: number
+}
+
+async function loadAudioSettings(): Promise<AudioSettings> {
+  try {
+    const config = (await window.api.getConfig()) as {
+      audio?: { device?: string; sampleRate?: number }
+    }
+    const device = config?.audio?.device
+    const sampleRate = config?.audio?.sampleRate
+    return {
+      deviceId: device && device !== 'default' ? device : undefined,
+      sampleRate:
+        typeof sampleRate === 'number' && Number.isFinite(sampleRate)
+          ? sampleRate
+          : DEFAULT_SAMPLE_RATE
+    }
+  } catch (error) {
+    console.warn('[MicrophoneCapture] Failed to read audio config:', error)
+    return { sampleRate: DEFAULT_SAMPLE_RATE }
+  }
+}
+
 /**
  * Get available microphone devices
  */
@@ -28,13 +55,33 @@ export async function getMicrophoneDevices(): Promise<
  * Start capturing microphone audio.
  * Audio data is sent to main process via IPC.
  */
-export async function startMicrophoneCapture(deviceId?: string): Promise<void> {
+export async function startMicrophoneCapture(
+  deviceId?: string,
+  sampleRate?: number
+): Promise<void> {
   try {
-    console.log('[MicrophoneCapture] Requesting microphone access, deviceId:', deviceId)
+    const settings = await loadAudioSettings()
+    const resolvedDeviceId =
+      deviceId !== undefined
+        ? deviceId !== 'default'
+          ? deviceId
+          : undefined
+        : settings.deviceId
+    const resolvedSampleRate =
+      typeof sampleRate === 'number' && Number.isFinite(sampleRate)
+        ? sampleRate
+        : settings.sampleRate
+
+    console.log(
+      '[MicrophoneCapture] Requesting microphone access, deviceId:',
+      resolvedDeviceId,
+      'sampleRate:',
+      resolvedSampleRate
+    )
 
     const constraints: MediaStreamConstraints = {
-      audio: deviceId
-        ? { deviceId: { exact: deviceId } }
+      audio: resolvedDeviceId
+        ? { deviceId: { exact: resolvedDeviceId } }
         : true,
       video: false
     }
@@ -48,8 +95,8 @@ export async function startMicrophoneCapture(deviceId?: string): Promise<void> {
 
     console.log('[MicrophoneCapture] Got audio track:', audioTracks[0].label)
 
-    // Create audio context at 16kHz for speech recognition
-    audioContext = new AudioContext({ sampleRate: 16000 })
+    // Create audio context using configured sample rate
+    audioContext = new AudioContext({ sampleRate: resolvedSampleRate })
     sourceNode = audioContext.createMediaStreamSource(mediaStream)
 
     // Use ScriptProcessorNode (deprecated but reliable across all Electron versions)

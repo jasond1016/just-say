@@ -27,6 +27,7 @@ export interface LocalRecognizerConfig {
   threads?: number
   computeType?: string
   useHttpServer?: boolean // Use HTTP server mode (recommended)
+  sampleRate?: number
 }
 
 export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
@@ -45,6 +46,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       threads: 4,
       computeType: 'auto',
       useHttpServer: true, // Default to HTTP server mode
+      sampleRate: 16000,
       ...config
     } as LocalRecognizerConfig
 
@@ -95,10 +97,14 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     return 'python'
   }
 
-  private createWavBuffer(pcmBuffer: Buffer, sampleRate: number = 16000): Buffer {
+  private createWavBuffer(pcmBuffer: Buffer, sampleRate?: number): Buffer {
+    const resolvedSampleRate =
+      typeof sampleRate === 'number' && Number.isFinite(sampleRate)
+        ? sampleRate
+        : this.config.sampleRate || 16000
     const numChannels = 1
     const bitsPerSample = 16
-    const byteRate = (sampleRate * numChannels * bitsPerSample) / 8
+    const byteRate = (resolvedSampleRate * numChannels * bitsPerSample) / 8
     const blockAlign = (numChannels * bitsPerSample) / 8
     const dataSize = pcmBuffer.length
     const headerSize = 44
@@ -112,7 +118,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     header.writeUInt32LE(16, 16) // fmt chunk size
     header.writeUInt16LE(1, 20) // PCM format
     header.writeUInt16LE(numChannels, 22)
-    header.writeUInt32LE(sampleRate, 24)
+    header.writeUInt32LE(resolvedSampleRate, 24)
     header.writeUInt32LE(byteRate, 28)
     header.writeUInt16LE(blockAlign, 32)
     header.writeUInt16LE(bitsPerSample, 34)

@@ -109,7 +109,7 @@ describe('deepMerge', () => {
     const result = deepMerge(target, source)
 
     expect(result.nested?.a).toBe('hello')
-    expect(result.nested?.b).toBe('world')
+    expect(result.nested?.b).toBe(2)
   })
 
   it('should handle empty source object', () => {

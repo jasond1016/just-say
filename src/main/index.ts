@@ -155,7 +155,10 @@ function showMeetingWindow(): void {
   // Pre-connect to recognition service to reduce latency
   const config = getConfig()
   if (!meetingTranscription) {
-    meetingTranscription = new MeetingTranscriptionManager(config.recognition?.soniox || {})
+    meetingTranscription = new MeetingTranscriptionManager({
+      ...(config.recognition?.soniox || {}),
+      sampleRate: config.audio?.sampleRate
+    })
   }
   // Fire and forget - don't block window showing
   meetingTranscription.preConnect().catch((err) => {
@@ -192,7 +195,10 @@ async function initializeApp(): Promise<void> {
   if (useStreamingSoniox) {
     console.log('[Main] Using streaming Soniox mode with Web Audio')
     webStreamingRecorder = new WebStreamingAudioRecorder()
-    streamingSoniox = new StreamingSonioxRecognizer(config.recognition?.soniox)
+    streamingSoniox = new StreamingSonioxRecognizer({
+      ...(config.recognition?.soniox || {}),
+      sampleRate: config.audio?.sampleRate
+    })
 
     // Pre-initialize the hidden window for faster first recording
     webStreamingRecorder.initialize().catch((err) => {
@@ -371,7 +377,10 @@ ipcMain.handle('delete-model', async (_event, modelType) => {
 ipcMain.handle('get-system-audio-sources', async () => {
   if (!meetingTranscription) {
     const config = getConfig()
-    meetingTranscription = new MeetingTranscriptionManager(config.recognition?.soniox || {})
+    meetingTranscription = new MeetingTranscriptionManager({
+      ...(config.recognition?.soniox || {}),
+      sampleRate: config.audio?.sampleRate
+    })
   }
   return meetingTranscription.getSystemAudioSources()
 })
@@ -380,7 +389,10 @@ ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   const config = getConfig()
 
   if (!meetingTranscription) {
-    meetingTranscription = new MeetingTranscriptionManager(config.recognition?.soniox || {})
+    meetingTranscription = new MeetingTranscriptionManager({
+      ...(config.recognition?.soniox || {}),
+      sampleRate: config.audio?.sampleRate
+    })
   }
 
   // Set up event forwarding to renderer

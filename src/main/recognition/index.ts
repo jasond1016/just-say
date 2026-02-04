@@ -33,6 +33,7 @@ export class RecognitionController extends EventEmitter {
 
   private createRecognizer(): SpeechRecognizer {
     const backend = this.config.recognition?.backend || 'local'
+    const sampleRate = this.config.audio?.sampleRate
     console.log(`[Recognition] Using ${backend} backend`)
 
     switch (backend) {
@@ -51,11 +52,15 @@ export class RecognitionController extends EventEmitter {
         const groqApiKey = getApiKey('groq')
         return new GroqRecognizer({
           ...this.config.recognition?.groq,
-          apiKey: groqApiKey
+          apiKey: groqApiKey,
+          sampleRate
         })
       }
       default:
-        return new LocalRecognizer(this.config.recognition?.local)
+        return new LocalRecognizer({
+          ...this.config.recognition?.local,
+          sampleRate
+        })
     }
   }
 

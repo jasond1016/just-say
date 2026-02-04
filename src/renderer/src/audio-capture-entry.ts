@@ -15,6 +15,33 @@ let recordingAudioContext: AudioContext | null = null
 let recordingScriptProcessor: ScriptProcessorNode | null = null
 let recordingSourceNode: MediaStreamAudioSourceNode | null = null
 
+const DEFAULT_SAMPLE_RATE = 16000
+
+interface AudioSettings {
+  deviceId?: string
+  sampleRate: number
+}
+
+async function loadAudioSettings(): Promise<AudioSettings> {
+  try {
+    const config = (await window.api.getConfig()) as {
+      audio?: { device?: string; sampleRate?: number }
+    }
+    const device = config?.audio?.device
+    const sampleRate = config?.audio?.sampleRate
+    return {
+      deviceId: device && device !== 'default' ? device : undefined,
+      sampleRate:
+        typeof sampleRate === 'number' && Number.isFinite(sampleRate)
+          ? sampleRate
+          : DEFAULT_SAMPLE_RATE
+    }
+  } catch (error) {
+    console.warn('[AudioCapture] Failed to read audio config:', error)
+    return { sampleRate: DEFAULT_SAMPLE_RATE }
+  }
+}
+
 // Helper to convert float32 audio to int16 PCM
 function floatTo16BitPCM(input: Float32Array): Int16Array {
   const int16Data = new Int16Array(input.length)
@@ -29,10 +56,11 @@ function floatTo16BitPCM(input: Float32Array): Int16Array {
 
 async function startPttCapture(): Promise<void> {
   try {
+    const settings = await loadAudioSettings()
     console.log('[AudioCapture] Starting PTT capture')
 
     pttMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
+      audio: settings.deviceId ? { deviceId: { exact: settings.deviceId } } : true,
       video: false
     })
 
@@ -43,7 +71,7 @@ async function startPttCapture(): Promise<void> {
 
     console.log('[AudioCapture] Got audio track:', audioTracks[0].label)
 
-    pttAudioContext = new AudioContext({ sampleRate: 16000 })
+    pttAudioContext = new AudioContext({ sampleRate: settings.sampleRate })
     pttSourceNode = pttAudioContext.createMediaStreamSource(pttMediaStream)
 
     pttScriptProcessor = pttAudioContext.createScriptProcessor(4096, 1, 1)
@@ -94,10 +122,11 @@ function stopPttCapture(): void {
 
 async function startRecording(): Promise<void> {
   try {
+    const settings = await loadAudioSettings()
     console.log('[AudioCapture] Starting recording')
 
     recordingMediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
+      audio: settings.deviceId ? { deviceId: { exact: settings.deviceId } } : true,
       video: false
     })
 
@@ -108,7 +137,7 @@ async function startRecording(): Promise<void> {
 
     console.log('[AudioCapture] Got audio track for recording:', audioTracks[0].label)
 
-    recordingAudioContext = new AudioContext({ sampleRate: 16000 })
+    recordingAudioContext = new AudioContext({ sampleRate: settings.sampleRate })
     recordingSourceNode = recordingAudioContext.createMediaStreamSource(recordingMediaStream)
 
     recordingScriptProcessor = recordingAudioContext.createScriptProcessor(4096, 1, 1)

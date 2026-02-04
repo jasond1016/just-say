@@ -4,6 +4,7 @@ export interface GroqRecognizerConfig {
   apiKey?: string
   model?: 'whisper-large-v3-turbo' | 'whisper-large-v3'
   language?: string
+  sampleRate?: number
 }
 
 export class GroqRecognizer implements SpeechRecognizer {
@@ -17,7 +18,10 @@ export class GroqRecognizer implements SpeechRecognizer {
   }
 
   private createWavBuffer(pcmBuffer: Buffer): Buffer {
-    const sampleRate = 16000
+    const sampleRate =
+      typeof this.config.sampleRate === 'number' && Number.isFinite(this.config.sampleRate)
+        ? this.config.sampleRate
+        : 16000
     const numChannels = 1
     const bitsPerSample = 16
     const byteRate = (sampleRate * numChannels * bitsPerSample) / 8

@@ -8,6 +8,23 @@ let audioContext: AudioContext | null = null
 let scriptProcessor: ScriptProcessorNode | null = null
 let sourceNode: MediaStreamAudioSourceNode | null = null
 
+const DEFAULT_SAMPLE_RATE = 16000
+
+async function resolveSampleRate(): Promise<number> {
+  try {
+    const config = (await window.api.getConfig()) as {
+      audio?: { sampleRate?: number }
+    }
+    const sampleRate = config?.audio?.sampleRate
+    if (typeof sampleRate === 'number' && Number.isFinite(sampleRate)) {
+      return sampleRate
+    }
+  } catch (error) {
+    console.warn('[SystemAudioCapture] Failed to read audio config:', error)
+  }
+  return DEFAULT_SAMPLE_RATE
+}
+
 /**
  * Get available system audio sources using desktopCapturer
  */
@@ -77,8 +94,9 @@ export async function startSystemAudioCapture(sourceId: string | null): Promise<
 
     console.log('[SystemAudioCapture] Got audio track:', audioTracks[0].label)
 
-    // Create audio context at 16kHz for speech recognition
-    audioContext = new AudioContext({ sampleRate: 16000 })
+    // Create audio context using configured sample rate
+    const sampleRate = await resolveSampleRate()
+    audioContext = new AudioContext({ sampleRate })
     sourceNode = audioContext.createMediaStreamSource(mediaStream)
 
     // Use ScriptProcessorNode (deprecated but reliable across all Electron versions)

@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { ModelManager } from '../components/Settings/ModelManager'
+import { getMicrophoneDevices } from '../microphone-capture'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type SettingsTab = 'general' | 'audio' | 'recognition' | 'hotkey' | 'output' | 'appearance' | 'advanced'
@@ -17,11 +18,34 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const [groqApiKey, setGroqApiKey] = useState('')
   const [hasSonioxKey, setHasSonioxKey] = useState(false)
   const [hasGroqKey, setHasGroqKey] = useState(false)
+  const [audioDevices, setAudioDevices] = useState<
+    Array<{ id: string; name: string; isDefault?: boolean }>
+  >([])
+  const [audioDevicesLoading, setAudioDevicesLoading] = useState(false)
 
   useEffect(() => {
     loadConfig()
     loadApiKeys()
   }, [])
+
+  const loadAudioDevices = useCallback(async (): Promise<void> => {
+    setAudioDevicesLoading(true)
+    try {
+      const devices = await getMicrophoneDevices()
+      setAudioDevices(devices)
+    } catch (err) {
+      console.error('Failed to load audio devices:', err)
+      setAudioDevices([])
+    } finally {
+      setAudioDevicesLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'audio') {
+      loadAudioDevices()
+    }
+  }, [activeTab, loadAudioDevices])
 
   const loadApiKeys = async (): Promise<void> => {
     const [sonioxKey, groqKey, hasSoniox, hasGroq] = await Promise.all([
@@ -124,6 +148,13 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
       </div>
     )
   }
+
+  const selectedAudioDevice = config.audio?.device || 'default'
+  const availableAudioDevices = audioDevices.filter((device) => device.id !== 'default')
+  const hasSelectedDevice =
+    selectedAudioDevice === 'default' ||
+    audioDevices.some((device) => device.id === selectedAudioDevice)
+  const sampleRateOptions = [8000, 16000, 22050, 44100, 48000]
 
   return (
     <div className="content-view">
@@ -238,6 +269,52 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
           {activeTab === 'audio' && (
             <div className="settings-section">
               <h2 className="settings-section__title">音频设置</h2>
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">输入设备</div>
+                  <div className="settings-row__desc">选择麦克风输入源</div>
+                </div>
+                <select
+                  className="form-input form-select"
+                  style={{ width: 240 }}
+                  value={selectedAudioDevice}
+                  onChange={(e) => updateConfig({ audio: { device: e.target.value } })}
+                  disabled={audioDevicesLoading}
+                >
+                  <option value="default">系统默认</option>
+                  {availableAudioDevices.map((device) => (
+                    <option key={device.id} value={device.id}>
+                      {device.name}
+                      {device.isDefault ? ' (默认)' : ''}
+                    </option>
+                  ))}
+                  {!hasSelectedDevice && selectedAudioDevice !== 'default' && (
+                    <option value={selectedAudioDevice}>当前设备 (不可用)</option>
+                  )}
+                </select>
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">采样率</div>
+                  <div className="settings-row__desc">推荐 16kHz，兼容语音识别</div>
+                </div>
+                <select
+                  className="form-input form-select"
+                  style={{ width: 150 }}
+                  value={config.audio?.sampleRate || 16000}
+                  onChange={(e) =>
+                    updateConfig({ audio: { sampleRate: parseInt(e.target.value) } })
+                  }
+                >
+                  {sampleRateOptions.map((rate) => (
+                    <option key={rate} value={rate}>
+                      {rate} Hz
+                    </option>
+                  ))}
+                </select>
+              </div>
 
               <div className="settings-row">
                 <div className="settings-row__info">
