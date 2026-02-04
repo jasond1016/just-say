@@ -10,6 +10,37 @@ interface SettingsProps {
   onThemeChange: (theme: ThemeOption) => void
 }
 
+type RecognitionBackend = 'local' | 'api' | 'network' | 'soniox' | 'groq'
+
+const recognitionLanguageOptions = [
+  { value: 'zh', label: '中文' },
+  { value: 'en', label: 'English' },
+  { value: 'ja', label: '日本語' },
+  { value: 'ko', label: '한국어' },
+  { value: 'fr', label: 'Français' },
+  { value: 'de', label: 'Deutsch' },
+  { value: 'es', label: 'Español' },
+  { value: 'ru', label: 'Русский' }
+]
+
+const getRecognitionLanguageSupport = (
+  backend: RecognitionBackend | string
+): { supported: boolean; reason?: string } => {
+  switch (backend) {
+    case 'local':
+    case 'groq':
+      return { supported: true }
+    case 'api':
+      return { supported: false, reason: 'OpenAI API 目前未接入 language 参数' }
+    case 'soniox':
+      return { supported: false, reason: 'Soniox 仅支持语言提示，不支持锁定' }
+    case 'network':
+      return { supported: false, reason: '网络后端未定义语言参数' }
+    default:
+      return { supported: false, reason: '当前后端不支持语言参数' }
+  }
+}
+
 export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.JSX.Element {
   const [config, setConfig] = useState<any>(null)
   const [loading, setLoading] = useState(true)
@@ -155,6 +186,17 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     selectedAudioDevice === 'default' ||
     audioDevices.some((device) => device.id === selectedAudioDevice)
   const sampleRateOptions = [8000, 16000, 22050, 44100, 48000]
+  const recognitionBackend = (config.recognition?.backend || 'local') as RecognitionBackend
+  const recognitionLanguage = config.recognition?.language || 'auto'
+  const recognitionLanguageLocked = recognitionLanguage !== 'auto'
+  const recognitionLanguageSupport = getRecognitionLanguageSupport(recognitionBackend)
+  const recognitionLanguageHint = recognitionLanguageSupport.supported
+    ? '锁定语言可提高准确率与速度，但多语言可能更差'
+    : `锁定语言可提高准确率与速度，但多语言可能更差（${recognitionLanguageSupport.reason}）`
+  const lockedLanguageValue = recognitionLanguageLocked ? recognitionLanguage : 'zh'
+  const hasLockedLanguageOption = recognitionLanguageOptions.some(
+    (option) => option.value === lockedLanguageValue
+  )
 
   return (
     <div className="content-view">
@@ -569,6 +611,51 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                 <div className="settings-row__info">
                   <div className="settings-row__label">关于</div>
                   <div className="settings-row__desc">JustSay v1.0.0</div>
+                </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">识别语言</div>
+                  <div className="settings-row__desc">{recognitionLanguageHint}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <select
+                    className="form-input form-select"
+                    style={{ width: 120 }}
+                    value={recognitionLanguageLocked ? 'locked' : 'auto'}
+                    disabled={!recognitionLanguageSupport.supported}
+                    onChange={(e) => {
+                      const mode = e.target.value
+                      if (mode === 'auto') {
+                        updateConfig({ recognition: { language: 'auto' } })
+                      } else {
+                        const nextLanguage =
+                          recognitionLanguage !== 'auto' ? recognitionLanguage : 'zh'
+                        updateConfig({ recognition: { language: nextLanguage } })
+                      }
+                    }}
+                  >
+                    <option value="auto">自动</option>
+                    <option value="locked">锁定</option>
+                  </select>
+                  {recognitionLanguageLocked && (
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 160 }}
+                      value={lockedLanguageValue}
+                      disabled={!recognitionLanguageSupport.supported}
+                      onChange={(e) => updateConfig({ recognition: { language: e.target.value } })}
+                    >
+                      {recognitionLanguageOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                      {!hasLockedLanguageOption && (
+                        <option value={lockedLanguageValue}>{lockedLanguageValue}</option>
+                      )}
+                    </select>
+                  )}
                 </div>
               </div>
             </div>
