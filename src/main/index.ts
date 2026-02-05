@@ -31,6 +31,9 @@ let mainWindow: BrowserWindow | null = null
 let indicatorWindow: BrowserWindow | null = null
 let meetingWindow: BrowserWindow | null = null
 
+type RecordingUiState = { recording?: boolean; processing?: boolean }
+let currentRecordingState: RecordingUiState = { recording: false }
+
 // Core modules
 let hotkeyManager: HotkeyManager | null = null
 let audioRecorder: WebAudioRecorder | null = null
@@ -49,6 +52,47 @@ function getRecognitionSignature(config: AppConfig): string {
 
 function shouldRecreateRecognition(prev: AppConfig, next: AppConfig): boolean {
   return getRecognitionSignature(prev) !== getRecognitionSignature(next)
+}
+
+function isIndicatorEnabled(): boolean {
+  return getConfig().ui?.indicatorEnabled !== false
+}
+
+function isSoundFeedbackEnabled(): boolean {
+  return getConfig().ui?.soundFeedback !== false
+}
+
+function setIndicatorState(state: RecordingUiState): void {
+  currentRecordingState = state
+
+  if (!indicatorWindow) return
+  if (!isIndicatorEnabled()) {
+    indicatorWindow.hide()
+    return
+  }
+
+  if (state.recording || state.processing) {
+    indicatorWindow.show()
+    indicatorWindow.webContents.send('recording-state', state)
+  } else {
+    indicatorWindow.hide()
+    indicatorWindow.webContents.send('recording-state', state)
+  }
+}
+
+function syncIndicatorVisibilityFromConfig(): void {
+  if (!indicatorWindow) return
+  if (!isIndicatorEnabled()) {
+    indicatorWindow.hide()
+    return
+  }
+
+  if (currentRecordingState.recording || currentRecordingState.processing) {
+    indicatorWindow.show()
+    indicatorWindow.webContents.send('recording-state', currentRecordingState)
+  } else {
+    indicatorWindow.hide()
+  }
 }
 
 function createMainWindow(): BrowserWindow {
@@ -253,8 +297,8 @@ async function initializeApp(): Promise<void> {
     hotkeyManager.on('recordStart', async () => {
       console.log('[Main] Recording started (streaming)')
       updateTrayStatus('recording')
-      indicatorWindow?.show()
-      indicatorWindow?.webContents.send('recording-state', { recording: true })
+      setIndicatorState({ recording: true })
+      if (isSoundFeedbackEnabled()) shell.beep()
 
       try {
         // Start WebSocket connection first
@@ -270,7 +314,7 @@ async function initializeApp(): Promise<void> {
       } catch (error) {
         console.error('[Main] Streaming start error:', error)
         updateTrayStatus('idle')
-        indicatorWindow?.hide()
+        setIndicatorState({ recording: false })
       }
     })
 
@@ -278,7 +322,8 @@ async function initializeApp(): Promise<void> {
       const stopTime = Date.now()
       console.log('[Main] Recording stopped (streaming)')
       updateTrayStatus('processing')
-      indicatorWindow?.webContents.send('recording-state', { recording: false, processing: true })
+      setIndicatorState({ recording: false, processing: true })
+      if (isSoundFeedbackEnabled()) shell.beep()
 
       try {
         // Stop recording
@@ -302,7 +347,7 @@ async function initializeApp(): Promise<void> {
         console.error('[Main] Streaming recognition error:', error)
       } finally {
         updateTrayStatus('idle')
-        indicatorWindow?.hide()
+        setIndicatorState({ recording: false })
       }
     })
   } else {
@@ -315,15 +360,16 @@ async function initializeApp(): Promise<void> {
     hotkeyManager.on('recordStart', async () => {
       console.log('[Main] Recording started')
       updateTrayStatus('recording')
-      indicatorWindow?.show()
-      indicatorWindow?.webContents.send('recording-state', { recording: true })
+      setIndicatorState({ recording: true })
+      if (isSoundFeedbackEnabled()) shell.beep()
       await audioRecorder?.startRecording()
     })
 
     hotkeyManager.on('recordStop', async () => {
       console.log('[Main] Recording stopped')
       updateTrayStatus('processing')
-      indicatorWindow?.webContents.send('recording-state', { recording: false, processing: true })
+      setIndicatorState({ recording: false, processing: true })
+      if (isSoundFeedbackEnabled()) shell.beep()
 
       try {
         const audioBuffer = await audioRecorder?.stopRecording()
@@ -341,7 +387,7 @@ async function initializeApp(): Promise<void> {
         console.error('[Main] Recognition error:', error)
       } finally {
         updateTrayStatus('idle')
-        indicatorWindow?.hide()
+        setIndicatorState({ recording: false })
       }
     })
   }
@@ -390,6 +436,7 @@ ipcMain.handle('set-config', (_event, config) => {
   if (!recognitionController || shouldRecreateRecognition(prevConfig, nextConfig)) {
     recognitionController = new RecognitionController(nextConfig)
   }
+  syncIndicatorVisibilityFromConfig()
 })
 
 ipcMain.handle('show-settings', () => {
