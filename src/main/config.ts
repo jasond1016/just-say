@@ -53,7 +53,7 @@ export interface AppConfig {
     }
   }
   output?: {
-    method?: 'simulate_input' | 'clipboard'
+    method?: 'simulate_input' | 'clipboard' | 'popup'
     autoSpace?: boolean
     capitalize?: boolean
   }

@@ -39,6 +39,13 @@ const api = {
     ipcRenderer.removeAllListeners(channel)
   },
 
+  // Output popup window
+  onOutputText: (callback: (payload: { text: string }) => void): void => {
+    ipcRenderer.on('output-text', (_event, payload) => callback(payload))
+  },
+  closeOutputWindow: (): Promise<void> => ipcRenderer.invoke('close-output-window'),
+  copyToClipboard: (text: string): Promise<void> => ipcRenderer.invoke('copy-to-clipboard', text),
+
   // Model Management
   getLocalModels: (): Promise<string[]> => ipcRenderer.invoke('get-local-models'),
   downloadModel: (modelType: string): Promise<void> =>

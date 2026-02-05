@@ -896,16 +896,19 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
               <div className="settings-row">
                 <div className="settings-row__info">
                   <div className="settings-row__label">输出方式</div>
-                  <div className="settings-row__desc">识别结果的插入方式</div>
+                  <div className="settings-row__desc">
+                    自动粘贴为默认推荐；如需更稳定可选“仅复制”或“弹出结果”
+                  </div>
                 </div>
                 <select
                   className="form-input form-select"
-                  style={{ width: 150 }}
+                  style={{ width: 220 }}
                   value={config.output?.method || 'simulate_input'}
                   onChange={(e) => updateConfig({ output: { method: e.target.value } })}
                 >
-                  <option value="simulate_input">模拟键盘输入</option>
-                  <option value="clipboard">复制到剪贴板</option>
+                  <option value="simulate_input">自动粘贴（推荐）</option>
+                  <option value="clipboard">仅复制到剪贴板</option>
+                  <option value="popup">弹出结果窗口（自动复制）</option>
                 </select>
               </div>
 

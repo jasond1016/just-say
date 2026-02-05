@@ -38,6 +38,12 @@ interface JustSayAPI {
     callback: (state: { recording: boolean; processing?: boolean }) => void
   ) => void
   removeAllListeners: (channel: string) => void
+
+  // Output popup window
+  onOutputText: (callback: (payload: { text: string }) => void) => void
+  closeOutputWindow: () => Promise<void>
+  copyToClipboard: (text: string) => Promise<void>
+
   getLocalModels: () => Promise<string[]>
   downloadModel: (modelType: string) => Promise<void>
   deleteModel: (modelType: string) => Promise<void>

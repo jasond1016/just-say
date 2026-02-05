@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, screen, desktopCapturer } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -30,6 +30,8 @@ import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 let mainWindow: BrowserWindow | null = null
 let indicatorWindow: BrowserWindow | null = null
 let meetingWindow: BrowserWindow | null = null
+let outputWindow: BrowserWindow | null = null
+let pendingOutputText: string | null = null
 
 type RecordingUiState = { recording?: boolean; processing?: boolean }
 let currentRecordingState: RecordingUiState = { recording: false }
@@ -170,6 +172,81 @@ function createIndicatorWindow(): BrowserWindow {
   }
 
   return window
+}
+
+function createOutputWindow(): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 520,
+    height: 240,
+    show: false,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  })
+
+  window.setMenuBarVisibility(false)
+  window.setMenu(null)
+
+  window.on('close', (e) => {
+    e.preventDefault()
+    window.hide()
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    window.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/output.html`)
+  } else {
+    window.loadFile(join(__dirname, '../renderer/output.html'))
+  }
+
+  window.webContents.on('did-finish-load', () => {
+    if (pendingOutputText) {
+      window.webContents.send('output-text', { text: pendingOutputText })
+      pendingOutputText = null
+    }
+  })
+
+  return window
+}
+
+function showOutputWindow(text: string): void {
+  if (!text?.trim()) return
+
+  if (!outputWindow) {
+    outputWindow = createOutputWindow()
+  }
+
+  // Position near cursor (clamped to display work area)
+  try {
+    const cursor = screen.getCursorScreenPoint()
+    const display = screen.getDisplayNearestPoint(cursor)
+    const { x, y, width, height } = display.workArea
+    const winW = 520
+    const winH = 240
+    const nextX = Math.min(Math.max(cursor.x - Math.round(winW / 2), x), x + width - winW)
+    const nextY = Math.min(Math.max(cursor.y + 20, y), y + height - winH)
+    outputWindow.setPosition(nextX, nextY)
+  } catch (err) {
+    console.warn('[Main] Failed to position output window:', err)
+  }
+
+  if (outputWindow.webContents.isLoading()) {
+    pendingOutputText = text
+  } else {
+    outputWindow.webContents.send('output-text', { text })
+  }
+
+  // Show without stealing focus when possible
+  try {
+    outputWindow.showInactive()
+  } catch {
+    outputWindow.show()
+  }
 }
 
 function createMeetingWindow(): BrowserWindow {
@@ -338,10 +415,15 @@ async function initializeApp(): Promise<void> {
 
         if (result?.text) {
           const config = getConfig()
-          await inputSimulator?.typeText(result.text, {
+          const method = config.output?.method || 'simulate_input'
+          const finalText = await inputSimulator?.typeText(result.text, {
+            method,
             autoSpace: config.output?.autoSpace,
             capitalize: config.output?.capitalize
           })
+          if (method === 'popup' && finalText) {
+            showOutputWindow(finalText)
+          }
         }
       } catch (error) {
         console.error('[Main] Streaming recognition error:', error)
@@ -377,10 +459,15 @@ async function initializeApp(): Promise<void> {
           const result = await recognitionController?.recognize(audioBuffer)
           if (result?.text) {
             const config = getConfig()
-            await inputSimulator?.typeText(result.text, {
+            const method = config.output?.method || 'simulate_input'
+            const finalText = await inputSimulator?.typeText(result.text, {
+              method,
               autoSpace: config.output?.autoSpace,
               capitalize: config.output?.capitalize
             })
+            if (method === 'popup' && finalText) {
+              showOutputWindow(finalText)
+            }
           }
         }
       } catch (error) {
@@ -424,6 +511,7 @@ app.on('before-quit', () => {
   mainWindow?.removeAllListeners('close')
   meetingWindow?.removeAllListeners('close')
   indicatorWindow?.removeAllListeners('close')
+  outputWindow?.removeAllListeners('close')
 })
 
 // IPC handlers
@@ -449,6 +537,14 @@ ipcMain.handle('quit-app', () => {
 
 ipcMain.handle('show-meeting-window', () => {
   showMeetingWindow()
+})
+
+ipcMain.handle('close-output-window', () => {
+  outputWindow?.hide()
+})
+
+ipcMain.handle('copy-to-clipboard', (_event, text: string) => {
+  clipboard.writeText(text || '')
 })
 
 ipcMain.handle('get-local-models', async () => {

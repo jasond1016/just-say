@@ -12,14 +12,19 @@ export class InputSimulator {
 
   async typeText(
     text: string,
-    options?: { autoSpace?: boolean; capitalize?: boolean }
-  ): Promise<void> {
+    options?: {
+      method?: 'simulate_input' | 'clipboard' | 'popup'
+      autoSpace?: boolean
+      capitalize?: boolean
+    }
+  ): Promise<string | null> {
     if (!text?.trim()) {
       console.log('[InputSimulator] No text to type')
-      return
+      return null
     }
 
     let finalText = text
+    const method = options?.method || 'simulate_input'
 
     // 1. Handle Capitalize
     if (options?.capitalize && finalText.length > 0) {
@@ -46,20 +51,27 @@ export class InputSimulator {
       finalText.substring(0, 50) + (finalText.length > 50 ? '...' : '')
     )
 
-    try {
-      // Use clipboard + paste method for all platforms
-      await this.pasteViaClipboard(finalText)
-    } catch (error) {
-      console.error('[InputSimulator] Error:', error)
-      // Fallback: just copy to clipboard
+    if (method === 'clipboard' || method === 'popup') {
       clipboard.writeText(finalText)
-      console.log('[InputSimulator] Fallback: copied to clipboard, please paste manually')
+      console.log('[InputSimulator] Copied to clipboard')
+    } else {
+      try {
+        // Use clipboard + paste method for all platforms
+        await this.pasteViaClipboard(finalText)
+      } catch (error) {
+        console.error('[InputSimulator] Auto-paste error:', error)
+        // Fallback: just copy to clipboard
+        clipboard.writeText(finalText)
+        console.log('[InputSimulator] Fallback: copied to clipboard, please paste manually')
+      }
     }
 
     // 3. Update state
     if (finalText.length > 0) {
       this.lastChar = finalText.charAt(finalText.length - 1)
     }
+
+    return finalText
   }
 
   private async pasteViaClipboard(text: string): Promise<void> {
