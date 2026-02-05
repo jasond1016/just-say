@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ModelManager } from '../components/Settings/ModelManager'
 import { getMicrophoneDevices } from '../microphone-capture'
+import { hasCapability } from '../../../shared/backend-capabilities'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type SettingsTab = 'general' | 'audio' | 'recognition' | 'hotkey' | 'output' | 'appearance' | 'advanced'
@@ -745,6 +746,25 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                       <option value="mixtral-8x7b-32768">Mixtral 8x7B (更快)</option>
                     </select>
                   </div>
+                  {hasCapability(config.recognition?.backend, 'punctuation') && (
+                    <div className="settings-row">
+                      <div className="settings-row__info">
+                        <div className="settings-row__label">自动标点</div>
+                        <div className="settings-row__desc">让模型自动添加标点符号</div>
+                      </div>
+                      <label className="toggle">
+                        <input
+                          type="checkbox"
+                          className="toggle__input"
+                          checked={config.recognition?.punctuation !== false}
+                          onChange={(e) =>
+                            updateConfig({ recognition: { punctuation: e.target.checked } })
+                          }
+                        />
+                        <span className="toggle__slider" />
+                      </label>
+                    </div>
+                  )}
                 </>
               )}
             </div>
