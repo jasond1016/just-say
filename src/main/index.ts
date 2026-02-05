@@ -292,7 +292,11 @@ async function initializeApp(): Promise<void> {
         )
 
         if (result?.text) {
-          await inputSimulator?.typeText(result.text)
+          const config = getConfig()
+          await inputSimulator?.typeText(result.text, {
+            autoSpace: config.output?.autoSpace,
+            capitalize: config.output?.capitalize
+          })
         }
       } catch (error) {
         console.error('[Main] Streaming recognition error:', error)
@@ -326,7 +330,11 @@ async function initializeApp(): Promise<void> {
         if (audioBuffer && audioBuffer.length > 0) {
           const result = await recognitionController?.recognize(audioBuffer)
           if (result?.text) {
-            await inputSimulator?.typeText(result.text)
+            const config = getConfig()
+            await inputSimulator?.typeText(result.text, {
+              autoSpace: config.output?.autoSpace,
+              capitalize: config.output?.capitalize
+            })
           }
         }
       } catch (error) {

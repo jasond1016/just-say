@@ -12,7 +12,7 @@
 - [ ] 本地模型线程数 - `recognition.local.threads`
 
 ### 输出设置
-- [ ] 首字母大写 - `output.capitalize`
+- [x] 首字母大写 - `output.capitalize`
 
 ### 外观设置
 - [ ] 指示器位置 - `ui.indicatorPosition`

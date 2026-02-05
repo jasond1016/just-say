@@ -924,6 +924,22 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   <span className="toggle__slider" />
                 </label>
               </div>
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">首字母大写</div>
+                  <div className="settings-row__desc">自动将每次识别结果的首字母大写</div>
+                </div>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    className="toggle__input"
+                    checked={config.output?.capitalize !== false}
+                    onChange={(e) => updateConfig({ output: { capitalize: e.target.checked } })}
+                  />
+                  <span className="toggle__slider" />
+                </label>
+              </div>
             </div>
           )}
 

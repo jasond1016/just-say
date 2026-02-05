@@ -4,27 +4,61 @@ import * as os from 'os'
 
 export class InputSimulator {
   private platform: string
+  private lastChar: string = ''
 
   constructor() {
     this.platform = os.platform()
   }
 
-  async typeText(text: string): Promise<void> {
+  async typeText(
+    text: string,
+    options?: { autoSpace?: boolean; capitalize?: boolean }
+  ): Promise<void> {
     if (!text?.trim()) {
       console.log('[InputSimulator] No text to type')
       return
     }
 
-    console.log('[InputSimulator] Typing:', text.substring(0, 50) + (text.length > 50 ? '...' : ''))
+    let finalText = text
+
+    // 1. Handle Capitalize
+    if (options?.capitalize && finalText.length > 0) {
+      finalText = finalText.charAt(0).toUpperCase() + finalText.slice(1)
+    }
+
+    // 2. Handle AutoSpace
+    if (options?.autoSpace) {
+      const isAlphaNum = (char: string): boolean => /^[a-zA-Z0-9]$/.test(char)
+
+      // If last char was alphaNum AND current first char is alphaNum -> add space
+      if (
+        this.lastChar &&
+        finalText.length > 0 &&
+        isAlphaNum(this.lastChar) &&
+        isAlphaNum(finalText.charAt(0))
+      ) {
+        finalText = ' ' + finalText
+      }
+    }
+
+    console.log(
+      '[InputSimulator] Typing:',
+      finalText.substring(0, 50) + (finalText.length > 50 ? '...' : '')
+    )
 
     try {
       // Use clipboard + paste method for all platforms
-      await this.pasteViaClipboard(text)
+      await this.pasteViaClipboard(finalText)
     } catch (error) {
       console.error('[InputSimulator] Error:', error)
       // Fallback: just copy to clipboard
-      clipboard.writeText(text)
+      clipboard.writeText(finalText)
       console.log('[InputSimulator] Fallback: copied to clipboard, please paste manually')
+    }
+
+    // 3. Update state
+    if (finalText.length > 0) {
+      this.lastChar = finalText.charAt(finalText.length - 1)
     }
   }
 
