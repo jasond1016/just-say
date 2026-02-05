@@ -38,8 +38,13 @@ export class RecognitionController extends EventEmitter {
     console.log(`[Recognition] Using ${backend} backend`)
 
     switch (backend) {
-      case 'api':
-        return new ApiRecognizer(this.config.recognition?.api)
+      case 'api': {
+        const openaiApiKey = getApiKey('openai')
+        return new ApiRecognizer({
+          ...this.config.recognition?.api,
+          apiKey: openaiApiKey || this.config.recognition?.api?.apiKey
+        })
+      }
       case 'soniox': {
         const sonioxApiKey = getApiKey('soniox')
         return new SonioxRecognizer({

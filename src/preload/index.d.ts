@@ -26,10 +26,10 @@ interface JustSayAPI {
   setConfig: (config: unknown) => Promise<void>
 
   // Secure API Key management
-  getApiKey: (provider: 'soniox' | 'groq') => Promise<string | undefined>
-  setApiKey: (provider: 'soniox' | 'groq', apiKey: string) => Promise<void>
-  deleteApiKey: (provider: 'soniox' | 'groq') => Promise<void>
-  hasApiKey: (provider: 'soniox' | 'groq') => Promise<boolean>
+  getApiKey: (provider: 'soniox' | 'groq' | 'openai') => Promise<string | undefined>
+  setApiKey: (provider: 'soniox' | 'groq' | 'openai', apiKey: string) => Promise<void>
+  deleteApiKey: (provider: 'soniox' | 'groq' | 'openai') => Promise<void>
+  hasApiKey: (provider: 'soniox' | 'groq' | 'openai') => Promise<boolean>
 
   showSettings: () => Promise<void>
   showMeetingWindow: () => Promise<void>

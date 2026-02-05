@@ -14,13 +14,13 @@ const api = {
   setConfig: (config: unknown): Promise<void> => ipcRenderer.invoke('set-config', config),
 
   // Secure API Key management
-  getApiKey: (provider: 'soniox' | 'groq'): Promise<string | undefined> =>
+  getApiKey: (provider: 'soniox' | 'groq' | 'openai'): Promise<string | undefined> =>
     ipcRenderer.invoke('get-api-key', provider),
-  setApiKey: (provider: 'soniox' | 'groq', apiKey: string): Promise<void> =>
+  setApiKey: (provider: 'soniox' | 'groq' | 'openai', apiKey: string): Promise<void> =>
     ipcRenderer.invoke('set-api-key', provider, apiKey),
-  deleteApiKey: (provider: 'soniox' | 'groq'): Promise<void> =>
+  deleteApiKey: (provider: 'soniox' | 'groq' | 'openai'): Promise<void> =>
     ipcRenderer.invoke('delete-api-key', provider),
-  hasApiKey: (provider: 'soniox' | 'groq'): Promise<boolean> =>
+  hasApiKey: (provider: 'soniox' | 'groq' | 'openai'): Promise<boolean> =>
     ipcRenderer.invoke('has-api-key', provider),
 
   // App control

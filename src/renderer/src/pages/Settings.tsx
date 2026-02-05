@@ -48,8 +48,11 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
   const [sonioxApiKey, setSonioxApiKey] = useState('')
   const [groqApiKey, setGroqApiKey] = useState('')
+  const [openaiApiKey, setOpenaiApiKey] = useState('')
   const [hasSonioxKey, setHasSonioxKey] = useState(false)
   const [hasGroqKey, setHasGroqKey] = useState(false)
+  const [hasOpenaiKey, setHasOpenaiKey] = useState(false)
+  const [openaiEndpointDraft, setOpenaiEndpointDraft] = useState('')
   const [connectionStatus, setConnectionStatus] = useState<
     'idle' | 'testing' | 'success' | 'failed'
   >('idle')
@@ -110,16 +113,20 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   }, [config?.recognition?.local?.serverHost, config?.recognition?.local?.serverPort, currentServerHost, currentServerPort])
 
   const loadApiKeys = async (): Promise<void> => {
-    const [sonioxKey, groqKey, hasSoniox, hasGroq] = await Promise.all([
+    const [sonioxKey, groqKey, openaiKey, hasSoniox, hasGroq, hasOpenai] = await Promise.all([
       window.api.getApiKey('soniox'),
       window.api.getApiKey('groq'),
+      window.api.getApiKey('openai'),
       window.api.hasApiKey('soniox'),
-      window.api.hasApiKey('groq')
+      window.api.hasApiKey('groq'),
+      window.api.hasApiKey('openai')
     ])
     if (sonioxKey) setSonioxApiKey(sonioxKey)
     if (groqKey) setGroqApiKey(groqKey)
+    if (openaiKey) setOpenaiApiKey(openaiKey)
     setHasSonioxKey(hasSoniox)
     setHasGroqKey(hasGroq)
+    setHasOpenaiKey(hasOpenai)
   }
 
   const handleSonioxApiKeyChange = async (value: string): Promise<void> => {
@@ -142,6 +149,29 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
       await window.api.deleteApiKey('groq')
       setHasGroqKey(false)
     }
+  }
+
+  const handleOpenaiApiKeyChange = async (value: string): Promise<void> => {
+    setOpenaiApiKey(value)
+    if (value.trim()) {
+      await window.api.setApiKey('openai', value)
+      setHasOpenaiKey(true)
+    } else {
+      await window.api.deleteApiKey('openai')
+      setHasOpenaiKey(false)
+    }
+  }
+
+  const commitOpenaiEndpoint = async (nextValue?: string): Promise<void> => {
+    if (!config) return
+    const trimmed = (nextValue ?? openaiEndpointDraft).trim()
+    const currentEndpoint = config.recognition?.api?.endpoint || 'https://api.openai.com/v1'
+    if (!trimmed) {
+      setOpenaiEndpointDraft(currentEndpoint)
+      return
+    }
+    if (trimmed === currentEndpoint) return
+    await updateConfig({ recognition: { api: { endpoint: trimmed } } })
   }
 
   const loadConfig = async (): Promise<void> => {
@@ -178,6 +208,12 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
       }
     })
   }
+
+  useEffect(() => {
+    if (!config) return
+    const currentEndpoint = config.recognition?.api?.endpoint || 'https://api.openai.com/v1'
+    setOpenaiEndpointDraft(currentEndpoint)
+  }, [config?.recognition?.api?.endpoint])
 
   useEffect(() => {
     if (!config) return
@@ -765,6 +801,65 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                       </label>
                     </div>
                   )}
+                </>
+              )}
+
+              {config.recognition?.backend === 'api' && (
+                <>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">API Endpoint</div>
+                      <div className="settings-row__desc">OpenAI 兼容的 API 地址</div>
+                    </div>
+                    <input
+                      className="form-input"
+                      style={{ width: 280 }}
+                      value={openaiEndpointDraft}
+                      placeholder="https://api.openai.com/v1"
+                      onChange={(e) => setOpenaiEndpointDraft(e.target.value)}
+                      onBlur={() => commitOpenaiEndpoint()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          void commitOpenaiEndpoint()
+                          e.currentTarget.blur()
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">API Key</div>
+                      <div className="settings-row__desc">
+                        {hasOpenaiKey ? '已安全存储 (加密)' : '输入您的 OpenAI API 密钥'}
+                      </div>
+                    </div>
+                    <input
+                      type="password"
+                      className="form-input"
+                      style={{ width: 280 }}
+                      value={openaiApiKey}
+                      placeholder="sk-..."
+                      onChange={(e) => handleOpenaiApiKeyChange(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">模型</div>
+                      <div className="settings-row__desc">选择 Whisper 模型版本</div>
+                    </div>
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 200 }}
+                      value={config.recognition?.api?.model || 'whisper-1'}
+                      onChange={(e) =>
+                        updateConfig({ recognition: { api: { model: e.target.value } } })
+                      }
+                    >
+                      <option value="whisper-1">whisper-1</option>
+                    </select>
+                  </div>
                 </>
               )}
             </div>

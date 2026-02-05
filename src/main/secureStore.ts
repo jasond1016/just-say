@@ -4,6 +4,7 @@ import { safeStorage } from 'electron'
 interface SecureStoreSchema {
   soniox_api_key?: string
   groq_api_key?: string
+  openai_api_key?: string
 }
 
 let secureStore: Store<SecureStoreSchema> | null = null
@@ -36,7 +37,7 @@ function decryptValue(encryptedValue: string): string {
   return encryptedValue
 }
 
-export function setApiKey(provider: 'soniox' | 'groq', apiKey: string): void {
+export function setApiKey(provider: 'soniox' | 'groq' | 'openai', apiKey: string): void {
   if (!secureStore) {
     console.error('[SecureStore] Store not initialized')
     return
@@ -47,7 +48,7 @@ export function setApiKey(provider: 'soniox' | 'groq', apiKey: string): void {
   console.log(`[SecureStore] ${provider} API key saved (encrypted: ${safeStorage.isEncryptionAvailable()})`)
 }
 
-export function getApiKey(provider: 'soniox' | 'groq'): string | undefined {
+export function getApiKey(provider: 'soniox' | 'groq' | 'openai'): string | undefined {
   if (!secureStore) {
     console.error('[SecureStore] Store not initialized')
     return undefined
@@ -58,14 +59,14 @@ export function getApiKey(provider: 'soniox' | 'groq'): string | undefined {
   return decryptValue(encrypted)
 }
 
-export function deleteApiKey(provider: 'soniox' | 'groq'): void {
+export function deleteApiKey(provider: 'soniox' | 'groq' | 'openai'): void {
   if (!secureStore) return
   const key = `${provider}_api_key` as keyof SecureStoreSchema
   secureStore.delete(key)
   console.log(`[SecureStore] ${provider} API key deleted`)
 }
 
-export function hasApiKey(provider: 'soniox' | 'groq'): boolean {
+export function hasApiKey(provider: 'soniox' | 'groq' | 'openai'): boolean {
   if (!secureStore) return false
   const key = `${provider}_api_key` as keyof SecureStoreSchema
   return secureStore.has(key)

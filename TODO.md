@@ -8,8 +8,6 @@
 ## UI缺失（配置已定义但UI未暴露）
 
 ### 识别设置
-- [ ] 自动标点开关 - `recognition.punctuation`
-- [ ] OpenAI API 完整配置 - `recognition.api.*` (endpoint, apiKey, model)
 - [ ] 本地模型 GPU/CPU 选择 - `recognition.local.device`
 - [ ] 本地模型线程数 - `recognition.local.threads`
 

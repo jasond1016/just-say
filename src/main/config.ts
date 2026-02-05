@@ -92,6 +92,10 @@ const defaultConfig: AppConfig = {
       computeType: 'int8',
       serverMode: 'local',
       serverPort: 8765
+    },
+    api: {
+      endpoint: 'https://api.openai.com/v1',
+      model: 'whisper-1'
     }
   },
   output: {

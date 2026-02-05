@@ -515,19 +515,19 @@ ipcMain.on('microphone-error', (_event, message: string) => {
 })
 
 // Secure API Key IPC handlers
-ipcMain.handle('get-api-key', (_event, provider: 'soniox' | 'groq') => {
+ipcMain.handle('get-api-key', (_event, provider: 'soniox' | 'groq' | 'openai') => {
   return getApiKey(provider)
 })
 
-ipcMain.handle('set-api-key', (_event, provider: 'soniox' | 'groq', apiKey: string) => {
+ipcMain.handle('set-api-key', (_event, provider: 'soniox' | 'groq' | 'openai', apiKey: string) => {
   setApiKey(provider, apiKey)
 })
 
-ipcMain.handle('delete-api-key', (_event, provider: 'soniox' | 'groq') => {
+ipcMain.handle('delete-api-key', (_event, provider: 'soniox' | 'groq' | 'openai') => {
   deleteApiKey(provider)
 })
 
-ipcMain.handle('has-api-key', (_event, provider: 'soniox' | 'groq') => {
+ipcMain.handle('has-api-key', (_event, provider: 'soniox' | 'groq' | 'openai') => {
   return hasApiKey(provider)
 })
 
