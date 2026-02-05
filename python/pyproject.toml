@@ -5,6 +5,6 @@ description = "Faster-Whisper service for JustSay"
 requires-python = ">=3.10"
 dependencies = [
     "faster-whisper>=1.0.0",
-    "nvidia-cublas-cu12>=12.9.1.4",
-    "nvidia-cudnn-cu12>=9.17.0.29",
+    "nvidia-cublas-cu12>=12.9.1.4; sys_platform == 'linux' or sys_platform == 'win32'",
+    "nvidia-cudnn-cu12>=9.17.0.29; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
