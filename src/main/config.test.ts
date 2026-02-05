@@ -161,7 +161,7 @@ describe('AppConfig structure', () => {
         minimizeToTray: true
       },
       hotkey: {
-        triggerKey: 'RAlt',
+        triggerKey: 'RCtrl',
         mode: 'push_to_talk' as const
       },
       audio: {
@@ -196,7 +196,7 @@ describe('AppConfig structure', () => {
     }
 
     expect(defaultConfig.general.language).toBe('zh-CN')
-    expect(defaultConfig.hotkey.triggerKey).toBe('RAlt')
+    expect(defaultConfig.hotkey.triggerKey).toBe('RCtrl')
     expect(defaultConfig.audio.sampleRate).toBe(16000)
     expect(defaultConfig.recognition.backend).toBe('local')
     expect(defaultConfig.ui.theme).toBe('system')

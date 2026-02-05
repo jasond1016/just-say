@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const mockClipboard = {
-  readText: vi.fn<string, []>(),
-  writeText: vi.fn<void, [string]>()
+  readText: vi.fn(() => ''),
+  writeText: vi.fn((_text: string) => undefined)
 }
 
 const mockExec = vi.fn()

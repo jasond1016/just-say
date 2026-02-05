@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { ModelManager } from '../components/Settings/ModelManager'
 import { getMicrophoneDevices } from '../microphone-capture'
 import { hasCapability } from '../../../shared/backend-capabilities'
+import { DEFAULT_TRIGGER_KEY } from '../../../shared/hotkey'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type SettingsTab = 'general' | 'audio' | 'recognition' | 'hotkey' | 'output' | 'appearance' | 'advanced'
@@ -877,7 +878,7 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                 <select
                   className="form-input form-select"
                   style={{ width: 150 }}
-                  value={config.hotkey?.triggerKey || 'RAlt'}
+                  value={config.hotkey?.triggerKey || DEFAULT_TRIGGER_KEY}
                   onChange={(e) => updateConfig({ hotkey: { triggerKey: e.target.value } })}
                 >
                   <option value="RAlt">Right Alt</option>

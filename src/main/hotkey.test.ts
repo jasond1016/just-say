@@ -1,184 +1,120 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock child_process and os before import
-const mockExec = vi.fn()
-const mockPlatform = vi.fn()
+const { listeners, mockUiohook, mockKeys, mockPlatform } = vi.hoisted(() => {
+  const listeners: Record<string, (e: any) => any> = {}
+  const mockUiohook: any = {
+    on: vi.fn((event: string, listener: (e: any) => any) => {
+      listeners[event] = listener
+      return mockUiohook
+    }),
+    start: vi.fn(),
+    stop: vi.fn(),
+    keyTap: vi.fn(),
+    keyToggle: vi.fn()
+  }
 
-vi.mock('child_process', () => ({
-  exec: mockExec
+  const mockKeys = {
+    Escape: 1,
+    F13: 91,
+    F14: 92,
+    CtrlRight: 3613,
+    AltRight: 3640
+  }
+
+  const mockPlatform = vi.fn()
+
+  return { listeners, mockUiohook, mockKeys, mockPlatform }
+})
+
+vi.mock('uiohook-napi', () => ({
+  uIOhook: mockUiohook,
+  UiohookKey: mockKeys
 }))
 
 vi.mock('os', () => ({
   platform: mockPlatform
 }))
 
-describe('clearAltModifier - cross-platform behavior', () => {
+import { HotkeyManager } from './hotkey'
+
+describe('HotkeyManager', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockExec.mockImplementation((_cmd, callback) => {
-      // Immediately call the callback
-      if (typeof callback === 'function') {
-        callback(null)
-      }
-    })
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('should call xdotool on Linux', async () => {
-    mockPlatform.mockReturnValue('linux')
-    
-    // Simulate the clearAltModifier logic
-    const clearAltModifier = async () => {
-      return new Promise<void>((resolve) => {
-        mockExec('xdotool keyup Alt_L Alt_R 2>/dev/null || xdotool key --clearmodifiers 2>/dev/null || true', () => {
-          mockExec('xdotool key --delay 10 a 2>/dev/null || true', () => {
-            resolve()
-          })
-        })
-      })
+    for (const key of Object.keys(listeners)) {
+      delete listeners[key]
     }
-    
-    await clearAltModifier()
-    
-    expect(mockExec).toHaveBeenCalledTimes(2)
-    expect(mockExec.mock.calls[0][0]).toContain('xdotool keyup Alt_L Alt_R')
-    expect(mockExec.mock.calls[1][0]).toContain('xdotool key --delay 10 a')
   })
 
-  it('should call PowerShell on Windows', async () => {
+  it('starts and stops uIOhook', () => {
     mockPlatform.mockReturnValue('win32')
-    
-    const clearAltModifier = async () => {
-      return new Promise<void>((resolve) => {
-        const script = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('{ESCAPE}')`
-        mockExec(`powershell -Command "${script.replace(/"/g, '\\"')}"`, () => resolve())
-      })
-    }
-    
-    await clearAltModifier()
-    
-    expect(mockExec).toHaveBeenCalledTimes(1)
-    expect(mockExec.mock.calls[0][0]).toContain('powershell')
-    expect(mockExec.mock.calls[0][0]).toContain('{ESCAPE}')
+    const manager = new HotkeyManager('RCtrl')
+    manager.start()
+    manager.stop()
+
+    expect(mockUiohook.start).toHaveBeenCalledTimes(1)
+    expect(mockUiohook.stop).toHaveBeenCalledTimes(1)
   })
 
-  it('should call osascript on macOS', async () => {
-    mockPlatform.mockReturnValue('darwin')
-    
-    const clearAltModifier = async () => {
-      return new Promise<void>((resolve) => {
-        mockExec(`osascript -e 'tell application "System Events" to key up option using command down' 2>/dev/null`, () => resolve())
-      })
-    }
-    
-    await clearAltModifier()
-    
-    expect(mockExec).toHaveBeenCalledTimes(1)
-    expect(mockExec.mock.calls[0][0]).toContain('osascript')
-    expect(mockExec.mock.calls[0][0]).toContain('key up option')
+  it('uses configured trigger key and emits start/stop', async () => {
+    mockPlatform.mockReturnValue('win32')
+    const manager = new HotkeyManager('F13')
+    const recordStart = vi.fn()
+    const recordStop = vi.fn()
+
+    manager.on('recordStart', recordStart)
+    manager.on('recordStop', recordStop)
+
+    expect(listeners.keydown).toBeTypeOf('function')
+    expect(listeners.keyup).toBeTypeOf('function')
+
+    listeners.keydown({ keycode: mockKeys.F13 })
+    await listeners.keyup({ keycode: mockKeys.F13 })
+
+    expect(recordStart).toHaveBeenCalledTimes(1)
+    expect(recordStop).toHaveBeenCalledTimes(1)
   })
 
-  it('should silently ignore if command fails', async () => {
+  it('updates trigger key at runtime', async () => {
+    mockPlatform.mockReturnValue('win32')
+    const manager = new HotkeyManager('RAlt')
+    const recordStart = vi.fn()
+
+    manager.on('recordStart', recordStart)
+
+    manager.setTriggerKey('RCtrl')
+    listeners.keydown({ keycode: mockKeys.AltRight })
+    listeners.keydown({ keycode: mockKeys.CtrlRight })
+
+    expect(recordStart).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears Windows Alt menu focus only when using RAlt and recording occurred', async () => {
+    mockPlatform.mockReturnValue('win32')
+    const manager = new HotkeyManager('RAlt')
+    const recordStop = vi.fn()
+    manager.on('recordStop', recordStop)
+
+    // Press and release: should clear Alt side-effect and stop recording
+    listeners.keydown({ keycode: mockKeys.AltRight })
+    await listeners.keyup({ keycode: mockKeys.AltRight })
+
+    expect(mockUiohook.keyTap).toHaveBeenCalledTimes(1)
+    expect(mockUiohook.keyTap).toHaveBeenCalledWith(mockKeys.Escape)
+    expect(recordStop).toHaveBeenCalledTimes(1)
+
+    // Release again without recording: should not clear again
+    await listeners.keyup({ keycode: mockKeys.AltRight })
+    expect(mockUiohook.keyTap).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not attempt Alt clearing on non-Windows platforms', async () => {
     mockPlatform.mockReturnValue('linux')
-    
-    // First exec fails (xdotool not installed), second succeeds
-    mockExec.mockImplementation((cmd, callback) => {
-      if (typeof callback === 'function') {
-        if (cmd.includes('keyup Alt_L Alt_R')) {
-          callback({ code: 127 }) // Command not found
-        } else {
-          callback(null)
-        }
-      }
-    })
-    
-    const clearAltModifier = async () => {
-      return new Promise<void>((resolve) => {
-        mockExec('xdotool keyup Alt_L Alt_R 2>/dev/null || xdotool key --clearmodifiers 2>/dev/null || true', () => {
-          resolve()
-        })
-      })
-    }
-    
-    // Should not throw, just resolve
-    await expect(clearAltModifier()).resolves.toBeUndefined()
-  })
-})
+    const manager = new HotkeyManager('RAlt')
+    manager.on('recordStop', vi.fn())
 
-describe('HotkeyManager - state machine logic', () => {
-  it('should track recording state correctly', () => {
-    let isRecording = false
-    let recordStartCount = 0
-    let recordStopCount = 0
-    
-    // Simulate keydown/keyup handlers
-    const handleKeyDown = (keycode: number, targetKey: number) => {
-      if (keycode === targetKey && !isRecording) {
-        isRecording = true
-        recordStartCount++
-        return true
-      }
-      return false
-    }
-    
-    const handleKeyUp = (keycode: number, targetKey: number) => {
-      if (keycode === targetKey && isRecording) {
-        isRecording = false
-        recordStopCount++
-        return true
-      }
-      return false
-    }
-    
-    const TARGET_KEY = 0xA5 // Right Alt
-    
-    // Initial state
-    expect(isRecording).toBe(false)
-    expect(recordStartCount).toBe(0)
-    
-    // Press key - should start recording
-    expect(handleKeyDown(TARGET_KEY, TARGET_KEY)).toBe(true)
-    expect(isRecording).toBe(true)
-    expect(recordStartCount).toBe(1)
-    
-    // Press again - should be ignored
-    expect(handleKeyDown(TARGET_KEY, TARGET_KEY)).toBe(false)
-    expect(isRecording).toBe(true)
-    expect(recordStartCount).toBe(1)
-    
-    // Release key - should stop recording
-    expect(handleKeyUp(TARGET_KEY, TARGET_KEY)).toBe(true)
-    expect(isRecording).toBe(false)
-    expect(recordStopCount).toBe(1)
-    
-    // Release again - should be ignored
-    expect(handleKeyUp(TARGET_KEY, TARGET_KEY)).toBe(false)
-    expect(isRecording).toBe(false)
-    expect(recordStopCount).toBe(1)
-  })
+    listeners.keydown({ keycode: mockKeys.AltRight })
+    await listeners.keyup({ keycode: mockKeys.AltRight })
 
-  it('should ignore wrong key', () => {
-    let isRecording = false
-    let recordStartCount = 0
-    
-    const handleKeyDown = (keycode: number, targetKey: number) => {
-      if (keycode === targetKey && !isRecording) {
-        isRecording = true
-        recordStartCount++
-        return true
-      }
-      return false
-    }
-    
-    const WRONG_KEY = 0x41 // A key
-    const TARGET_KEY = 0xA5 // Right Alt
-    
-    // Press wrong key - should be ignored
-    expect(handleKeyDown(WRONG_KEY, TARGET_KEY)).toBe(false)
-    expect(isRecording).toBe(false)
-    expect(recordStartCount).toBe(0)
+    expect(mockUiohook.keyTap).not.toHaveBeenCalled()
   })
 })

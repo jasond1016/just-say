@@ -351,7 +351,7 @@ async function initializeApp(): Promise<void> {
   audioRecorder = new WebAudioRecorder()
   recognitionController = new RecognitionController(config)
   inputSimulator = new InputSimulator()
-  hotkeyManager = new HotkeyManager()
+  hotkeyManager = new HotkeyManager(config.hotkey?.triggerKey)
 
   // Check if using streaming Soniox
   const useStreamingSoniox =
@@ -481,7 +481,7 @@ async function initializeApp(): Promise<void> {
 
   // Start hotkey listener
   hotkeyManager.start()
-  console.log('[Main] JustSay ready! Press Right Alt to record.')
+  console.log(`[Main] JustSay ready! Hold ${hotkeyManager.getTriggerKeyLabel()} to record.`)
 }
 
 // App lifecycle
@@ -521,6 +521,9 @@ ipcMain.handle('set-config', (_event, config) => {
   const prevConfig = getConfig()
   setConfig(config)
   const nextConfig = getConfig()
+  if (prevConfig.hotkey?.triggerKey !== nextConfig.hotkey?.triggerKey) {
+    hotkeyManager?.setTriggerKey(nextConfig.hotkey?.triggerKey)
+  }
   if (!recognitionController || shouldRecreateRecognition(prevConfig, nextConfig)) {
     recognitionController = new RecognitionController(nextConfig)
   }

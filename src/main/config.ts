@@ -1,4 +1,5 @@
 import Store from 'electron-store'
+import { DEFAULT_TRIGGER_KEY, type TriggerKey } from '../shared/hotkey'
 
 export interface AppConfig {
   general?: {
@@ -7,7 +8,7 @@ export interface AppConfig {
     minimizeToTray?: boolean
   }
   hotkey?: {
-    triggerKey?: string
+    triggerKey?: TriggerKey
   }
   audio?: {
     device?: string
@@ -73,7 +74,7 @@ const defaultConfig: AppConfig = {
     minimizeToTray: true
   },
   hotkey: {
-    triggerKey: 'RAlt'
+    triggerKey: DEFAULT_TRIGGER_KEY
   },
   audio: {
     device: 'default',

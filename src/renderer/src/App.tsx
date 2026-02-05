@@ -8,6 +8,7 @@ import { MeetingTranscription } from './pages/MeetingTranscription'
 import { Settings } from './pages/Settings'
 import { TranscriptHistory } from './pages/TranscriptHistory'
 import { TranscriptDetail } from './pages/TranscriptDetail'
+import { DEFAULT_TRIGGER_KEY, getTriggerKeyLabel } from '../../shared/hotkey'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type ViewType = 'ptt' | 'meeting' | 'settings' | 'history' | 'detail'
@@ -107,7 +108,7 @@ function App(): React.JSX.Element {
     setTheme(newTheme)
   }
 
-  const hotkey = config?.hotkey?.triggerKey || 'Right Alt'
+  const hotkey = getTriggerKeyLabel(config?.hotkey?.triggerKey || DEFAULT_TRIGGER_KEY)
   const engine =
     config?.recognition?.backend === 'soniox'
       ? 'Soniox'
