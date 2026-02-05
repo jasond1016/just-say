@@ -8,7 +8,6 @@ export interface AppConfig {
   }
   hotkey?: {
     triggerKey?: string
-    mode?: 'push_to_talk' | 'toggle'
   }
   audio?: {
     device?: string
@@ -74,8 +73,7 @@ const defaultConfig: AppConfig = {
     minimizeToTray: true
   },
   hotkey: {
-    triggerKey: 'RAlt',
-    mode: 'push_to_talk'
+    triggerKey: 'RAlt'
   },
   audio: {
     device: 'default',
