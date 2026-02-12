@@ -25,7 +25,6 @@ const api = {
 
   // App control
   showSettings: (): Promise<void> => ipcRenderer.invoke('show-settings'),
-  showMeetingWindow: (): Promise<void> => ipcRenderer.invoke('show-meeting-window'),
   quit: (): Promise<void> => ipcRenderer.invoke('quit-app'),
 
   // Recording state events

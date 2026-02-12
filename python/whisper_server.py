@@ -9,9 +9,11 @@ JustSay - Faster-Whisper HTTP Server
 import os
 import sys
 import json
+import glob
 import tempfile
 import time
 import argparse
+import traceback
 from pathlib import Path
 
 # Add NVIDIA paths before importing anything else
@@ -56,6 +58,15 @@ _model_info = {
     'device': None,
     'compute_type': None,
     'download_root': None
+}
+_runtime_policy = {
+    'lock_model': False,
+    'lock_device_compute': False,
+    'lock_language': False,
+    'default_model_type': 'tiny',
+    'default_language': None,
+    'device': 'cpu',
+    'compute_type': 'int8'
 }
 
 
@@ -116,6 +127,93 @@ def detect_gpu():
     return result
 
 
+def collect_candidate_library_dirs():
+    """Collect candidate library directories for NVIDIA runtime libs."""
+    dirs = []
+
+    def add_dir(path):
+        if path and os.path.isdir(path) and path not in dirs:
+            dirs.append(path)
+
+    ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
+    if ld_library_path:
+        for entry in ld_library_path.split(os.pathsep):
+            add_dir(entry)
+
+    possible_site_packages = []
+    try:
+        import site
+        if hasattr(site, 'getsitepackages'):
+            possible_site_packages.extend(site.getsitepackages())
+        if hasattr(site, 'getusersitepackages'):
+            user_site = site.getusersitepackages()
+            if user_site:
+                possible_site_packages.append(user_site)
+    except Exception:
+        pass
+
+    for p in sys.path:
+        if 'site-packages' in p:
+            possible_site_packages.append(p)
+
+    unique_site_packages = []
+    for p in possible_site_packages:
+        if p and p not in unique_site_packages:
+            unique_site_packages.append(p)
+
+    for site_packages in unique_site_packages:
+        nvidia_root = os.path.join(site_packages, 'nvidia')
+        if not os.path.isdir(nvidia_root):
+            continue
+        for pkg in ('cublas', 'cudnn'):
+            for subdir in ('lib', 'lib64', 'bin'):
+                add_dir(os.path.join(nvidia_root, pkg, subdir))
+
+    return dirs
+
+
+def find_first_library(candidate_dirs, patterns):
+    """Find first library file matching any glob pattern under candidate dirs."""
+    for directory in candidate_dirs:
+        for pattern in patterns:
+            matches = sorted(glob.glob(os.path.join(directory, pattern)))
+            if matches:
+                return matches[0]
+    return None
+
+
+def log_runtime_library_diagnostics():
+    """Log runtime library env and detected NVIDIA runtime libraries."""
+    ld_library_path = os.environ.get('LD_LIBRARY_PATH', '')
+    print(f"[Server] LD_LIBRARY_PATH: {ld_library_path or '(empty)'}", flush=True)
+
+    candidate_dirs = collect_candidate_library_dirs()
+    if not candidate_dirs:
+        print("[Server] No candidate NVIDIA library directories found", flush=True)
+    else:
+        max_preview = 8
+        preview_dirs = candidate_dirs[:max_preview]
+        for directory in preview_dirs:
+            print(f"[Server] LibDir: {directory}", flush=True)
+        if len(candidate_dirs) > max_preview:
+            print(
+                f"[Server] LibDir: ... ({len(candidate_dirs) - max_preview} more)",
+                flush=True
+            )
+
+    cublas_path = find_first_library(
+        candidate_dirs,
+        ['libcublas.so*', 'libcublasLt.so*', 'cublas64_*.dll']
+    )
+    cudnn_path = find_first_library(
+        candidate_dirs,
+        ['libcudnn.so*', 'cudnn64_*.dll']
+    )
+
+    print(f"[Server] Resolved cuBLAS: {cublas_path or 'NOT FOUND'}", flush=True)
+    print(f"[Server] Resolved cuDNN: {cudnn_path or 'NOT FOUND'}", flush=True)
+
+
 class WhisperHandler(BaseHTTPRequestHandler):
     """HTTP request handler for whisper service."""
     
@@ -135,9 +233,21 @@ class WhisperHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests."""
         parsed = urlparse(self.path)
-        
+
         if parsed.path == '/health':
-            self.send_json({'status': 'ok', 'model_loaded': _model is not None})
+            self.send_json({
+                'status': 'ok',
+                'model_loaded': _model is not None,
+                'runtime_policy': {
+                    'lock_model': _runtime_policy['lock_model'],
+                    'lock_device_compute': _runtime_policy['lock_device_compute'],
+                    'lock_language': _runtime_policy['lock_language'],
+                    'default_model_type': _runtime_policy['default_model_type'],
+                    'default_language': _runtime_policy['default_language'],
+                    'device': _runtime_policy['device'],
+                    'compute_type': _runtime_policy['compute_type']
+                }
+            })
         
         elif parsed.path == '/gpu':
             self.send_json(detect_gpu())
@@ -203,13 +313,34 @@ class WhisperHandler(BaseHTTPRequestHandler):
     def transcribe_audio(self, audio_data: bytes, params: dict) -> dict:
         """Transcribe audio bytes."""
         start_time = time.time()
-        
+
         # Get parameters
-        model_type = params.get('model', ['tiny'])[0]
-        device = params.get('device', ['cpu'])[0]
-        compute_type = params.get('compute_type', ['int8'])[0]
-        language = params.get('language', [None])[0]
+        default_model_type = _model_info['model_type'] or _runtime_policy['default_model_type'] or 'tiny'
+        default_device = _model_info['device'] or _runtime_policy['device'] or 'cpu'
+        default_compute_type = _model_info['compute_type'] or _runtime_policy['compute_type'] or 'int8'
+
+        requested_model_type = params.get('model', [default_model_type])[0]
+        if _runtime_policy['lock_model']:
+            model_type = default_model_type
+        else:
+            model_type = requested_model_type
+
+        requested_device = params.get('device', [default_device])[0]
+        requested_compute_type = params.get('compute_type', [default_compute_type])[0]
+        default_language = _runtime_policy['default_language']
+        requested_language = params.get('language', [default_language])[0]
+        if _runtime_policy['lock_language']:
+            language = default_language
+        else:
+            language = requested_language
         download_root = params.get('download_root', [None])[0]
+
+        if _runtime_policy['lock_device_compute']:
+            device = _runtime_policy['device']
+            compute_type = _runtime_policy['compute_type']
+        else:
+            device = requested_device
+            compute_type = requested_compute_type
         
         # Write to temp file
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
@@ -239,9 +370,27 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 'language': info.language,
                 'language_probability': info.language_probability,
                 'duration': info.duration,
-                'processing_time': time.time() - start_time
+                'processing_time': time.time() - start_time,
+                'device': device,
+                'compute_type': compute_type
             }
-            
+        except Exception as e:
+            print(
+                f"[Server] Transcribe failed: model={model_type}, device={device}, "
+                f"compute_type={compute_type}, error={e}",
+                flush=True
+            )
+            traceback.print_exc()
+            return {
+                'success': False,
+                'text': '',
+                'error': str(e),
+                'processing_time': time.time() - start_time,
+                'model': model_type,
+                'device': device,
+                'compute_type': compute_type,
+                'language': language
+            }
         finally:
             # Cleanup
             try:
@@ -366,16 +515,55 @@ class ThreadedHTTPServer(HTTPServer):
 
 
 def main():
+    global _runtime_policy
+
     parser = argparse.ArgumentParser(description='Whisper HTTP Server')
     parser.add_argument('--host', default='127.0.0.1', help='Host to bind to')
     parser.add_argument('--port', type=int, default=8765, help='Port to listen on')
     parser.add_argument('--preload-model', help='Pre-load a model on startup')
+    parser.add_argument(
+        '--default-model',
+        default='tiny',
+        choices=['tiny', 'base', 'small', 'medium', 'large-v3'],
+        help='Default model used when request does not provide model'
+    )
+    parser.add_argument(
+        '--default-language',
+        help='Default language (e.g. zh, en). If unset, auto language detection is used'
+    )
+    parser.add_argument(
+        '--lock-model',
+        action='store_true',
+        help='Ignore request model and always use server default/current model'
+    )
+    parser.add_argument(
+        '--lock-language',
+        action='store_true',
+        help='Ignore request language and always use server default language'
+    )
     parser.add_argument('--device', default='cpu', choices=['cpu', 'cuda'])
     parser.add_argument('--compute-type', default='int8')
+    parser.add_argument(
+        '--lock-device-compute',
+        action='store_true',
+        help='Ignore request device/compute_type and always use startup values'
+    )
     parser.add_argument('--download-root', help='Model cache directory')
-    
+
     args = parser.parse_args()
-    
+
+    _runtime_policy['lock_model'] = args.lock_model
+    _runtime_policy['lock_device_compute'] = args.lock_device_compute
+    _runtime_policy['lock_language'] = args.lock_language
+    _runtime_policy['default_model_type'] = args.preload_model or args.default_model
+    _runtime_policy['default_language'] = args.default_language
+    _runtime_policy['device'] = args.device
+    _runtime_policy['compute_type'] = args.compute_type
+
+    print(f"[Server] Python executable: {sys.executable}", flush=True)
+    print(f"[Server] Python version: {sys.version.split()[0]}", flush=True)
+    log_runtime_library_diagnostics()
+
     # Pre-load model if specified
     if args.preload_model:
         print(f"[Server] Pre-loading model: {args.preload_model}", flush=True)
@@ -394,7 +582,15 @@ def main():
     print(f"  POST /transcribe   - Transcribe audio", flush=True)
     print(f"  POST /model/load   - Pre-load model", flush=True)
     print(f"  POST /model/unload - Unload model", flush=True)
-    
+    if args.lock_model or args.lock_device_compute or args.lock_language:
+        print(
+            f"[Server] Runtime locked: lock_model={args.lock_model}, "
+            f"lock_language={args.lock_language}, "
+            f"default_language={args.default_language}, "
+            f"device={args.device}, compute_type={args.compute_type}",
+            flush=True
+        )
+
     try:
         server.serve_forever()
     except KeyboardInterrupt:

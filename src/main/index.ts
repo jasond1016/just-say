@@ -25,11 +25,11 @@ import { InputSimulator } from './input/simulator'
 import { MeetingTranscriptionManager } from './meeting-transcription'
 import { StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingSonioxConfig } from './recognition/streaming-soniox'
+import { StreamingLocalConfig } from './recognition/streaming-local'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
 let indicatorWindow: BrowserWindow | null = null
-let meetingWindow: BrowserWindow | null = null
 let outputWindow: BrowserWindow | null = null
 let pendingOutputText: string | null = null
 
@@ -44,6 +44,19 @@ let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
 let meetingTranscription: MeetingTranscriptionManager | null = null
+
+function sendMeetingEvent(channel: 'meeting-transcript' | 'meeting-status', payload: unknown): void {
+  const targets = [mainWindow]
+  const sentWebContents = new Set<number>()
+
+  for (const target of targets) {
+    if (!target || target.isDestroyed()) continue
+    const webContentsId = target.webContents.id
+    if (sentWebContents.has(webContentsId)) continue
+    sentWebContents.add(webContentsId)
+    target.webContents.send(channel, payload)
+  }
+}
 
 function getRecognitionSignature(config: AppConfig): string {
   return JSON.stringify({
@@ -249,58 +262,9 @@ function showOutputWindow(text: string): void {
   }
 }
 
-function createMeetingWindow(): BrowserWindow {
-  const window = new BrowserWindow({
-    width: 700,
-    height: 600,
-    show: false,
-    autoHideMenuBar: true,
-    title: '会议转录 - JustSay',
-    ...(process.platform === 'linux' ? { icon } : {}),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
-    }
-  })
-
-  window.on('close', (e) => {
-    // Stop transcription when window closes
-    if (meetingTranscription?.getStatus() === 'transcribing') {
-      meetingTranscription.stopTranscription()
-    }
-    e.preventDefault()
-    window.hide()
-  })
-
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    window.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/meeting.html`)
-  } else {
-    window.loadFile(join(__dirname, '../renderer/meeting.html'))
-  }
-
-  return window
-}
-
-function showMeetingWindow(): void {
-  if (!meetingWindow) {
-    meetingWindow = createMeetingWindow()
-  }
-  meetingWindow.show()
-
-  // Pre-connect to recognition service to reduce latency
-  const config = getConfig()
-  if (!meetingTranscription) {
-    meetingTranscription = createMeetingTranscriptionManager(config)
-  }
-  // Fire and forget - don't block window showing
-  meetingTranscription.preConnect().catch((err) => {
-    console.error('[Main] Pre-connect failed:', err)
-  })
-}
-
 /**
  * Create MeetingTranscriptionManager based on global backend setting.
- * Supports both Soniox (streaming WebSocket) and Groq (REST API with buffering).
+ * Supports Soniox/Groq and local faster-whisper (including remote LAN server mode).
  */
 function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscriptionManager {
   const backend = config.recognition?.backend
@@ -318,8 +282,20 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
     }
     console.log('[Main] Creating MeetingTranscriptionManager with Groq backend')
     return new MeetingTranscriptionManager('groq', undefined, groqConfig)
+  } else if (backend === 'local' || !backend || backend === 'network' || backend === 'api') {
+    const localConfig: StreamingLocalConfig = {
+      ...(config.recognition?.local || {}),
+      language: config.recognition?.language,
+      sampleRate
+    }
+    const fallbackInfo =
+      backend && backend !== 'local'
+        ? ` (fallback from unsupported meeting backend: ${backend})`
+        : ''
+    console.log(`[Main] Creating MeetingTranscriptionManager with Local backend${fallbackInfo}`)
+    return new MeetingTranscriptionManager('local', undefined, undefined, localConfig)
   } else {
-    // Default: Soniox backend (streaming WebSocket)
+    // Soniox backend (streaming WebSocket)
     const sonioxApiKey = getApiKey('soniox')
     const sonioxConfig: StreamingSonioxConfig = {
       ...(config.recognition?.soniox || {}),
@@ -509,7 +485,6 @@ app.on('before-quit', () => {
   hotkeyManager?.stop()
   // Allow all windows to close on quit
   mainWindow?.removeAllListeners('close')
-  meetingWindow?.removeAllListeners('close')
   indicatorWindow?.removeAllListeners('close')
   outputWindow?.removeAllListeners('close')
 })
@@ -536,10 +511,6 @@ ipcMain.handle('show-settings', () => {
 
 ipcMain.handle('quit-app', () => {
   app.quit()
-})
-
-ipcMain.handle('show-meeting-window', () => {
-  showMeetingWindow()
 })
 
 ipcMain.handle('close-output-window', () => {
@@ -601,17 +572,16 @@ ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   meetingTranscription.removeAllListeners()
 
   meetingTranscription.on('transcript', (segment) => {
-    // Send to main window (embedded meeting transcription)
-    mainWindow?.webContents.send('meeting-transcript', segment)
+    sendMeetingEvent('meeting-transcript', segment)
   })
 
   meetingTranscription.on('status', (status) => {
-    mainWindow?.webContents.send('meeting-status', status)
+    sendMeetingEvent('meeting-status', status)
   })
 
   meetingTranscription.on('error', (err) => {
     console.error('[Main] Meeting transcription error:', err)
-    mainWindow?.webContents.send('meeting-status', 'error')
+    sendMeetingEvent('meeting-status', 'error')
   })
 
   await meetingTranscription.startTranscription(options)
@@ -645,7 +615,7 @@ ipcMain.on('system-audio-stopped', () => {
 
 ipcMain.on('system-audio-error', (_event, message: string) => {
   console.error('[Main] System audio capture error:', message)
-  mainWindow?.webContents.send('meeting-status', 'error')
+  sendMeetingEvent('meeting-status', 'error')
 })
 
 // Microphone capture IPC handlers (audio captured in renderer, sent to main)
@@ -665,7 +635,7 @@ ipcMain.on('microphone-stopped', () => {
 
 ipcMain.on('microphone-error', (_event, message: string) => {
   console.error('[Main] Microphone capture error:', message)
-  meetingWindow?.webContents.send('meeting-status', 'error')
+  sendMeetingEvent('meeting-status', 'error')
 })
 
 // Secure API Key IPC handlers

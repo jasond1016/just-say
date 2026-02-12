@@ -29,6 +29,8 @@ export interface TranscribeResult {
   language_probability?: number
   duration?: number
   processing_time?: number
+  device?: string
+  compute_type?: string
   error?: string
 }
 
@@ -310,13 +312,19 @@ class WhisperServerClient {
   ): Promise<TranscribeResult> {
     await this.ensureRunning()
 
-    const params = new URLSearchParams({
-      model: options?.modelType || this.config.modelType,
-      device: options?.device || this.config.device,
-      compute_type: options?.computeType || this.config.computeType
-    })
+    const params = new URLSearchParams()
 
-    if (options?.language) {
+    if (options?.modelType) {
+      params.set('model', options.modelType)
+    }
+    if (options?.device) {
+      params.set('device', options.device)
+    }
+    if (options?.computeType) {
+      params.set('compute_type', options.computeType)
+    }
+
+    if (options?.language && options.language !== 'auto') {
       params.set('language', options.language)
     }
 
@@ -325,7 +333,9 @@ class WhisperServerClient {
       params.set('download_root', downloadRoot)
     }
 
-    return this.httpPostBinary(`/transcribe?${params.toString()}`, audioBuffer)
+    const query = params.toString()
+    const endpoint = query ? `/transcribe?${query}` : '/transcribe'
+    return this.httpPostBinary(endpoint, audioBuffer)
   }
 
   private async ensureRunning(): Promise<void> {
@@ -350,7 +360,7 @@ class WhisperServerClient {
         res.on('end', () => {
           try {
             resolve(JSON.parse(data))
-          } catch (e) {
+          } catch {
             reject(new Error(`Invalid JSON response: ${data}`))
           }
         })
@@ -383,7 +393,7 @@ class WhisperServerClient {
           res.on('end', () => {
             try {
               resolve(JSON.parse(responseData))
-            } catch (e) {
+            } catch {
               reject(new Error(`Invalid JSON response: ${responseData}`))
             }
           })
@@ -418,7 +428,7 @@ class WhisperServerClient {
           res.on('end', () => {
             try {
               resolve(JSON.parse(data))
-            } catch (e) {
+            } catch {
               reject(new Error(`Invalid JSON response: ${data}`))
             }
           })

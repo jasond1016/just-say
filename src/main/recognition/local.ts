@@ -164,8 +164,25 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
    * Recognize via HTTP server (fast path - model stays in memory)
    */
   private async recognizeViaServer(audioBuffer: Buffer): Promise<RecognitionResult> {
-    const { device, computeType } = await this.resolveAutoSettings()
     const wavBuffer = this.createWavBuffer(audioBuffer)
+
+    if (this.isRemoteMode()) {
+      console.log('[LocalRecognizer] Recognizing via remote HTTP server (server-controlled params)')
+      const remoteResult = await this.whisperServer!.transcribe(wavBuffer, {
+        language: this.config.language
+      })
+      if (!remoteResult.success) {
+        throw new Error(remoteResult.error || 'Transcription failed')
+      }
+      return {
+        text: remoteResult.text || '',
+        language: remoteResult.language,
+        confidence: remoteResult.language_probability,
+        durationMs: (remoteResult.processing_time || 0) * 1000
+      }
+    }
+
+    const { device, computeType } = await this.resolveAutoSettings()
     const autoComputeType =
       !this.config.computeType ||
       this.config.computeType === 'auto' ||
@@ -412,7 +429,11 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     // Determine compute type based on device
     let computeType: string
-    if (!this.config.computeType || this.config.computeType === 'auto' || this.config.computeType === 'default') {
+    if (
+      !this.config.computeType ||
+      this.config.computeType === 'auto' ||
+      this.config.computeType === 'default'
+    ) {
       computeType = device === 'cuda' ? 'float16' : 'int8'
     } else {
       computeType = this.config.computeType

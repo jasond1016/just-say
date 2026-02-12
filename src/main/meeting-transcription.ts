@@ -6,9 +6,10 @@ import {
   PartialResult
 } from './recognition/streaming-soniox'
 import { StreamingGroqRecognizer, StreamingGroqConfig } from './recognition/streaming-groq'
+import { StreamingLocalRecognizer, StreamingLocalConfig } from './recognition/streaming-local'
 import { profiler } from './utils/profiler'
 
-export type MeetingBackend = 'soniox' | 'groq'
+export type MeetingBackend = 'local' | 'soniox' | 'groq'
 
 export interface SystemAudioSource {
   id: string
@@ -51,10 +52,15 @@ export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 
  * This avoids the need for ffmpeg.
  */
 export class MeetingTranscriptionManager extends EventEmitter {
-  private recognizer: StreamingSonioxRecognizer | StreamingGroqRecognizer | null = null
+  private recognizer:
+    | StreamingSonioxRecognizer
+    | StreamingGroqRecognizer
+    | StreamingLocalRecognizer
+    | null = null
   private backend: MeetingBackend
   private sonioxConfig?: StreamingSonioxConfig
   private groqConfig?: StreamingGroqConfig
+  private localConfig?: StreamingLocalConfig
 
   private status: MeetingStatus = 'idle'
   private transcriptHistory: TranscriptSegment[] = []
@@ -73,12 +79,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
   constructor(
     backend: MeetingBackend,
     sonioxConfig?: StreamingSonioxConfig,
-    groqConfig?: StreamingGroqConfig
+    groqConfig?: StreamingGroqConfig,
+    localConfig?: StreamingLocalConfig
   ) {
     super()
     this.backend = backend
     this.sonioxConfig = sonioxConfig
     this.groqConfig = groqConfig
+    this.localConfig = localConfig
   }
 
   /**
@@ -96,6 +104,8 @@ export class MeetingTranscriptionManager extends EventEmitter {
     // Create appropriate recognizer based on backend
     if (this.backend === 'groq') {
       this.recognizer = new StreamingGroqRecognizer(this.groqConfig)
+    } else if (this.backend === 'local') {
+      this.recognizer = new StreamingLocalRecognizer(this.localConfig)
     } else {
       this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
     }
@@ -171,6 +181,11 @@ export class MeetingTranscriptionManager extends EventEmitter {
               : undefined
         }
         this.recognizer = new StreamingGroqRecognizer(recognizerConfig)
+      } else if (this.backend === 'local') {
+        const recognizerConfig: StreamingLocalConfig = {
+          ...this.localConfig
+        }
+        this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
       } else {
         const recognizerConfig: StreamingSonioxConfig = {
           ...this.sonioxConfig,

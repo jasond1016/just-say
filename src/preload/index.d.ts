@@ -32,7 +32,6 @@ interface JustSayAPI {
   hasApiKey: (provider: 'soniox' | 'groq' | 'openai') => Promise<boolean>
 
   showSettings: () => Promise<void>
-  showMeetingWindow: () => Promise<void>
   quit: () => Promise<void>
   onRecordingState: (
     callback: (state: { recording: boolean; processing?: boolean }) => void
