@@ -52,6 +52,7 @@ interface JustSayAPI {
   ) => () => void
 
   // Meeting transcription
+  preconnectMeetingTranscription: () => Promise<boolean>
   startMeetingTranscription: (options: {
     includeMicrophone: boolean
     translationEnabled?: boolean

@@ -32,12 +32,7 @@ function App(): React.JSX.Element {
   const [pttStatus, setPttStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
   const [config, setConfig] = useState<AppConfig | null>(null)
 
-  // Load config on mount
-  useEffect(() => {
-    loadConfig()
-  }, [])
-
-  const loadConfig = async (): Promise<void> => {
+  const loadConfig = useCallback(async (): Promise<void> => {
     try {
       const cfg = (await window.api.getConfig()) as AppConfig
       setConfig(cfg)
@@ -47,7 +42,12 @@ function App(): React.JSX.Element {
     } catch (err) {
       console.error('Failed to load config:', err)
     }
-  }
+  }, [])
+
+  // Load config on mount
+  useEffect(() => {
+    void loadConfig()
+  }, [loadConfig])
 
   // Apply theme based on preference
   const applyTheme = useCallback((themeOption: ThemeOption) => {

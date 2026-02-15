@@ -71,6 +71,10 @@ function shouldRecreateRecognition(prev: AppConfig, next: AppConfig): boolean {
   return getRecognitionSignature(prev) !== getRecognitionSignature(next)
 }
 
+function shouldRecreateMeeting(prev: AppConfig, next: AppConfig): boolean {
+  return getRecognitionSignature(prev) !== getRecognitionSignature(next)
+}
+
 async function maybeTranslatePttText(text: string): Promise<string> {
   if (!translationService || !text?.trim()) {
     return text
@@ -324,6 +328,7 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
       apiKey: groqApiKey || undefined,
       whisperModel: config.recognition?.groq?.model || 'whisper-large-v3-turbo',
       chatModel: config.recognition?.groq?.chatModel || 'llama-3.3-70b-versatile',
+      rateControl: config.recognition?.groq?.rateControl,
       language: config.recognition?.language,
       sampleRate: sampleRate
     }
@@ -556,11 +561,16 @@ ipcMain.handle('set-config', (_event, config) => {
   const prevConfig = getConfig()
   setConfig(config)
   const nextConfig = getConfig()
+  const recognitionChanged = shouldRecreateRecognition(prevConfig, nextConfig)
+  const meetingRecognitionChanged = shouldRecreateMeeting(prevConfig, nextConfig)
   if (prevConfig.hotkey?.triggerKey !== nextConfig.hotkey?.triggerKey) {
     hotkeyManager?.setTriggerKey(nextConfig.hotkey?.triggerKey)
   }
-  if (!recognitionController || shouldRecreateRecognition(prevConfig, nextConfig)) {
+  if (!recognitionController || recognitionChanged) {
     recognitionController = new RecognitionController(nextConfig)
+  }
+  if (meetingRecognitionChanged && meetingTranscription?.getStatus() === 'idle') {
+    meetingTranscription = null
   }
   prewarmLocalRecognition('config-update')
   syncIndicatorVisibilityFromConfig()
@@ -620,6 +630,27 @@ ipcMain.handle('get-system-audio-sources', async () => {
     meetingTranscription = createMeetingTranscriptionManager(config)
   }
   return meetingTranscription.getSystemAudioSources()
+})
+
+ipcMain.handle('preconnect-meeting-transcription', async () => {
+  if (meetingTranscription?.getStatus() !== 'transcribing') {
+    const config = getConfig()
+    if (!meetingTranscription) {
+      meetingTranscription = createMeetingTranscriptionManager(config)
+    }
+  }
+
+  if (!meetingTranscription) {
+    return false
+  }
+
+  try {
+    await meetingTranscription.preConnect()
+    return true
+  } catch (err) {
+    console.warn('[Main] Meeting transcription preconnect failed:', err)
+    return false
+  }
 })
 
 ipcMain.handle('start-meeting-transcription', async (_event, options) => {

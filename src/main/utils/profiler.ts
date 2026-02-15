@@ -13,7 +13,10 @@ export interface ResponseEvent {
   timestamp: number // When response was received
   textLength: number // Length of recognized text at this point
   isNew: boolean // Whether this contains new text
+  type: ResponseType // Response category
 }
+
+export type ResponseType = 'asr' | 'translation' | 'other'
 
 export interface LatencyStats {
   avgMs: number
@@ -32,9 +35,14 @@ class TranscriptionProfiler {
   private audioWindowStart: number | null = null
   private totalBytesSent = 0
   private totalResponsesReceived = 0
+  private totalAsrResponses = 0
+  private totalTranslationResponses = 0
+  private totalOtherResponses = 0
 
   // Latency measurements (time between last audio sent and response received)
   private responseLatencies: number[] = []
+  private firstAsrLatency: number | null = null
+  private firstVisibleLatency: number | null = null
 
   // For detailed timeline
   private audioEvents: { timestamp: number; bytes: number }[] = []
@@ -43,21 +51,28 @@ class TranscriptionProfiler {
   // Connection timing
   private connectionStartTime: number | null = null
   private connectionEstablishedTime: number | null = null
+  private sessionBackend: string | null = null
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled
   }
 
-  startSession(): void {
+  startSession(backend?: string): void {
     this.sessionStartTime = performance.now()
     this.audioWindowStart = null
     this.totalBytesSent = 0
     this.totalResponsesReceived = 0
+    this.totalAsrResponses = 0
+    this.totalTranslationResponses = 0
+    this.totalOtherResponses = 0
     this.responseLatencies = []
+    this.firstAsrLatency = null
+    this.firstVisibleLatency = null
     this.audioEvents = []
     this.responseEvents = []
     this.connectionStartTime = null
     this.connectionEstablishedTime = null
+    this.sessionBackend = backend || null
     console.log('[Profiler] Session started')
   }
 
@@ -105,7 +120,11 @@ class TranscriptionProfiler {
   /**
    * Record response received from server
    */
-  markResponseReceived(textLength: number, previousTextLength: number): void {
+  markResponseReceived(
+    textLength: number,
+    previousTextLength: number,
+    type: ResponseType = 'asr'
+  ): void {
     if (!this.enabled) return
 
     const now = performance.now()
@@ -114,16 +133,34 @@ class TranscriptionProfiler {
     this.responseEvents.push({
       timestamp: now,
       textLength,
-      isNew
+      isNew,
+      type
     })
 
-    // Calculate latency from last audio to this response
-    if (this.audioWindowStart !== null && isNew) {
-      const latency = now - this.audioWindowStart
-      this.responseLatencies.push(latency)
+    if (type === 'asr') {
+      this.totalAsrResponses++
 
-      // Reset window for next measurement
-      this.audioWindowStart = null
+      // Calculate latency from last audio to this ASR response with new text.
+      if (this.audioWindowStart !== null && isNew) {
+        const latency = now - this.audioWindowStart
+        this.responseLatencies.push(latency)
+        if (this.firstAsrLatency === null) {
+          this.firstAsrLatency = latency
+        }
+        if (this.firstVisibleLatency === null) {
+          this.firstVisibleLatency = latency
+        }
+
+        // Reset window for next measurement
+        this.audioWindowStart = null
+      }
+    } else if (type === 'translation') {
+      this.totalTranslationResponses++
+      if (this.firstVisibleLatency === null && this.audioWindowStart !== null) {
+        this.firstVisibleLatency = now - this.audioWindowStart
+      }
+    } else {
+      this.totalOtherResponses++
     }
 
     this.totalResponsesReceived++
@@ -161,12 +198,13 @@ class TranscriptionProfiler {
   /**
    * Calculate inter-response time (time between consecutive responses)
    */
-  getInterResponseStats(): LatencyStats | null {
-    if (this.responseEvents.length < 2) return null
+  getInterResponseStats(type?: ResponseType): LatencyStats | null {
+    const events = type ? this.responseEvents.filter((event) => event.type === type) : this.responseEvents
+    if (events.length < 2) return null
 
     const intervals: number[] = []
-    for (let i = 1; i < this.responseEvents.length; i++) {
-      intervals.push(this.responseEvents[i].timestamp - this.responseEvents[i - 1].timestamp)
+    for (let i = 1; i < events.length; i++) {
+      intervals.push(events[i].timestamp - events[i - 1].timestamp)
     }
 
     const sorted = intervals.sort((a, b) => a - b)
@@ -204,11 +242,17 @@ class TranscriptionProfiler {
    */
   printReport(): void {
     console.log('\n========== TRANSCRIPTION LATENCY REPORT ==========\n')
+    if (this.sessionBackend) {
+      console.log(`[*] Backend: ${this.sessionBackend}`)
+    }
 
-    // Connection
+    // Startup timing
     const connLatency = this.getConnectionLatency()
     if (connLatency !== null) {
-      console.log(`[*] Connection Latency: ${connLatency}ms`)
+      console.log(`[*] Session Startup Latency: ${connLatency}ms`)
+    }
+    if (this.firstVisibleLatency !== null) {
+      console.log(`[*] First Visible Text Latency: ${Math.round(this.firstVisibleLatency)}ms`)
     }
 
     // Audio stats
@@ -231,22 +275,31 @@ class TranscriptionProfiler {
       console.log(`   Samples: ${respLatency.count}`)
     }
 
-    // Inter-response time
-    const interResp = this.getInterResponseStats()
+    // Inter-response cadence for ASR results only.
+    const interResp = this.getInterResponseStats('asr')
     if (interResp) {
-      console.log(`\n[Time Between Responses]`)
+      console.log(`\n[Time Between ASR Responses]`)
       console.log(`   Avg: ${interResp.avgMs}ms`)
       console.log(`   P50: ${interResp.p50Ms}ms`)
       console.log(`   P95: ${interResp.p95Ms}ms`)
     }
 
     // Summary
+    const asrNewResponses = this.responseEvents.filter((event) => event.type === 'asr' && event.isNew).length
     console.log(`\n[Summary]`)
     console.log(`   Audio chunks sent: ${this.audioEvents.length}`)
     console.log(`   Responses received: ${this.totalResponsesReceived}`)
-    console.log(
-      `   Response ratio: ${((this.totalResponsesReceived / this.audioEvents.length) * 100).toFixed(1)}%`
-    )
+    console.log(`   ASR responses: ${this.totalAsrResponses} (new text: ${asrNewResponses})`)
+    console.log(`   Translation updates: ${this.totalTranslationResponses}`)
+    if (this.totalOtherResponses > 0) {
+      console.log(`   Other updates: ${this.totalOtherResponses}`)
+    }
+    if (this.firstAsrLatency !== null) {
+      console.log(`   First ASR latency: ${Math.round(this.firstAsrLatency)}ms`)
+    }
+    if (asrNewResponses > 0) {
+      console.log(`   Avg chunks per ASR update: ${(this.audioEvents.length / asrNewResponses).toFixed(2)}`)
+    }
 
     console.log('\n====================================================\n')
   }

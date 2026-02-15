@@ -66,8 +66,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
   private externalTranslator?: ExternalTranslator
 
   private status: MeetingStatus = 'idle'
+  private preConnectPromise: Promise<void> | null = null
   private transcriptHistory: TranscriptSegment[] = []
   private lastTextLength = 0
+  private lastTranslatedTextLength = 0
 
   // For mixing audio streams
   private mixBuffer: Buffer[] = []
@@ -103,6 +105,21 @@ export class MeetingTranscriptionManager extends EventEmitter {
       console.log('[MeetingTranscription] Already pre-connected')
       return
     }
+    if (this.preConnectPromise) {
+      await this.preConnectPromise
+      return
+    }
+
+    this.preConnectPromise = this.doPreConnect().finally(() => {
+      this.preConnectPromise = null
+    })
+    await this.preConnectPromise
+  }
+
+  private async doPreConnect(): Promise<void> {
+    if (this.recognizer?.isPreConnected()) {
+      return
+    }
 
     console.log(`[MeetingTranscription] Pre-connecting to ${this.backend} recognition service...`)
 
@@ -126,6 +143,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
     } catch (err) {
       console.error('[MeetingTranscription] Pre-connect failed:', err)
       this.recognizer = null
+      throw err
     }
   }
 
@@ -170,10 +188,21 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.setStatus('starting')
     this.transcriptHistory = []
     this.lastTextLength = 0
+    this.lastTranslatedTextLength = 0
 
     try {
+      // If pre-connect is currently in flight, wait for it first.
+      // This avoids racing into a cold start right before prewarm completes.
+      if (this.preConnectPromise) {
+        try {
+          await this.preConnectPromise
+        } catch (err) {
+          console.warn('[MeetingTranscription] In-flight pre-connect failed, fallback to cold start:', err)
+        }
+      }
+
       // Start profiling session
-      profiler.startSession()
+      profiler.startSession(this.backend)
 
       // Use pre-connected recognizer or create new one
       // Merge translation options if provided
@@ -216,7 +245,11 @@ export class MeetingTranscriptionManager extends EventEmitter {
                 }
               : undefined
         }
-        this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
+        if (this.recognizer instanceof StreamingLocalRecognizer && this.recognizer.isPreConnected()) {
+          this.recognizer.updateConfig(recognizerConfig)
+        } else {
+          this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
+        }
       } else {
         const recognizerConfig: StreamingSonioxConfig = {
           ...this.sonioxConfig,
@@ -225,10 +258,12 @@ export class MeetingTranscriptionManager extends EventEmitter {
               ? { enabled: true, targetLanguage: options.targetLanguage }
               : undefined
         }
-        if (!this.recognizer?.isPreConnected()) {
-          this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
+        if (
+          this.recognizer instanceof StreamingSonioxRecognizer &&
+          this.recognizer.isPreConnected()
+        ) {
+          this.recognizer.updateConfig(recognizerConfig)
         } else {
-          // Update config for pre-connected recognizer
           this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
         }
       }
@@ -239,8 +274,16 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
       this.recognizer.on('partial', (result: PartialResult) => {
         // Track response for profiling (use combined length for latency tracking)
-        profiler.markResponseReceived(result.combined.length, this.lastTextLength)
+        const translatedLength = result.currentSegment?.translatedText?.length || 0
+        const responseType =
+          result.combined.length > this.lastTextLength
+            ? 'asr'
+            : translatedLength > this.lastTranslatedTextLength
+              ? 'translation'
+              : 'other'
+        profiler.markResponseReceived(result.combined.length, this.lastTextLength, responseType)
         this.lastTextLength = result.combined.length
+        this.lastTranslatedTextLength = translatedLength
 
         const segment: TranscriptSegment = {
           text: result.combined, // Legacy: combined text for backward compatibility
@@ -329,7 +372,12 @@ export class MeetingTranscriptionManager extends EventEmitter {
           this.transcriptHistory.push(finalSegment)
           this.emit('transcript', finalSegment)
         }
-        this.recognizer = null
+        const keepWarmRecognizer =
+          this.recognizer instanceof StreamingLocalRecognizer ||
+          this.recognizer instanceof StreamingGroqRecognizer
+        if (!keepWarmRecognizer) {
+          this.recognizer = null
+        }
       }
 
       // Print profiling report

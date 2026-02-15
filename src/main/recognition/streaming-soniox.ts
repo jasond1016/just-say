@@ -103,6 +103,18 @@ export class StreamingSonioxRecognizer extends EventEmitter {
   }
 
   /**
+   * Update runtime config before startSession when reusing a pre-connected socket.
+   */
+  updateConfig(config?: StreamingSonioxConfig): void {
+    if (!config) return
+    this.config = {
+      ...this.config,
+      ...config
+    }
+    this.isConfigSent = false
+  }
+
+  /**
    * Pre-connect to WebSocket server without starting a session.
    * Call this early (e.g., when meeting window opens) to reduce latency.
    */

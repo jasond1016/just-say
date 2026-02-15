@@ -47,6 +47,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
   // Endpointing state
   private pendingAudioBuffer: Buffer[] = []
   private pendingAudioBytes = 0
+  private pendingNewAudioBytes = 0
   private lastSpeechTime = 0
   private bufferStartTime = 0
   private readonly vadState = new VADState(0.01, 3)
@@ -58,9 +59,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private sentencePairs: SentencePair[] = []
   private translationQueue: Promise<void> = Promise.resolve()
 
-  private readonly SILENCE_THRESHOLD_MS = 500
-  private readonly MIN_CHUNK_DURATION_MS = 800
-  private readonly MAX_CHUNK_DURATION_MS = 10000
+  private readonly SILENCE_THRESHOLD_MS = 350
+  private readonly MIN_CHUNK_DURATION_MS = 600
+  private readonly MAX_CHUNK_DURATION_MS = 4500
+  private readonly OVERLAP_AUDIO_MS = 200
 
   constructor(config?: StreamingLocalConfig) {
     super()
@@ -81,22 +83,46 @@ export class StreamingLocalRecognizer extends EventEmitter {
       ...config
     }
 
-    this.recognizer = new LocalRecognizer({
-      engine: this.config.engine,
-      modelType: this.config.modelType,
-      sensevoice: this.config.sensevoice,
-      device: this.config.device,
-      computeType: this.config.computeType,
-      language: this.config.language,
-      serverMode: this.config.serverMode,
-      serverHost: this.config.serverHost,
-      serverPort: this.config.serverPort,
-      sampleRate: this.config.sampleRate,
-      useHttpServer: true
-    })
+    this.recognizer = this.createLocalRecognizer()
+  }
+
+  updateConfig(config?: StreamingLocalConfig): void {
+    if (!config) return
+
+    const nextConfig = {
+      ...this.config,
+      ...config,
+      sensevoice: {
+        ...this.config.sensevoice,
+        ...(config.sensevoice || {})
+      }
+    }
+
+    const recognizerRuntimeChanged =
+      nextConfig.engine !== this.config.engine ||
+      nextConfig.modelType !== this.config.modelType ||
+      nextConfig.sensevoice.modelId !== this.config.sensevoice.modelId ||
+      nextConfig.sensevoice.useItn !== this.config.sensevoice.useItn ||
+      nextConfig.device !== this.config.device ||
+      nextConfig.computeType !== this.config.computeType ||
+      nextConfig.language !== this.config.language ||
+      nextConfig.serverMode !== this.config.serverMode ||
+      nextConfig.serverHost !== this.config.serverHost ||
+      nextConfig.serverPort !== this.config.serverPort ||
+      nextConfig.sampleRate !== this.config.sampleRate
+
+    this.config = nextConfig
+
+    if (recognizerRuntimeChanged) {
+      this.recognizer = this.createLocalRecognizer()
+      this.preConnected = false
+    }
   }
 
   async preConnect(): Promise<void> {
+    if (this.config.serverMode === 'local') {
+      await this.recognizer.prewarm('meeting-preconnect')
+    }
     const healthy = await this.recognizer.healthCheck()
     this.preConnected = healthy
     if (!healthy) {
@@ -123,6 +149,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.startTime = Date.now()
     this.pendingAudioBuffer = []
     this.pendingAudioBytes = 0
+    this.pendingNewAudioBytes = 0
     this.lastSpeechTime = Date.now()
     this.bufferStartTime = 0
     this.confirmedText = ''
@@ -147,6 +174,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
 
     this.pendingAudioBuffer.push(chunk)
     this.pendingAudioBytes += chunk.length
+    this.pendingNewAudioBytes += chunk.length
     if (this.bufferStartTime === 0) {
       this.bufferStartTime = Date.now()
     }
@@ -210,6 +238,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.processingChunk = false
     this.pendingAudioBuffer = []
     this.pendingAudioBytes = 0
+    this.pendingNewAudioBytes = 0
     this.bufferStartTime = 0
     this.confirmedText = ''
     this.confirmedTranslation = ''
@@ -217,11 +246,28 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.translationQueue = Promise.resolve()
   }
 
+  private createLocalRecognizer(): LocalRecognizer {
+    return new LocalRecognizer({
+      engine: this.config.engine,
+      modelType: this.config.modelType,
+      sensevoice: this.config.sensevoice,
+      device: this.config.device,
+      computeType: this.config.computeType,
+      language: this.config.language,
+      serverMode: this.config.serverMode,
+      serverHost: this.config.serverHost,
+      serverPort: this.config.serverPort,
+      sampleRate: this.config.sampleRate,
+      useHttpServer: true
+    })
+  }
+
   private async maybeProcessFinal(force = false): Promise<void> {
     if (!this.isActive || this.processingChunk || this.pendingAudioBytes === 0) return
+    if (!force && this.pendingNewAudioBytes === 0) return
     if (!force && this.bufferStartTime === 0) return
 
-    const pendingDurationMs = this.getDurationMsFromBytes(this.pendingAudioBytes)
+    const pendingDurationMs = this.getDurationMsFromBytes(this.pendingNewAudioBytes)
     const silenceDurationMs = Date.now() - this.lastSpeechTime
 
     const shouldProcess =
@@ -232,15 +278,20 @@ export class StreamingLocalRecognizer extends EventEmitter {
 
     if (!shouldProcess) return
 
-    const pcmBuffer = Buffer.concat(this.pendingAudioBuffer)
+    const snapshotBuffers = this.pendingAudioBuffer
+    const snapshotBytes = this.pendingAudioBytes
+    const snapshotNewBytes = this.pendingNewAudioBytes
+    const pcmBuffer = Buffer.concat(snapshotBuffers)
     this.pendingAudioBuffer = []
     this.pendingAudioBytes = 0
+    this.pendingNewAudioBytes = 0
     this.bufferStartTime = 0
 
     this.processingChunk = true
 
     try {
       const result = await this.recognizer.recognize(pcmBuffer)
+      this.retainOverlap(pcmBuffer)
       const chunkText = result.text?.trim()
       if (chunkText) {
         const appended = this.appendConfirmedText(chunkText)
@@ -252,6 +303,11 @@ export class StreamingLocalRecognizer extends EventEmitter {
         this.translateChunkAsync(appended, pairIndex)
       }
     } catch (error) {
+      // Requeue audio when ASR fails, so we don't drop speech content.
+      this.pendingAudioBuffer = [...snapshotBuffers, ...this.pendingAudioBuffer]
+      this.pendingAudioBytes += snapshotBytes
+      this.pendingNewAudioBytes += snapshotNewBytes
+      this.bufferStartTime = Date.now() - this.getDurationMsFromBytes(this.pendingAudioBytes)
       const err = error instanceof Error ? error : new Error(String(error))
       console.error('[StreamingLocal] Chunk transcription failed:', err)
       this.emit('error', err)
@@ -348,5 +404,26 @@ export class StreamingLocalRecognizer extends EventEmitter {
     const sampleRate = this.config.sampleRate || 16000
     const samples = bytes / 2 // 16-bit PCM mono
     return (samples / sampleRate) * 1000
+  }
+
+  private retainOverlap(processedBuffer: Buffer): void {
+    const overlapBytes = this.getBytesForMs(this.OVERLAP_AUDIO_MS)
+    if (overlapBytes <= 0 || processedBuffer.length === 0) {
+      return
+    }
+
+    const overlap =
+      processedBuffer.length > overlapBytes
+        ? processedBuffer.slice(processedBuffer.length - overlapBytes)
+        : processedBuffer
+    this.pendingAudioBuffer = [overlap, ...this.pendingAudioBuffer]
+    this.pendingAudioBytes += overlap.length
+    this.bufferStartTime = Date.now() - this.getDurationMsFromBytes(this.pendingAudioBytes)
+  }
+
+  private getBytesForMs(ms: number): number {
+    if (ms <= 0) return 0
+    const sampleRate = this.config.sampleRate || 16000
+    return Math.floor((sampleRate * 2 * ms) / 1000)
   }
 }

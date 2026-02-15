@@ -64,6 +64,9 @@ const api = {
   },
 
   // Meeting Transcription
+  preconnectMeetingTranscription: (): Promise<boolean> =>
+    ipcRenderer.invoke('preconnect-meeting-transcription'),
+
   startMeetingTranscription: (options: {
     includeMicrophone: boolean
     translationEnabled?: boolean

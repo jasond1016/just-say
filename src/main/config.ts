@@ -64,6 +64,13 @@ export interface AppConfig {
       apiKey?: string
       model?: 'whisper-large-v3-turbo' | 'whisper-large-v3'
       chatModel?: string // For translation, default: 'llama-3.3-70b-versatile'
+      rateControl?: {
+        mode?: 'free-tier' | 'balanced'
+        targetRpm?: number
+        minRequestIntervalMs?: number
+        maxBackoffMs?: number
+        allowPreview?: boolean
+      }
     }
   }
   output?: {

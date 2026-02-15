@@ -57,6 +57,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private pythonPath: string
   private scriptPath: string
   private static cachedGpuInfo: GpuInfo | null = null
+  private static globalPrewarmPromise: Promise<void> | null = null
+  private static globalPrewarmKey: string | null = null
   private whisperServer: WhisperServerClient | null = null
   private prewarmPromise: Promise<void> | null = null
   private lastPrewarmKey: string | null = null
@@ -786,7 +788,12 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     device: 'cpu' | 'cuda'
     computeType: string
   }): string {
-    return JSON.stringify(runtime)
+    return JSON.stringify({
+      mode: this.config.serverMode || 'local',
+      host: this.config.serverHost || '127.0.0.1',
+      port: this.config.serverPort || 8765,
+      runtime
+    })
   }
 
   private async ensureServerReadyAndPrewarmed(
@@ -806,7 +813,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     const key = this.getPrewarmKey(runtime)
     const healthy = await this.whisperServer.isHealthy()
-    if (healthy && this.lastPrewarmKey === key) {
+    if (healthy && (this.lastPrewarmKey === key || LocalRecognizer.globalPrewarmKey === key)) {
+      this.lastPrewarmKey = key
       return
     }
 
@@ -831,6 +839,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     })
     const prewarmMs = Date.now() - loadStartAt
     this.lastPrewarmKey = key
+    LocalRecognizer.globalPrewarmKey = key
     console.log(
       '[LocalRecognizer] Prewarm complete:',
       JSON.stringify({
@@ -859,7 +868,27 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       return this.prewarmPromise
     }
 
-    this.prewarmPromise = this.ensureServerReadyAndPrewarmed(runtime, reason).finally(() => {
+    this.prewarmPromise = (async () => {
+      const key = this.getPrewarmKey(runtime)
+
+      if (LocalRecognizer.globalPrewarmPromise) {
+        await LocalRecognizer.globalPrewarmPromise
+        if (LocalRecognizer.globalPrewarmKey === key) {
+          this.lastPrewarmKey = key
+          return
+        }
+      }
+
+      const sharedPrewarm = this.ensureServerReadyAndPrewarmed(runtime, reason)
+      LocalRecognizer.globalPrewarmPromise = sharedPrewarm
+      try {
+        await sharedPrewarm
+      } finally {
+        if (LocalRecognizer.globalPrewarmPromise === sharedPrewarm) {
+          LocalRecognizer.globalPrewarmPromise = null
+        }
+      }
+    })().finally(() => {
       this.prewarmPromise = null
     })
 

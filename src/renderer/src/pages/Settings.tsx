@@ -424,6 +424,7 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const recognitionLanguage = config.recognition?.language || 'auto'
   const translationEnabledForPtt = config.recognition?.translation?.enabledForPtt === true
   const translationTargetLanguage = config.recognition?.translation?.targetLanguage || 'en'
+  const groqRateMode = config.recognition?.groq?.rateControl?.mode || 'free-tier'
   const recognitionLanguageLocked = recognitionLanguage !== 'auto'
   const recognitionLanguageSupport = getRecognitionLanguageSupport(recognitionBackend)
   const recognitionLanguageHint = recognitionLanguageSupport.supported
@@ -845,6 +846,31 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                     >
                       <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
                       <option value="whisper-large-v3">whisper-large-v3</option>
+                    </select>
+                  </div>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">限流模式</div>
+                      <div className="settings-row__desc">
+                        免费额度建议选择 free-tier（优先稳定，减少 429）
+                      </div>
+                    </div>
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 200 }}
+                      value={groqRateMode}
+                      onChange={(e) =>
+                        updateConfig({
+                          recognition: {
+                            groq: {
+                              rateControl: { mode: e.target.value }
+                            }
+                          }
+                        })
+                      }
+                    >
+                      <option value="free-tier">free-tier（20 RPM 优化）</option>
+                      <option value="balanced">balanced（低延迟优先）</option>
                     </select>
                   </div>
                   <div className="settings-row">

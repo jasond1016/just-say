@@ -45,6 +45,7 @@ export function MeetingTranscription(): React.JSX.Element {
     const transcriptRef = useRef<HTMLDivElement>(null)
     const timerRef = useRef<NodeJS.Timeout | null>(null)
     const lastCurrentTextRef = useRef<string>('')
+    const stopInProgressRef = useRef(false)
 
     // Format duration as HH:MM:SS
     const formatDuration = (s: number): string => {
@@ -79,6 +80,7 @@ export function MeetingTranscription(): React.JSX.Element {
 
     // Start transcription
     const startTranscription = async (): Promise<void> => {
+        if (stopInProgressRef.current) return
         try {
             // First start the recognition service in main process
             await window.api.startMeetingTranscription({
@@ -116,54 +118,63 @@ export function MeetingTranscription(): React.JSX.Element {
 
     // Stop transcription
     const stopTranscription = async (): Promise<void> => {
-        // Stop audio captures in renderer process
-        stopSystemAudioCapture()
-        stopMicrophoneCapture()
+        if (stopInProgressRef.current || status !== 'transcribing') {
+            return
+        }
+        stopInProgressRef.current = true
 
         try {
-            await window.api.stopMeetingTranscription()
-        } catch (err) {
-            console.error('Stop error:', err)
-        }
+            // Stop audio captures in renderer process
+            stopSystemAudioCapture()
+            stopMicrophoneCapture()
 
-        // Auto-save transcript if there's content
-        if (segments.length > 0 || currentSegment) {
             try {
-                // Collect all segments including current
-                const allSegments = [...segments]
-                if (currentSegment) {
-                    allSegments.push(currentSegment)
-                }
-
-                const transcriptData = {
-                    duration_seconds: seconds,
-                    translation_enabled: enableTranslation,
-                    target_language: enableTranslation ? targetLanguage : undefined,
-                    include_microphone: includeMic,
-                    segments: allSegments.map((seg) => ({
-                        speaker: seg.speaker,
-                        text: seg.text,
-                        translated_text: seg.translatedText,
-                        sentence_pairs: seg.sentencePairs?.map((pair) => ({
-                            original: pair.original,
-                            translated: pair.translated
-                        }))
-                    }))
-                }
-
-                const saved = await window.api.saveTranscript(transcriptData)
-                console.log('Transcript saved:', saved.id)
-            } catch (saveErr) {
-                console.error('Failed to save transcript:', saveErr)
+                await window.api.stopMeetingTranscription()
+            } catch (err) {
+                console.error('Stop error:', err)
             }
-        }
 
-        setStatus('idle')
-        setCurrentSegment(null)
+            // Auto-save transcript if there's content
+            if (segments.length > 0 || currentSegment) {
+                try {
+                    // Collect all segments including current
+                    const allSegments = [...segments]
+                    if (currentSegment) {
+                        allSegments.push(currentSegment)
+                    }
 
-        if (timerRef.current) {
-            clearInterval(timerRef.current)
-            timerRef.current = null
+                    const transcriptData = {
+                        duration_seconds: seconds,
+                        translation_enabled: enableTranslation,
+                        target_language: enableTranslation ? targetLanguage : undefined,
+                        include_microphone: includeMic,
+                        segments: allSegments.map((seg) => ({
+                            speaker: seg.speaker,
+                            text: seg.text,
+                            translated_text: seg.translatedText,
+                            sentence_pairs: seg.sentencePairs?.map((pair) => ({
+                                original: pair.original,
+                                translated: pair.translated
+                            }))
+                        }))
+                    }
+
+                    const saved = await window.api.saveTranscript(transcriptData)
+                    console.log('Transcript saved:', saved.id)
+                } catch (saveErr) {
+                    console.error('Failed to save transcript:', saveErr)
+                }
+            }
+
+            setStatus('idle')
+            setCurrentSegment(null)
+
+            if (timerRef.current) {
+                clearInterval(timerRef.current)
+                timerRef.current = null
+            }
+        } finally {
+            stopInProgressRef.current = false
         }
     }
 
@@ -221,7 +232,7 @@ export function MeetingTranscription(): React.JSX.Element {
 
         window.api.onMeetingStatus((s: string) => {
             if (s === 'idle' && status === 'transcribing') {
-                stopTranscription()
+                void stopTranscription()
             } else if (s === 'error') {
                 setStatus('error')
             }
@@ -232,6 +243,13 @@ export function MeetingTranscription(): React.JSX.Element {
             window.api.removeAllListeners?.('meeting-status')
         }
     }, [handleTranscript, status])
+
+    // Pre-connect backend when entering meeting page to reduce first-start latency.
+    useEffect(() => {
+        void window.api.preconnectMeetingTranscription().catch((err) => {
+            console.warn('[MeetingTranscription] Preconnect failed:', err)
+        })
+    }, [])
 
     // Auto-scroll to bottom
     useEffect(() => {

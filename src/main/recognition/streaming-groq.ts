@@ -10,6 +10,19 @@ export interface StreamingGroqConfig {
   language?: string
   sampleRate?: number
   externalTranslator?: (text: string, targetLanguage: string) => Promise<string>
+  /** Rate-control strategy for Groq free tier and API limits. */
+  rateControl?: {
+    /** free-tier: conservative defaults for 20 RPM users; balanced: lower latency with higher request cadence */
+    mode?: 'free-tier' | 'balanced'
+    /** Target request budget per minute, used by shared limiter (transcription + optional Groq translation). */
+    targetRpm?: number
+    /** Minimum gap between two Groq requests. */
+    minRequestIntervalMs?: number
+    /** Max backoff after consecutive 429 errors. */
+    maxBackoffMs?: number
+    /** Whether preview requests are allowed under this mode. */
+    allowPreview?: boolean
+  }
   /** One-way translation config */
   translation?: {
     enabled: boolean
@@ -31,6 +44,8 @@ interface TranscriptionResult {
   duration?: number
 }
 
+type GroqRequestPriority = 'preview' | 'final' | 'translation'
+
 /**
  * Streaming Groq recognizer that buffers audio chunks and processes them
  * using Groq's Whisper API for transcription and Chat API for translation.
@@ -44,6 +59,17 @@ interface TranscriptionResult {
  */
 export class StreamingGroqRecognizer extends EventEmitter {
   private config: StreamingGroqConfig
+
+  // Shared request limiter (transcription + optional Groq translation)
+  private readonly rateMode: 'free-tier' | 'balanced'
+  private readonly targetRpm: number
+  private readonly minRequestIntervalMs: number
+  private readonly maxBackoffMs: number
+  private readonly previewEnabled: boolean
+  private requestTimestamps: number[] = []
+  private lastRequestAt = 0
+  private backoffUntil = 0
+  private currentBackoffMs = 0
 
   // Audio buffering
   private bufferStartTime = 0
@@ -93,6 +119,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
 
   // Completed segments and mappings
   private completedSegments: SpeakerSegment[] = []
+  private translationQueue: Promise<void> = Promise.resolve()
 
   // Language name mappings for translation prompts
   private readonly LANGUAGE_NAMES: Record<string, string> = {
@@ -116,10 +143,32 @@ export class StreamingGroqRecognizer extends EventEmitter {
       sampleRate: 16000,
       ...config
     }
-    this.previewIntervalMs = this.normalizeMs(this.config.previewIntervalMs, 400)
-    this.previewMinAudioMs = this.normalizeMs(this.config.previewMinAudioMs, 300)
-    this.previewWindowMs = this.normalizeMs(this.config.previewWindowMs, 2500)
-    this.previewMinNewAudioMs = this.normalizeMs(this.config.previewMinNewAudioMs, 200)
+    this.rateMode = this.config.rateControl?.mode || 'free-tier'
+    const defaultTargetRpm = this.rateMode === 'free-tier' ? 15 : 60
+    const defaultMinIntervalMs = this.rateMode === 'free-tier' ? 3000 : 800
+    const defaultAllowPreview = this.rateMode !== 'free-tier'
+    this.targetRpm = this.normalizeMinValue(this.config.rateControl?.targetRpm, defaultTargetRpm, 1)
+    this.minRequestIntervalMs = this.normalizeMinValue(
+      this.config.rateControl?.minRequestIntervalMs,
+      defaultMinIntervalMs,
+      0
+    )
+    this.maxBackoffMs = this.normalizeMinValue(this.config.rateControl?.maxBackoffMs, 30000, 1000)
+    this.previewEnabled = this.config.rateControl?.allowPreview ?? defaultAllowPreview
+    const previewDefaults =
+      this.rateMode === 'free-tier'
+        ? { interval: 4000, minAudio: 1200, window: 5000, minNewAudio: 1500 }
+        : { interval: 400, minAudio: 300, window: 2500, minNewAudio: 200 }
+    this.previewIntervalMs = this.normalizeMs(
+      this.config.previewIntervalMs,
+      previewDefaults.interval
+    )
+    this.previewMinAudioMs = this.normalizeMs(this.config.previewMinAudioMs, previewDefaults.minAudio)
+    this.previewWindowMs = this.normalizeMs(this.config.previewWindowMs, previewDefaults.window)
+    this.previewMinNewAudioMs = this.normalizeMs(
+      this.config.previewMinNewAudioMs,
+      previewDefaults.minNewAudio
+    )
     this.vadState = new VADState(this.VAD_SILENCE_THRESHOLD, 3)
   }
 
@@ -165,10 +214,15 @@ export class StreamingGroqRecognizer extends EventEmitter {
     this.lastPreviewTime = 0
     this.lastPreviewAudioBytes = 0
     this.completedSegments = []
+    this.translationQueue = Promise.resolve()
     this.finalText = []
     this.finalTranslation = []
     this.nonFinalText = ''
     this.finalRevision = 0
+    this.requestTimestamps = []
+    this.lastRequestAt = 0
+    this.backoffUntil = 0
+    this.currentBackoffMs = 0
     this.vadState.reset()
 
     // Start silence detection interval
@@ -176,7 +230,9 @@ export class StreamingGroqRecognizer extends EventEmitter {
       void this.maybeProcessFinal()
     }, 500)
 
-    console.log('[StreamingGroq] Session started with non-final/final token support')
+    console.log(
+      `[StreamingGroq] Session started (mode=${this.rateMode}, targetRpm=${this.targetRpm}, minIntervalMs=${this.minRequestIntervalMs}, preview=${this.previewEnabled ? 'on' : 'off'})`
+    )
   }
 
   /**
@@ -215,6 +271,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
    * Check if preview should be processed (Non-final).
    */
   private async maybeProcessPreview(): Promise<void> {
+    if (!this.previewEnabled) return
     if (!this.isActive || this.isPreviewProcessing || this.processingChunk) return
 
     const now = Date.now()
@@ -233,11 +290,16 @@ export class StreamingGroqRecognizer extends EventEmitter {
     this.lastPreviewAudioBytes = this.previewAudioBytes
 
     try {
+      const allowed = await this.acquireRequestSlot('preview')
+      if (!allowed) {
+        return
+      }
       const audioToPreview = this.getPreviewWindowBuffer()
       if (audioToPreview.length === 0) return
 
       const wavBuffer = this.createWavBuffer(audioToPreview)
       const result = await this.transcribeAudio(wavBuffer)
+      this.onRequestSucceeded()
       const previewText = result.text.trim()
 
       if (!previewText || !this.isActive || previewRevision !== this.finalRevision) {
@@ -247,6 +309,11 @@ export class StreamingGroqRecognizer extends EventEmitter {
       this.nonFinalText = this.deduplicateFromFinal(previewText)
       this.emitPartialResult()
     } catch (error) {
+      if (this.isRateLimitError(error)) {
+        this.applyRateLimitBackoff('preview')
+      } else {
+        this.applySoftBackoff()
+      }
       console.warn('[GroqPreview] Preview failed:', error)
     } finally {
       this.isPreviewProcessing = false
@@ -282,12 +349,17 @@ export class StreamingGroqRecognizer extends EventEmitter {
 
     this.processingChunk = true
     const audioToProcess = this.getAudioWithOverlap()
-    this.retainPendingOverlap(audioToProcess)
 
     try {
+      const allowed = await this.acquireRequestSlot('final')
+      if (!allowed) {
+        return
+      }
       const wavBuffer = this.createWavBuffer(audioToProcess)
       const transcription = await this.transcribeAudio(wavBuffer)
       const finalText = transcription.text.trim()
+      this.onRequestSucceeded()
+      this.retainPendingOverlap(audioToProcess)
 
       if (!finalText) {
         return
@@ -313,6 +385,13 @@ export class StreamingGroqRecognizer extends EventEmitter {
 
       this.translateFinalAsync(deduped, finalIndex)
     } catch (error) {
+      if (this.isRateLimitError(error)) {
+        this.applyRateLimitBackoff('final')
+        console.warn('[GroqFinal] Rate limited, will retry with buffered audio')
+        return
+      } else {
+        this.applySoftBackoff()
+      }
       console.error('[GroqFinal] Processing error:', error)
       this.emit('error', error)
     } finally {
@@ -326,12 +405,20 @@ export class StreamingGroqRecognizer extends EventEmitter {
     }
 
     const targetLang = this.config.translation.targetLanguage
-    const translateFn = this.config.externalTranslator
-      ? this.config.externalTranslator
-      : (chunk: string, lang: string) => this.translateText(chunk, lang)
-
-    translateFn(text, targetLang)
-      .then((translatedText) => {
+    const usesGroqTranslator = !this.config.externalTranslator
+    this.translationQueue = this.translationQueue
+      .then(async () => {
+        if (usesGroqTranslator) {
+          const allowed = await this.acquireRequestSlot('translation')
+          if (!allowed) return
+        }
+        const translateFn = this.config.externalTranslator
+          ? this.config.externalTranslator
+          : (chunk: string, lang: string) => this.translateText(chunk, lang)
+        const translatedText = await translateFn(text, targetLang)
+        if (usesGroqTranslator) {
+          this.onRequestSucceeded()
+        }
         if (!translatedText || !this.isActive || this.finalText[index] !== text) {
           return
         }
@@ -340,6 +427,10 @@ export class StreamingGroqRecognizer extends EventEmitter {
         this.emitPartialResult(true)
       })
       .catch((err) => {
+        if (usesGroqTranslator && this.isRateLimitError(err)) {
+          this.applyRateLimitBackoff('translation')
+          return
+        }
         console.warn('[StreamingGroq] Translation failed:', err)
         this.emit('translationError', err)
       })
@@ -477,6 +568,109 @@ export class StreamingGroqRecognizer extends EventEmitter {
     return Math.floor(value)
   }
 
+  private normalizeMinValue(value: number | undefined, fallback: number, min: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return fallback
+    }
+    return Math.max(min, Math.floor(value))
+  }
+
+  private pruneRequestWindow(now: number): void {
+    const windowStart = now - 60_000
+    while (this.requestTimestamps.length > 0 && this.requestTimestamps[0] < windowStart) {
+      this.requestTimestamps.shift()
+    }
+  }
+
+  private getLimiterDelayMs(now: number): number {
+    this.pruneRequestWindow(now)
+
+    const backoffDelay = this.backoffUntil > now ? this.backoffUntil - now : 0
+    const intervalDelay =
+      this.lastRequestAt > 0 && now - this.lastRequestAt < this.minRequestIntervalMs
+        ? this.minRequestIntervalMs - (now - this.lastRequestAt)
+        : 0
+    const rpmDelay =
+      this.requestTimestamps.length >= this.targetRpm
+        ? this.requestTimestamps[0] + 60_000 - now
+        : 0
+
+    return Math.max(0, backoffDelay, intervalDelay, rpmDelay)
+  }
+
+  private markRequestSent(now: number): void {
+    this.lastRequestAt = now
+    this.requestTimestamps.push(now)
+    this.pruneRequestWindow(now)
+  }
+
+  private async acquireRequestSlot(priority: GroqRequestPriority): Promise<boolean> {
+    const now = Date.now()
+    const delayMs = this.getLimiterDelayMs(now)
+    if (delayMs <= 0) {
+      this.markRequestSent(now)
+      return true
+    }
+
+    if (priority === 'preview') {
+      return false
+    }
+
+    const waitUntil = now + delayMs + 2000
+    while (this.isActive && Date.now() <= waitUntil) {
+      const nextDelay = this.getLimiterDelayMs(Date.now())
+      if (nextDelay <= 0) {
+        this.markRequestSent(Date.now())
+        return true
+      }
+      await this.sleep(Math.min(nextDelay, 1000))
+    }
+
+    return false
+  }
+
+  private isRateLimitError(error: unknown): boolean {
+    return this.getErrorStatus(error) === 429
+  }
+
+  private getErrorStatus(error: unknown): number | null {
+    if (!error || typeof error !== 'object') {
+      return null
+    }
+    const maybeStatus = (error as { status?: unknown }).status
+    if (typeof maybeStatus === 'number') {
+      return maybeStatus
+    }
+    return null
+  }
+
+  private applyRateLimitBackoff(source: GroqRequestPriority): void {
+    const next = this.currentBackoffMs > 0 ? this.currentBackoffMs * 2 : 3000
+    this.currentBackoffMs = Math.min(this.maxBackoffMs, next)
+    this.backoffUntil = Date.now() + this.currentBackoffMs
+    console.warn(
+      `[StreamingGroq] Rate limited on ${source}, backoff=${this.currentBackoffMs}ms, mode=${this.rateMode}`
+    )
+  }
+
+  private applySoftBackoff(): void {
+    const softBackoffMs = 1500
+    this.backoffUntil = Math.max(this.backoffUntil, Date.now() + softBackoffMs)
+  }
+
+  private onRequestSucceeded(): void {
+    this.currentBackoffMs = 0
+    this.backoffUntil = 0
+  }
+
+  private createHttpError(scope: 'transcription' | 'translation', status: number, body: string): Error {
+    const error = new Error(`Groq ${scope} API error ${status}: ${body}`) as Error & {
+      status?: number
+    }
+    error.status = status
+    return error
+  }
+
   /**
    * Convert raw PCM buffer to WAV format.
    */
@@ -563,7 +757,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
 
     if (!response.ok) {
       const error = await response.text()
-      throw new Error(`Groq Whisper API error ${response.status}: ${error}`)
+      throw this.createHttpError('transcription', response.status, error)
     }
 
     const result = (await response.json()) as {
@@ -612,7 +806,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
 
     if (!response.ok) {
       const error = await response.text()
-      throw new Error(`Groq Chat API error ${response.status}: ${error}`)
+      throw this.createHttpError('translation', response.status, error)
     }
 
     const result = (await response.json()) as {
@@ -691,9 +885,8 @@ export class StreamingGroqRecognizer extends EventEmitter {
     // Process any remaining buffered audio
     if (this.pendingNewAudioBytes > 0) {
       await this.processFinalAudio()
-      // Wait a bit for any pending translations
-      await this.sleep(500)
     }
+    await this.translationQueue
 
     this.isActive = false
 
@@ -748,6 +941,11 @@ export class StreamingGroqRecognizer extends EventEmitter {
     this.nonFinalText = ''
     this.processingChunk = false
     this.isPreviewProcessing = false
+    this.translationQueue = Promise.resolve()
+    this.requestTimestamps = []
+    this.lastRequestAt = 0
+    this.backoffUntil = 0
+    this.currentBackoffMs = 0
   }
 
   /**
