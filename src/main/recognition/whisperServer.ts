@@ -347,9 +347,12 @@ class WhisperServerClient {
       device?: 'cpu' | 'cuda'
       computeType?: string
       language?: string
+      skipHealthCheck?: boolean
     }
   ): Promise<TranscribeResult> {
-    await this.ensureRunning()
+    if (!options?.skipHealthCheck) {
+      await this.ensureRunning()
+    }
 
     const params = new URLSearchParams()
 

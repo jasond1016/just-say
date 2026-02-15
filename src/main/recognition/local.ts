@@ -225,26 +225,30 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     console.log('[LocalRecognizer] Recognizing via HTTP server')
     const prewarmStart = Date.now()
+    const runtime = {
+      engine: this.getEngine(),
+      modelType: this.config.modelType || 'tiny',
+      sensevoiceModelId: this.getSenseVoiceModelId(),
+      sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
+      device,
+      computeType
+    }
     await this.prewarmWithRuntime(
-      {
-        engine: this.getEngine(),
-        modelType: this.config.modelType || 'tiny',
-        sensevoiceModelId: this.getSenseVoiceModelId(),
-        sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
-        device,
-        computeType
-      },
+      runtime,
       'recognize'
     )
     if (!this.loggedFirstTranscribeWait) {
       this.loggedFirstTranscribeWait = true
       console.log(
         '[LocalRecognizer] First transcribe wait:',
-        JSON.stringify({ first_transcribe_wait_ms: Date.now() - prewarmStart, engine: this.getEngine() })
+        JSON.stringify({
+          first_transcribe_wait_ms: Date.now() - prewarmStart,
+          engine: this.getEngine()
+        })
       )
     }
 
-    const result = await this.whisperServer!.transcribe(wavBuffer, {
+    const requestOptions = {
       engine: this.config.engine,
       modelType: this.config.modelType,
       sensevoiceModelId: this.getSenseVoiceModelId(),
@@ -252,7 +256,26 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       device,
       computeType,
       language: this.config.language
-    })
+    }
+    const prewarmKey = this.getPrewarmKey(runtime)
+
+    let result
+    try {
+      result = await this.whisperServer!.transcribe(wavBuffer, {
+        ...requestOptions,
+        skipHealthCheck: true
+      })
+    } catch (error) {
+      // Fast path failed (server restarted / transient network error):
+      // invalidate prewarm cache and retry once via full readiness check.
+      this.invalidatePrewarmKey(prewarmKey)
+      await this.prewarmWithRuntime(runtime, 'recover-transcribe')
+      result = await this.whisperServer!.transcribe(wavBuffer, requestOptions)
+      console.warn(
+        '[LocalRecognizer] Fast transcribe failed, recovered via re-prewarm:',
+        error instanceof Error ? error.message : String(error)
+      )
+    }
 
     if (!result.success) {
       const errMessage = result.error || 'Transcription failed'
@@ -812,9 +835,14 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     }
 
     const key = this.getPrewarmKey(runtime)
+    if (this.lastPrewarmKey === key || LocalRecognizer.globalPrewarmKey === key) {
+      return
+    }
+
     const healthy = await this.whisperServer.isHealthy()
-    if (healthy && (this.lastPrewarmKey === key || LocalRecognizer.globalPrewarmKey === key)) {
+    if (healthy) {
       this.lastPrewarmKey = key
+      LocalRecognizer.globalPrewarmKey = key
       return
     }
 
@@ -893,6 +921,15 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     })
 
     return this.prewarmPromise
+  }
+
+  private invalidatePrewarmKey(key: string): void {
+    if (this.lastPrewarmKey === key) {
+      this.lastPrewarmKey = null
+    }
+    if (LocalRecognizer.globalPrewarmKey === key) {
+      LocalRecognizer.globalPrewarmKey = null
+    }
   }
 
   private resolveSenseVoiceModelKey(modelType: string): string {
