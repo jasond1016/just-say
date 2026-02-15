@@ -26,6 +26,7 @@ import { MeetingTranscriptionManager } from './meeting-transcription'
 import { StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingLocalConfig } from './recognition/streaming-local'
+import { TranslationService } from './translation/service'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -44,6 +45,7 @@ let streamingSoniox: StreamingSonioxRecognizer | null = null
 let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
 let meetingTranscription: MeetingTranscriptionManager | null = null
+let translationService: TranslationService | null = null
 
 function sendMeetingEvent(channel: 'meeting-transcript' | 'meeting-status', payload: unknown): void {
   const targets = [mainWindow]
@@ -67,6 +69,34 @@ function getRecognitionSignature(config: AppConfig): string {
 
 function shouldRecreateRecognition(prev: AppConfig, next: AppConfig): boolean {
   return getRecognitionSignature(prev) !== getRecognitionSignature(next)
+}
+
+async function maybeTranslatePttText(text: string): Promise<string> {
+  if (!translationService || !text?.trim()) {
+    return text
+  }
+  if (!translationService.isPttEnabled()) {
+    return text
+  }
+
+  const targetLanguage = translationService.getPttTargetLanguage()
+  const result = await translationService.translate(text, targetLanguage, {
+    context: 'ptt',
+    fallbackToSource: true
+  })
+
+  console.log(
+    '[Main] PTT translation:',
+    JSON.stringify({
+      target_language: targetLanguage,
+      translated: result.translated,
+      fallback: result.fallback,
+      latency_ms: result.latencyMs,
+      error: result.error || null
+    })
+  )
+
+  return result.text || text
 }
 
 function prewarmLocalRecognition(reason: string): void {
@@ -279,9 +309,16 @@ function showOutputWindow(text: string): void {
 function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscriptionManager {
   const backend = config.recognition?.backend
   const sampleRate = config.audio?.sampleRate
+  const service = translationService
+  const externalTranslator = service
+    ? async (text: string, targetLanguage: string): Promise<string> => {
+        const translated = await service.translateForMeeting(text, targetLanguage)
+        return translated.text
+      }
+    : undefined
 
   if (backend === 'groq') {
-    // Groq backend: uses Whisper API for transcription + Chat API for translation
+    // Groq backend: transcription by Groq Whisper, translation delegated to external translator.
     const groqApiKey = getApiKey('groq')
     const groqConfig: StreamingGroqConfig = {
       apiKey: groqApiKey || undefined,
@@ -291,7 +328,7 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
       sampleRate: sampleRate
     }
     console.log('[Main] Creating MeetingTranscriptionManager with Groq backend')
-    return new MeetingTranscriptionManager('groq', undefined, groqConfig)
+    return new MeetingTranscriptionManager('groq', undefined, groqConfig, undefined, externalTranslator)
   } else if (backend === 'local' || !backend || backend === 'network' || backend === 'api') {
     const localConfig: StreamingLocalConfig = {
       ...(config.recognition?.local || {}),
@@ -303,7 +340,13 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
         ? ` (fallback from unsupported meeting backend: ${backend})`
         : ''
     console.log(`[Main] Creating MeetingTranscriptionManager with Local backend${fallbackInfo}`)
-    return new MeetingTranscriptionManager('local', undefined, undefined, localConfig)
+    return new MeetingTranscriptionManager(
+      'local',
+      undefined,
+      undefined,
+      localConfig,
+      externalTranslator
+    )
   } else {
     // Soniox backend (streaming WebSocket)
     const sonioxApiKey = getApiKey('soniox')
@@ -313,7 +356,7 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
       sampleRate: sampleRate
     }
     console.log('[Main] Creating MeetingTranscriptionManager with Soniox backend')
-    return new MeetingTranscriptionManager('soniox', sonioxConfig, undefined)
+    return new MeetingTranscriptionManager('soniox', sonioxConfig, undefined, undefined, undefined)
   }
 }
 
@@ -322,6 +365,10 @@ async function initializeApp(): Promise<void> {
   initConfig()
   initSecureStore()
   initDatabase()
+  translationService = new TranslationService(
+    () => getConfig(),
+    () => getApiKey('openai') || getConfig().recognition?.api?.apiKey
+  )
   const config = getConfig()
 
   // Create windows
@@ -402,8 +449,9 @@ async function initializeApp(): Promise<void> {
 
         if (result?.text) {
           const config = getConfig()
+          const translatedText = await maybeTranslatePttText(result.text)
           const method = config.output?.method || 'simulate_input'
-          const finalText = await inputSimulator?.typeText(result.text, {
+          const finalText = await inputSimulator?.typeText(translatedText, {
             method,
             autoSpace: config.output?.autoSpace,
             capitalize: config.output?.capitalize
@@ -446,8 +494,9 @@ async function initializeApp(): Promise<void> {
           const result = await recognitionController?.recognize(audioBuffer)
           if (result?.text) {
             const config = getConfig()
+            const translatedText = await maybeTranslatePttText(result.text)
             const method = config.output?.method || 'simulate_input'
-            const finalText = await inputSimulator?.typeText(result.text, {
+            const finalText = await inputSimulator?.typeText(translatedText, {
               method,
               autoSpace: config.output?.autoSpace,
               capitalize: config.output?.capitalize

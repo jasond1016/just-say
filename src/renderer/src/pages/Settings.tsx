@@ -55,6 +55,8 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const [hasGroqKey, setHasGroqKey] = useState(false)
   const [hasOpenaiKey, setHasOpenaiKey] = useState(false)
   const [openaiEndpointDraft, setOpenaiEndpointDraft] = useState('')
+  const [translationEndpointDraft, setTranslationEndpointDraft] = useState('')
+  const [translationModelDraft, setTranslationModelDraft] = useState('')
   const [connectionStatus, setConnectionStatus] = useState<
     'idle' | 'testing' | 'success' | 'failed'
   >('idle')
@@ -176,6 +178,31 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     await updateConfig({ recognition: { api: { endpoint: trimmed } } })
   }
 
+  const commitTranslationEndpoint = async (nextValue?: string): Promise<void> => {
+    if (!config) return
+    const trimmed = (nextValue ?? translationEndpointDraft).trim()
+    const currentEndpoint =
+      config.recognition?.translation?.endpoint || 'https://api.openai.com/v1'
+    if (!trimmed) {
+      setTranslationEndpointDraft(currentEndpoint)
+      return
+    }
+    if (trimmed === currentEndpoint) return
+    await updateConfig({ recognition: { translation: { endpoint: trimmed } } })
+  }
+
+  const commitTranslationModel = async (nextValue?: string): Promise<void> => {
+    if (!config) return
+    const trimmed = (nextValue ?? translationModelDraft).trim()
+    const currentModel = config.recognition?.translation?.model || 'gpt-4o-mini'
+    if (!trimmed) {
+      setTranslationModelDraft(currentModel)
+      return
+    }
+    if (trimmed === currentModel) return
+    await updateConfig({ recognition: { translation: { model: trimmed } } })
+  }
+
   const loadConfig = async (): Promise<void> => {
     try {
       const cfg = await window.api.getConfig()
@@ -236,6 +263,14 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     const currentEndpoint = config.recognition?.api?.endpoint || 'https://api.openai.com/v1'
     setOpenaiEndpointDraft(currentEndpoint)
   }, [config?.recognition?.api?.endpoint])
+
+  useEffect(() => {
+    if (!config) return
+    const currentEndpoint = config.recognition?.translation?.endpoint || 'https://api.openai.com/v1'
+    const currentModel = config.recognition?.translation?.model || 'gpt-4o-mini'
+    setTranslationEndpointDraft(currentEndpoint)
+    setTranslationModelDraft(currentModel)
+  }, [config?.recognition?.translation?.endpoint, config?.recognition?.translation?.model])
 
   useEffect(() => {
     if (!config) return
@@ -387,6 +422,8 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
     ? 'sensevoice-small'
     : config.recognition?.local?.modelType || 'tiny'
   const recognitionLanguage = config.recognition?.language || 'auto'
+  const translationEnabledForPtt = config.recognition?.translation?.enabledForPtt === true
+  const translationTargetLanguage = config.recognition?.translation?.targetLanguage || 'en'
   const recognitionLanguageLocked = recognitionLanguage !== 'auto'
   const recognitionLanguageSupport = getRecognitionLanguageSupport(recognitionBackend)
   const recognitionLanguageHint = recognitionLanguageSupport.supported
@@ -813,7 +850,9 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   <div className="settings-row">
                     <div className="settings-row__info">
                       <div className="settings-row__label">翻译模型</div>
-                      <div className="settings-row__desc">用于会议转录的实时翻译</div>
+                      <div className="settings-row__desc">
+                        兼容保留项，推荐使用下方统一翻译配置
+                      </div>
                     </div>
                     <select
                       className="form-input form-select"
@@ -909,6 +948,108 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   </div>
                 </>
               )}
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">PTT 翻译</div>
+                  <div className="settings-row__desc">
+                    开启后将按键转录结果翻译后再输出（OpenAI Compatible）
+                  </div>
+                </div>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    className="toggle__input"
+                    checked={translationEnabledForPtt}
+                    onChange={(e) =>
+                      updateConfig({ recognition: { translation: { enabledForPtt: e.target.checked } } })
+                    }
+                  />
+                  <span className="toggle__slider" />
+                </label>
+              </div>
+
+              {translationEnabledForPtt && (
+                <div className="settings-row">
+                  <div className="settings-row__info">
+                    <div className="settings-row__label">PTT 目标语言</div>
+                    <div className="settings-row__desc">按键转录将翻译到该语言</div>
+                  </div>
+                  <select
+                    className="form-input form-select"
+                    style={{ width: 160 }}
+                    value={translationTargetLanguage}
+                    onChange={(e) =>
+                      updateConfig({ recognition: { translation: { targetLanguage: e.target.value } } })
+                    }
+                  >
+                    {recognitionLanguageOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">翻译 API Endpoint</div>
+                  <div className="settings-row__desc">OpenAI 兼容地址（默认 /v1）</div>
+                </div>
+                <input
+                  className="form-input"
+                  style={{ width: 280 }}
+                  value={translationEndpointDraft}
+                  placeholder="https://api.openai.com/v1"
+                  onChange={(e) => setTranslationEndpointDraft(e.target.value)}
+                  onBlur={() => commitTranslationEndpoint()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      void commitTranslationEndpoint()
+                      e.currentTarget.blur()
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">翻译模型</div>
+                  <div className="settings-row__desc">用于文本翻译（chat/completions）</div>
+                </div>
+                <input
+                  className="form-input"
+                  style={{ width: 220 }}
+                  value={translationModelDraft}
+                  placeholder="gpt-4o-mini"
+                  onChange={(e) => setTranslationModelDraft(e.target.value)}
+                  onBlur={() => commitTranslationModel()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      void commitTranslationModel()
+                      e.currentTarget.blur()
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="settings-row">
+                <div className="settings-row__info">
+                  <div className="settings-row__label">翻译 API Key</div>
+                  <div className="settings-row__desc">
+                    {hasOpenaiKey ? '已安全存储 (加密)' : '输入 OpenAI Compatible API Key'}
+                  </div>
+                </div>
+                <input
+                  type="password"
+                  className="form-input"
+                  style={{ width: 280 }}
+                  value={openaiApiKey}
+                  placeholder="sk-..."
+                  onChange={(e) => handleOpenaiApiKeyChange(e.target.value)}
+                />
+              </div>
             </div>
           )}
 

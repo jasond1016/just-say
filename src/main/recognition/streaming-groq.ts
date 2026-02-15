@@ -9,6 +9,7 @@ export interface StreamingGroqConfig {
   chatModel?: string // Default: 'moonshotai/kimi-k2-instruct-0905'
   language?: string
   sampleRate?: number
+  externalTranslator?: (text: string, targetLanguage: string) => Promise<string>
   /** One-way translation config */
   translation?: {
     enabled: boolean
@@ -325,7 +326,11 @@ export class StreamingGroqRecognizer extends EventEmitter {
     }
 
     const targetLang = this.config.translation.targetLanguage
-    this.translateText(text, targetLang)
+    const translateFn = this.config.externalTranslator
+      ? this.config.externalTranslator
+      : (chunk: string, lang: string) => this.translateText(chunk, lang)
+
+    translateFn(text, targetLang)
       .then((translatedText) => {
         if (!translatedText || !this.isActive || this.finalText[index] !== text) {
           return

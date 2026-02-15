@@ -1,8 +1,14 @@
 import { EventEmitter } from 'events'
 import { LocalRecognizer } from './local'
-import { SpeakerSegment, PartialResult } from './streaming-soniox'
+import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
 import { VADState } from './vad-utils'
 import { findTextOverlap, mergeText } from './text-utils'
+
+interface LocalTranslationConfig {
+  enabled: boolean
+  targetLanguage: string
+  translator?: (text: string, targetLanguage: string) => Promise<string>
+}
 
 export interface StreamingLocalConfig {
   engine?: 'faster-whisper' | 'sensevoice'
@@ -18,6 +24,7 @@ export interface StreamingLocalConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  translation?: LocalTranslationConfig
 }
 
 /**
@@ -27,7 +34,9 @@ export interface StreamingLocalConfig {
  * then sends finalized chunks to LocalRecognizer (HTTP server path).
  */
 export class StreamingLocalRecognizer extends EventEmitter {
-  private config: Required<StreamingLocalConfig>
+  private config: Required<Omit<StreamingLocalConfig, 'translation'>> & {
+    translation?: LocalTranslationConfig
+  }
   private recognizer: LocalRecognizer
   private preConnected = false
   private isActive = false
@@ -44,7 +53,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
 
   // Output state
   private confirmedText = ''
+  private confirmedTranslation = ''
   private completedSegments: SpeakerSegment[] = []
+  private sentencePairs: SentencePair[] = []
+  private translationQueue: Promise<void> = Promise.resolve()
 
   private readonly SILENCE_THRESHOLD_MS = 500
   private readonly MIN_CHUNK_DURATION_MS = 800
@@ -114,7 +126,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.lastSpeechTime = Date.now()
     this.bufferStartTime = 0
     this.confirmedText = ''
+    this.confirmedTranslation = ''
     this.completedSegments = []
+    this.sentencePairs = []
+    this.translationQueue = Promise.resolve()
     this.vadState.reset()
 
     if (this.silenceCheckInterval) {
@@ -158,14 +173,18 @@ export class StreamingLocalRecognizer extends EventEmitter {
     if (this.pendingAudioBytes > 0) {
       await this.maybeProcessFinal(true)
     }
+    await this.translationQueue
 
     this.isActive = false
 
     const text = this.confirmedText.trim()
+    const translatedText = this.confirmedTranslation.trim()
     const finalSegment: SpeakerSegment | null = text
       ? {
           speaker: 0,
           text,
+          translatedText: translatedText || undefined,
+          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
           isFinal: true
         }
       : null
@@ -193,6 +212,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.pendingAudioBytes = 0
     this.bufferStartTime = 0
     this.confirmedText = ''
+    this.confirmedTranslation = ''
+    this.sentencePairs = []
+    this.translationQueue = Promise.resolve()
   }
 
   private async maybeProcessFinal(force = false): Promise<void> {
@@ -221,8 +243,13 @@ export class StreamingLocalRecognizer extends EventEmitter {
       const result = await this.recognizer.recognize(pcmBuffer)
       const chunkText = result.text?.trim()
       if (chunkText) {
-        this.appendConfirmedText(chunkText)
+        const appended = this.appendConfirmedText(chunkText)
+        if (!appended) {
+          return
+        }
+        const pairIndex = this.sentencePairs.push({ original: appended }) - 1
         this.emitPartialResult()
+        this.translateChunkAsync(appended, pairIndex)
       }
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error))
@@ -233,26 +260,75 @@ export class StreamingLocalRecognizer extends EventEmitter {
     }
   }
 
-  private appendConfirmedText(nextText: string): void {
+  private appendConfirmedText(nextText: string): string {
     if (!this.confirmedText) {
       this.confirmedText = nextText
-      return
+      return nextText
     }
 
     const overlap = findTextOverlap(this.confirmedText, nextText, 160)
     const deduped = overlap > 0 ? nextText.slice(overlap) : nextText
     const normalized = deduped.trimStart()
-    if (!normalized) return
+    if (!normalized) return ''
 
     this.confirmedText = mergeText(this.confirmedText, normalized)
+    return normalized
+  }
+
+  private translateChunkAsync(chunkText: string, pairIndex: number): void {
+    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
+      return
+    }
+
+    const translator = this.config.translation.translator
+    if (!translator) {
+      return
+    }
+
+    this.translationQueue = this.translationQueue
+      .then(async () => {
+        const translated = (await translator(
+          chunkText,
+          this.config.translation!.targetLanguage
+        ))?.trim()
+        if (!this.isActive || !translated) {
+          return
+        }
+        if (this.sentencePairs[pairIndex]?.original !== chunkText) {
+          return
+        }
+        this.sentencePairs[pairIndex] = {
+          ...this.sentencePairs[pairIndex],
+          translated
+        }
+        this.rebuildConfirmedTranslation()
+        this.emitPartialResult()
+      })
+      .catch((error) => {
+        const err = error instanceof Error ? error : new Error(String(error))
+        console.warn('[StreamingLocal] Chunk translation failed:', err.message)
+        this.emit('translationError', err)
+      })
+  }
+
+  private rebuildConfirmedTranslation(): void {
+    let merged = ''
+    for (const pair of this.sentencePairs) {
+      if (!pair.translated) continue
+      merged = mergeText(merged, pair.translated)
+    }
+    this.confirmedTranslation = merged
   }
 
   private emitPartialResult(): void {
     const combined = this.confirmedText.trim()
+    const translated = this.confirmedTranslation.trim()
     const currentSegment: SpeakerSegment | null = combined
       ? {
           speaker: 0,
           text: combined,
+          translatedText: translated || undefined,
+          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
           isFinal: false
         }
       : null
@@ -262,7 +338,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
       currentSegment,
       combined,
       currentSpeaker: 0,
-      translationEnabled: false
+      translationEnabled: this.config.translation?.enabled === true
     }
 
     this.emit('partial', result)

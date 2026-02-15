@@ -43,6 +43,8 @@ export interface TranscriptSegment {
 
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
 
+export type ExternalTranslator = (text: string, targetLanguage: string) => Promise<string>
+
 /**
  * Manages meeting transcription by receiving system audio from renderer process
  * and sending it to the speech recognition service.
@@ -61,6 +63,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
   private sonioxConfig?: StreamingSonioxConfig
   private groqConfig?: StreamingGroqConfig
   private localConfig?: StreamingLocalConfig
+  private externalTranslator?: ExternalTranslator
 
   private status: MeetingStatus = 'idle'
   private transcriptHistory: TranscriptSegment[] = []
@@ -80,13 +83,15 @@ export class MeetingTranscriptionManager extends EventEmitter {
     backend: MeetingBackend,
     sonioxConfig?: StreamingSonioxConfig,
     groqConfig?: StreamingGroqConfig,
-    localConfig?: StreamingLocalConfig
+    localConfig?: StreamingLocalConfig,
+    externalTranslator?: ExternalTranslator
   ) {
     super()
     this.backend = backend
     this.sonioxConfig = sonioxConfig
     this.groqConfig = groqConfig
     this.localConfig = localConfig
+    this.externalTranslator = externalTranslator
   }
 
   /**
@@ -172,18 +177,44 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
       // Use pre-connected recognizer or create new one
       // Merge translation options if provided
+      const useExternalTranslation =
+        this.backend !== 'soniox' &&
+        !!options.translationEnabled &&
+        !!options.targetLanguage &&
+        !!this.externalTranslator
+
+      if (
+        this.backend !== 'soniox' &&
+        options.translationEnabled &&
+        options.targetLanguage &&
+        !this.externalTranslator
+      ) {
+        console.warn(
+          '[MeetingTranscription] Translation requested but external translator is unavailable'
+        )
+      }
+
       if (this.backend === 'groq') {
         const recognizerConfig: StreamingGroqConfig = {
           ...this.groqConfig,
           translation:
-            options.translationEnabled && options.targetLanguage
-              ? { enabled: true, targetLanguage: options.targetLanguage }
-              : undefined
+            useExternalTranslation
+              ? { enabled: true, targetLanguage: options.targetLanguage! }
+              : undefined,
+          externalTranslator: useExternalTranslation ? this.externalTranslator : undefined
         }
         this.recognizer = new StreamingGroqRecognizer(recognizerConfig)
       } else if (this.backend === 'local') {
         const recognizerConfig: StreamingLocalConfig = {
-          ...this.localConfig
+          ...this.localConfig,
+          translation:
+            useExternalTranslation
+              ? {
+                  enabled: true,
+                  targetLanguage: options.targetLanguage!,
+                  translator: useExternalTranslation ? this.externalTranslator : undefined
+                }
+              : undefined
         }
         this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
       } else {

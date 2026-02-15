@@ -20,6 +20,14 @@ export interface AppConfig {
     backend?: 'local' | 'api' | 'network' | 'soniox' | 'groq'
     language?: string
     punctuation?: boolean
+    translation?: {
+      provider?: 'openai-compatible'
+      enabledForPtt?: boolean
+      targetLanguage?: string
+      endpoint?: string
+      model?: string
+      timeoutMs?: number
+    }
     local?: {
       modelPath?: string
       engine?: 'faster-whisper' | 'sensevoice'
@@ -91,6 +99,14 @@ const defaultConfig: AppConfig = {
     backend: 'local',
     language: 'auto',
     punctuation: true,
+    translation: {
+      provider: 'openai-compatible',
+      enabledForPtt: false,
+      targetLanguage: 'en',
+      endpoint: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini',
+      timeoutMs: 15000
+    },
     local: {
       engine: 'faster-whisper',
       modelType: 'tiny',
