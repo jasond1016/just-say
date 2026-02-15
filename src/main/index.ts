@@ -34,6 +34,14 @@ let indicatorWindow: BrowserWindow | null = null
 let outputWindow: BrowserWindow | null = null
 let pendingOutputText: string | null = null
 
+const INDICATOR_WINDOW_WIDTH = 240
+const INDICATOR_WINDOW_HEIGHT = 64
+
+const OUTPUT_WINDOW_WIDTH = 500
+const OUTPUT_WINDOW_HEIGHT = 230
+const OUTPUT_CURSOR_OFFSET_Y = 18
+const OUTPUT_CURSOR_PADDING = 12
+
 type RecordingUiState = { recording?: boolean; processing?: boolean }
 let currentRecordingState: RecordingUiState = { recording: false }
 
@@ -47,7 +55,10 @@ let inputSimulator: InputSimulator | null = null
 let meetingTranscription: MeetingTranscriptionManager | null = null
 let translationService: TranslationService | null = null
 
-function sendMeetingEvent(channel: 'meeting-transcript' | 'meeting-status', payload: unknown): void {
+function sendMeetingEvent(
+  channel: 'meeting-transcript' | 'meeting-status',
+  payload: unknown
+): void {
   const targets = [mainWindow]
   const sentWebContents = new Set<number>()
 
@@ -202,8 +213,8 @@ function createMainWindow(): BrowserWindow {
 
 function createIndicatorWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 220,
-    height: 60,
+    width: INDICATOR_WINDOW_WIDTH,
+    height: INDICATOR_WINDOW_HEIGHT,
     show: false,
     frame: false,
     transparent: true,
@@ -220,7 +231,10 @@ function createIndicatorWindow(): BrowserWindow {
   // Position at center bottom
   const primaryDisplay = screen.getPrimaryDisplay()
   const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize
-  window.setPosition(Math.round((screenWidth - 220) / 2), screenHeight - 100)
+  window.setPosition(
+    Math.round((screenWidth - INDICATOR_WINDOW_WIDTH) / 2),
+    screenHeight - INDICATOR_WINDOW_HEIGHT - 20
+  )
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     window.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/indicator.html`)
@@ -233,8 +247,8 @@ function createIndicatorWindow(): BrowserWindow {
 
 function createOutputWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 520,
-    height: 240,
+    width: OUTPUT_WINDOW_WIDTH,
+    height: OUTPUT_WINDOW_HEIGHT,
     show: false,
     frame: false,
     transparent: true,
@@ -283,10 +297,21 @@ function showOutputWindow(text: string): void {
     const cursor = screen.getCursorScreenPoint()
     const display = screen.getDisplayNearestPoint(cursor)
     const { x, y, width, height } = display.workArea
-    const winW = 520
-    const winH = 240
-    const nextX = Math.min(Math.max(cursor.x - Math.round(winW / 2), x), x + width - winW)
-    const nextY = Math.min(Math.max(cursor.y + 20, y), y + height - winH)
+
+    const minX = x + OUTPUT_CURSOR_PADDING
+    const minY = y + OUTPUT_CURSOR_PADDING
+    const maxX = x + width - OUTPUT_WINDOW_WIDTH - OUTPUT_CURSOR_PADDING
+    const maxY = y + height - OUTPUT_WINDOW_HEIGHT - OUTPUT_CURSOR_PADDING
+
+    const centeredX = cursor.x - Math.round(OUTPUT_WINDOW_WIDTH / 2)
+    const nextX = Math.min(Math.max(centeredX, minX), Math.max(minX, maxX))
+
+    const belowY = cursor.y + OUTPUT_CURSOR_OFFSET_Y
+    const aboveY = cursor.y - OUTPUT_WINDOW_HEIGHT - OUTPUT_CURSOR_OFFSET_Y
+    const preferBelow = belowY <= maxY
+    const rawY = preferBelow ? belowY : aboveY
+    const nextY = Math.min(Math.max(rawY, minY), Math.max(minY, maxY))
+
     outputWindow.setPosition(nextX, nextY)
   } catch (err) {
     console.warn('[Main] Failed to position output window:', err)
@@ -304,6 +329,11 @@ function showOutputWindow(text: string): void {
   } catch {
     outputWindow.show()
   }
+}
+
+function notifyIndicatorOutputText(text: string): void {
+  if (!text?.trim() || !indicatorWindow || indicatorWindow.isDestroyed()) return
+  indicatorWindow.webContents.send('output-text', { text })
 }
 
 /**
@@ -333,7 +363,13 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
       sampleRate: sampleRate
     }
     console.log('[Main] Creating MeetingTranscriptionManager with Groq backend')
-    return new MeetingTranscriptionManager('groq', undefined, groqConfig, undefined, externalTranslator)
+    return new MeetingTranscriptionManager(
+      'groq',
+      undefined,
+      groqConfig,
+      undefined,
+      externalTranslator
+    )
   } else if (backend === 'local' || !backend || backend === 'network' || backend === 'api') {
     const localConfig: StreamingLocalConfig = {
       ...(config.recognition?.local || {}),
@@ -461,6 +497,9 @@ async function initializeApp(): Promise<void> {
             autoSpace: config.output?.autoSpace,
             capitalize: config.output?.capitalize
           })
+          if (finalText) {
+            notifyIndicatorOutputText(finalText)
+          }
           if (method === 'popup' && finalText) {
             showOutputWindow(finalText)
           }
@@ -506,6 +545,9 @@ async function initializeApp(): Promise<void> {
               autoSpace: config.output?.autoSpace,
               capitalize: config.output?.capitalize
             })
+            if (finalText) {
+              notifyIndicatorOutputText(finalText)
+            }
             if (method === 'popup' && finalText) {
               showOutputWindow(finalText)
             }
@@ -616,12 +658,15 @@ ipcMain.handle('delete-model', async (_event, modelType) => {
   await recognitionController?.deleteModel(modelType)
 })
 
-ipcMain.handle('test-whisper-remote', async (_event, options?: { host?: string; port?: number }) => {
-  const host = options?.host || '127.0.0.1'
-  const port = typeof options?.port === 'number' ? options.port : 8765
-  const client = new WhisperServerClient({ mode: 'remote', host, port, autoStart: false })
-  return client.isHealthy()
-})
+ipcMain.handle(
+  'test-whisper-remote',
+  async (_event, options?: { host?: string; port?: number }) => {
+    const host = options?.host || '127.0.0.1'
+    const port = typeof options?.port === 'number' ? options.port : 8765
+    const client = new WhisperServerClient({ mode: 'remote', host, port, autoStart: false })
+    return client.isHealthy()
+  }
+)
 
 // Meeting transcription IPC handlers
 ipcMain.handle('get-system-audio-sources', async () => {
@@ -748,38 +793,62 @@ ipcMain.handle('has-api-key', (_event, provider: 'soniox' | 'groq' | 'openai') =
 })
 
 // Transcript storage IPC handlers
-ipcMain.handle('save-transcript', (_event, data: {
-  title?: string
-  note?: string
-  duration_seconds: number
-  translation_enabled: boolean
-  target_language?: string
-  include_microphone: boolean
-  segments: {
-    speaker: number
-    text: string
-    translated_text?: string
-    sentence_pairs?: { original: string; translated?: string }[]
-  }[]
-}) => {
-  return createTranscript(data)
-})
+ipcMain.handle(
+  'save-transcript',
+  (
+    _event,
+    data: {
+      title?: string
+      note?: string
+      duration_seconds: number
+      translation_enabled: boolean
+      target_language?: string
+      include_microphone: boolean
+      segments: {
+        speaker: number
+        text: string
+        translated_text?: string
+        sentence_pairs?: { original: string; translated?: string }[]
+      }[]
+    }
+  ) => {
+    return createTranscript(data)
+  }
+)
 
-ipcMain.handle('list-transcripts', (_event, options?: { page?: number; pageSize?: number; orderBy?: string; order?: string }) => {
-  return listTranscripts(options as { page?: number; pageSize?: number; orderBy?: 'created_at' | 'updated_at' | 'duration_seconds'; order?: 'ASC' | 'DESC' } | undefined)
-})
+ipcMain.handle(
+  'list-transcripts',
+  (_event, options?: { page?: number; pageSize?: number; orderBy?: string; order?: string }) => {
+    return listTranscripts(
+      options as
+        | {
+            page?: number
+            pageSize?: number
+            orderBy?: 'created_at' | 'updated_at' | 'duration_seconds'
+            order?: 'ASC' | 'DESC'
+          }
+        | undefined
+    )
+  }
+)
 
-ipcMain.handle('search-transcripts', (_event, options: { query: string; page?: number; pageSize?: number }) => {
-  return searchTranscripts(options)
-})
+ipcMain.handle(
+  'search-transcripts',
+  (_event, options: { query: string; page?: number; pageSize?: number }) => {
+    return searchTranscripts(options)
+  }
+)
 
 ipcMain.handle('get-transcript', (_event, id: string) => {
   return getTranscriptWithSegments(id)
 })
 
-ipcMain.handle('update-transcript', (_event, id: string, data: { title?: string; note?: string }) => {
-  return updateTranscript(id, data)
-})
+ipcMain.handle(
+  'update-transcript',
+  (_event, id: string, data: { title?: string; note?: string }) => {
+    return updateTranscript(id, data)
+  }
+)
 
 ipcMain.handle('delete-transcript', (_event, id: string) => {
   return deleteTranscript(id)

@@ -130,11 +130,7 @@ interface JustSayAPI {
     totalPages: number
   }>
 
-  searchTranscripts: (options: {
-    query: string
-    page?: number
-    pageSize?: number
-  }) => Promise<{
+  searchTranscripts: (options: { query: string; page?: number; pageSize?: number }) => Promise<{
     items: unknown[]
     total: number
     page: number

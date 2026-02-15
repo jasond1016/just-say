@@ -25,4 +25,3 @@ export function normalizeTriggerKey(value: unknown): TriggerKey {
 export function getTriggerKeyLabel(value: unknown): string {
   return TRIGGER_KEY_LABELS[normalizeTriggerKey(value)]
 }
-

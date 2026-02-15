@@ -214,7 +214,8 @@ const api = {
 
   deleteTranscript: (id: string): Promise<boolean> => ipcRenderer.invoke('delete-transcript', id),
 
-  exportTranscript: (id: string): Promise<string | null> => ipcRenderer.invoke('export-transcript', id)
+  exportTranscript: (id: string): Promise<string | null> =>
+    ipcRenderer.invoke('export-transcript', id)
 }
 
 if (process.contextIsolated) {
