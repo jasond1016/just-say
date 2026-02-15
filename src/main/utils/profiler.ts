@@ -199,7 +199,9 @@ class TranscriptionProfiler {
    * Calculate inter-response time (time between consecutive responses)
    */
   getInterResponseStats(type?: ResponseType): LatencyStats | null {
-    const events = type ? this.responseEvents.filter((event) => event.type === type) : this.responseEvents
+    const events = type
+      ? this.responseEvents.filter((event) => event.type === type)
+      : this.responseEvents
     if (events.length < 2) return null
 
     const intervals: number[] = []
@@ -285,7 +287,9 @@ class TranscriptionProfiler {
     }
 
     // Summary
-    const asrNewResponses = this.responseEvents.filter((event) => event.type === 'asr' && event.isNew).length
+    const asrNewResponses = this.responseEvents.filter(
+      (event) => event.type === 'asr' && event.isNew
+    ).length
     console.log(`\n[Summary]`)
     console.log(`   Audio chunks sent: ${this.audioEvents.length}`)
     console.log(`   Responses received: ${this.totalResponsesReceived}`)
@@ -298,7 +302,9 @@ class TranscriptionProfiler {
       console.log(`   First ASR latency: ${Math.round(this.firstAsrLatency)}ms`)
     }
     if (asrNewResponses > 0) {
-      console.log(`   Avg chunks per ASR update: ${(this.audioEvents.length / asrNewResponses).toFixed(2)}`)
+      console.log(
+        `   Avg chunks per ASR update: ${(this.audioEvents.length / asrNewResponses).toFixed(2)}`
+      )
     }
 
     console.log('\n====================================================\n')

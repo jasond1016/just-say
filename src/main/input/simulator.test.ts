@@ -41,8 +41,16 @@ describe('InputSimulator', () => {
     const { InputSimulator } = await import('./simulator')
     const sim = new InputSimulator()
 
-    const r1 = await sim.typeText('hello', { method: 'clipboard', capitalize: true, autoSpace: true })
-    const r2 = await sim.typeText('world', { method: 'clipboard', capitalize: true, autoSpace: true })
+    const r1 = await sim.typeText('hello', {
+      method: 'clipboard',
+      capitalize: true,
+      autoSpace: true
+    })
+    const r2 = await sim.typeText('world', {
+      method: 'clipboard',
+      capitalize: true,
+      autoSpace: true
+    })
 
     expect(r1).toBe('Hello')
     expect(r2).toBe(' World')

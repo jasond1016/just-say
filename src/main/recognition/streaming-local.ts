@@ -343,10 +343,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
 
     this.translationQueue = this.translationQueue
       .then(async () => {
-        const translated = (await translator(
-          chunkText,
-          this.config.translation!.targetLanguage
-        ))?.trim()
+        const translated = (
+          await translator(chunkText, this.config.translation!.targetLanguage)
+        )?.trim()
         if (!this.isActive || !translated) {
           return
         }

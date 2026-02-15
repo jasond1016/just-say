@@ -93,37 +93,51 @@ export function closeDatabase(): void {
 // Helper functions for typed queries
 export function getAllTranscripts(limit = 50, offset = 0): Transcript[] {
   const database = getDatabase()
-  return database.prepare(`
+  return database
+    .prepare(
+      `
     SELECT * FROM transcripts
     ORDER BY created_at DESC
     LIMIT ? OFFSET ?
-  `).all(limit, offset) as Transcript[]
+  `
+    )
+    .all(limit, offset) as Transcript[]
 }
 
 export function getTranscriptCount(): number {
   const database = getDatabase()
-  const result = database.prepare('SELECT COUNT(*) as count FROM transcripts').get() as { count: number }
+  const result = database.prepare('SELECT COUNT(*) as count FROM transcripts').get() as {
+    count: number
+  }
   return result.count
 }
 
 export function searchTranscriptsFTS(query: string, limit = 50, offset = 0): Transcript[] {
   const database = getDatabase()
   // Search in FTS index
-  return database.prepare(`
+  return database
+    .prepare(
+      `
     SELECT DISTINCT t.* FROM transcripts t
     JOIN transcripts_fts fts ON t.id = fts.transcript_id
     WHERE transcripts_fts MATCH ?
     ORDER BY t.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(`${query}*`, limit, offset) as Transcript[]
+  `
+    )
+    .all(`${query}*`, limit, offset) as Transcript[]
 }
 
 export function searchTranscriptsCount(query: string): number {
   const database = getDatabase()
-  const result = database.prepare(`
+  const result = database
+    .prepare(
+      `
     SELECT COUNT(DISTINCT t.id) as count FROM transcripts t
     JOIN transcripts_fts fts ON t.id = fts.transcript_id
     WHERE transcripts_fts MATCH ?
-  `).get(`${query}*`) as { count: number }
+  `
+    )
+    .get(`${query}*`) as { count: number }
   return result.count
 }

@@ -15,6 +15,16 @@ vi.mock('child_process', () => ({
 
 const readSampleRate = (wavBuffer: Buffer): number => wavBuffer.readUInt32LE(24)
 
+interface WavFactory {
+  createWavBuffer: (buffer: Buffer) => Buffer
+}
+
+interface StreamingSonioxHarness {
+  ws: { send: (payload: string) => void }
+  isConfigSent: boolean
+  sendConfig: () => void
+}
+
 describe('recognition sample rate handling', () => {
   let logSpy: ReturnType<typeof vi.spyOn>
 
@@ -29,7 +39,7 @@ describe('recognition sample rate handling', () => {
   it('uses configured sample rate in LocalRecognizer WAV header', async () => {
     const { LocalRecognizer } = await import('./local')
     const recognizer = new LocalRecognizer({ sampleRate: 44100, useHttpServer: false })
-    const wav = (recognizer as any).createWavBuffer(Buffer.alloc(8))
+    const wav = (recognizer as unknown as WavFactory).createWavBuffer(Buffer.alloc(8))
 
     expect(readSampleRate(wav)).toBe(44100)
   })
@@ -37,7 +47,7 @@ describe('recognition sample rate handling', () => {
   it('falls back to 16000 Hz in LocalRecognizer when unset', async () => {
     const { LocalRecognizer } = await import('./local')
     const recognizer = new LocalRecognizer({ useHttpServer: false })
-    const wav = (recognizer as any).createWavBuffer(Buffer.alloc(8))
+    const wav = (recognizer as unknown as WavFactory).createWavBuffer(Buffer.alloc(8))
 
     expect(readSampleRate(wav)).toBe(16000)
   })
@@ -45,7 +55,7 @@ describe('recognition sample rate handling', () => {
   it('uses configured sample rate in GroqRecognizer WAV header', async () => {
     const { GroqRecognizer } = await import('./groq')
     const recognizer = new GroqRecognizer({ sampleRate: 22050 })
-    const wav = (recognizer as any).createWavBuffer(Buffer.alloc(8))
+    const wav = (recognizer as unknown as WavFactory).createWavBuffer(Buffer.alloc(8))
 
     expect(readSampleRate(wav)).toBe(22050)
   })
@@ -53,7 +63,7 @@ describe('recognition sample rate handling', () => {
   it('falls back to 16000 Hz in GroqRecognizer when unset', async () => {
     const { GroqRecognizer } = await import('./groq')
     const recognizer = new GroqRecognizer()
-    const wav = (recognizer as any).createWavBuffer(Buffer.alloc(8))
+    const wav = (recognizer as unknown as WavFactory).createWavBuffer(Buffer.alloc(8))
 
     expect(readSampleRate(wav)).toBe(16000)
   })
@@ -62,9 +72,10 @@ describe('recognition sample rate handling', () => {
     const { StreamingSonioxRecognizer } = await import('./streaming-soniox')
     const recognizer = new StreamingSonioxRecognizer({ apiKey: 'test', sampleRate: 48000 })
     const send = vi.fn()
-    ;(recognizer as any).ws = { send }
-    ;(recognizer as any).isConfigSent = false
-    ;(recognizer as any).sendConfig()
+    const harness = recognizer as unknown as StreamingSonioxHarness
+    harness.ws = { send }
+    harness.isConfigSent = false
+    harness.sendConfig()
 
     const payload = JSON.parse(send.mock.calls[0][0] as string) as { sample_rate: number }
     expect(payload.sample_rate).toBe(48000)
@@ -74,9 +85,10 @@ describe('recognition sample rate handling', () => {
     const { StreamingSonioxRecognizer } = await import('./streaming-soniox')
     const recognizer = new StreamingSonioxRecognizer({ apiKey: 'test' })
     const send = vi.fn()
-    ;(recognizer as any).ws = { send }
-    ;(recognizer as any).isConfigSent = false
-    ;(recognizer as any).sendConfig()
+    const harness = recognizer as unknown as StreamingSonioxHarness
+    harness.ws = { send }
+    harness.isConfigSent = false
+    harness.sendConfig()
 
     const payload = JSON.parse(send.mock.calls[0][0] as string) as { sample_rate: number }
     expect(payload.sample_rate).toBe(16000)

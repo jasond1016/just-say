@@ -197,7 +197,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
         try {
           await this.preConnectPromise
         } catch (err) {
-          console.warn('[MeetingTranscription] In-flight pre-connect failed, fallback to cold start:', err)
+          console.warn(
+            '[MeetingTranscription] In-flight pre-connect failed, fallback to cold start:',
+            err
+          )
         }
       }
 
@@ -226,26 +229,27 @@ export class MeetingTranscriptionManager extends EventEmitter {
       if (this.backend === 'groq') {
         const recognizerConfig: StreamingGroqConfig = {
           ...this.groqConfig,
-          translation:
-            useExternalTranslation
-              ? { enabled: true, targetLanguage: options.targetLanguage! }
-              : undefined,
+          translation: useExternalTranslation
+            ? { enabled: true, targetLanguage: options.targetLanguage! }
+            : undefined,
           externalTranslator: useExternalTranslation ? this.externalTranslator : undefined
         }
         this.recognizer = new StreamingGroqRecognizer(recognizerConfig)
       } else if (this.backend === 'local') {
         const recognizerConfig: StreamingLocalConfig = {
           ...this.localConfig,
-          translation:
-            useExternalTranslation
-              ? {
-                  enabled: true,
-                  targetLanguage: options.targetLanguage!,
-                  translator: useExternalTranslation ? this.externalTranslator : undefined
-                }
-              : undefined
+          translation: useExternalTranslation
+            ? {
+                enabled: true,
+                targetLanguage: options.targetLanguage!,
+                translator: useExternalTranslation ? this.externalTranslator : undefined
+              }
+            : undefined
         }
-        if (this.recognizer instanceof StreamingLocalRecognizer && this.recognizer.isPreConnected()) {
+        if (
+          this.recognizer instanceof StreamingLocalRecognizer &&
+          this.recognizer.isPreConnected()
+        ) {
           this.recognizer.updateConfig(recognizerConfig)
         } else {
           this.recognizer = new StreamingLocalRecognizer(recognizerConfig)

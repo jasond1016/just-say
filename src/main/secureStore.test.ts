@@ -151,7 +151,7 @@ describe('secureStore', () => {
       mockStore.set = setFn
 
       // Simulate setApiKey function
-      const setApiKey = (provider: 'soniox' | 'groq', apiKey: string) => {
+      const setApiKey = (provider: 'soniox' | 'groq', apiKey: string): void => {
         if (!mockStore) return
         const key = `${provider}_api_key`
         const encrypted = mockIsEncryptionAvailable()
@@ -172,7 +172,7 @@ describe('secureStore', () => {
       const setFn = vi.fn()
       mockStore.set = setFn
 
-      const setApiKey = (provider: 'soniox' | 'groq', apiKey: string) => {
+      const setApiKey = (provider: 'soniox' | 'groq', apiKey: string): void => {
         if (!mockStore) return
         const key = `${provider}_api_key`
         const encrypted = mockIsEncryptionAvailable()
@@ -259,7 +259,7 @@ describe('secureStore', () => {
     it('should delete API key', () => {
       mockStore.delete = vi.fn()
 
-      const deleteApiKey = (provider: 'soniox' | 'groq') => {
+      const deleteApiKey = (provider: 'soniox' | 'groq'): void => {
         if (!mockStore) return
         const key = `${provider}_api_key`
         mockStore.delete(key)

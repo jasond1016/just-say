@@ -45,7 +45,9 @@ export function setApiKey(provider: 'soniox' | 'groq' | 'openai', apiKey: string
   const key = `${provider}_api_key` as keyof SecureStoreSchema
   const encrypted = encryptValue(apiKey)
   secureStore.set(key, encrypted)
-  console.log(`[SecureStore] ${provider} API key saved (encrypted: ${safeStorage.isEncryptionAvailable()})`)
+  console.log(
+    `[SecureStore] ${provider} API key saved (encrypted: ${safeStorage.isEncryptionAvailable()})`
+  )
 }
 
 export function getApiKey(provider: 'soniox' | 'groq' | 'openai'): string | undefined {

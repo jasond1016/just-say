@@ -250,10 +250,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       device,
       computeType
     }
-    await this.prewarmWithRuntime(
-      runtime,
-      'recognize'
-    )
+    await this.prewarmWithRuntime(runtime, 'recognize')
     if (!this.loggedFirstTranscribeWait) {
       this.loggedFirstTranscribeWait = true
       console.log(
@@ -849,7 +846,9 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
   private getAutoComputeHintKey(device: 'cpu' | 'cuda'): string {
     const modelIdentity =
-      this.getEngine() === 'sensevoice' ? this.getSenseVoiceModelId() : this.config.modelType || 'tiny'
+      this.getEngine() === 'sensevoice'
+        ? this.getSenseVoiceModelId()
+        : this.config.modelType || 'tiny'
     return `${this.getEngine()}|${modelIdentity}|${device}`
   }
 

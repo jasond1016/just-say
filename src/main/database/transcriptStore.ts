@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid'
+import type Database from 'better-sqlite3'
 import { getDatabase, searchTranscriptsFTS, searchTranscriptsCount } from './index'
 import type {
   Transcript,
@@ -51,7 +52,9 @@ export function createTranscript(data: SaveTranscriptRequest): Transcript {
 // Get transcript by ID
 export function getTranscriptById(id: string): Transcript | null {
   const db = getDatabase()
-  const result = db.prepare('SELECT * FROM transcripts WHERE id = ?').get(id) as Transcript | undefined
+  const result = db.prepare('SELECT * FROM transcripts WHERE id = ?').get(id) as
+    | Transcript
+    | undefined
   return result || null
 }
 
@@ -59,22 +62,32 @@ export function getTranscriptById(id: string): Transcript | null {
 export function getTranscriptWithSegments(id: string): TranscriptWithSegments | null {
   const db = getDatabase()
 
-  const transcript = db.prepare('SELECT * FROM transcripts WHERE id = ?').get(id) as Transcript | undefined
+  const transcript = db.prepare('SELECT * FROM transcripts WHERE id = ?').get(id) as
+    | Transcript
+    | undefined
   if (!transcript) return null
 
-  const segments = db.prepare(`
+  const segments = db
+    .prepare(
+      `
     SELECT * FROM transcript_segments
     WHERE transcript_id = ?
     ORDER BY segment_order
-  `).all(id) as TranscriptSegment[]
+  `
+    )
+    .all(id) as TranscriptSegment[]
 
   // Get sentence pairs for each segment
   const segmentsWithPairs = segments.map((segment) => {
-    const pairs = db.prepare(`
+    const pairs = db
+      .prepare(
+        `
       SELECT * FROM sentence_pairs
       WHERE segment_id = ?
       ORDER BY pair_order
-    `).all(segment.id) as SentencePair[]
+    `
+      )
+      .all(segment.id) as SentencePair[]
 
     return {
       ...segment,
@@ -98,11 +111,15 @@ export function listTranscripts(options: ListTranscriptsOptions = {}): Paginated
   const db = getDatabase()
   const offset = (page - 1) * pageSize
 
-  const items = db.prepare(`
+  const items = db
+    .prepare(
+      `
     SELECT * FROM transcripts
     ORDER BY ${orderBy} ${order}
     LIMIT ? OFFSET ?
-  `).all(pageSize, offset) as Transcript[]
+  `
+    )
+    .all(pageSize, offset) as Transcript[]
 
   const total = db.prepare('SELECT COUNT(*) as count FROM transcripts').get() as { count: number }
 
@@ -198,7 +215,7 @@ export function exportTranscript(id: string): string | null {
 
 // Helper: Insert segments and sentence pairs
 function insertSegments(
-  db: any,
+  db: Database.Database,
   transcriptId: string,
   segments: SaveTranscriptRequest['segments']
 ): void {
@@ -227,12 +244,7 @@ function insertSegments(
       if (seg.sentence_pairs && seg.sentence_pairs.length > 0) {
         for (let j = 0; j < seg.sentence_pairs.length; j++) {
           const pair = seg.sentence_pairs[j]
-          pairStmt.run(
-            result.lastInsertRowid,
-            pair.original,
-            pair.translated || null,
-            j
-          )
+          pairStmt.run(result.lastInsertRowid, pair.original, pair.translated || null, j)
         }
       }
     }
@@ -243,7 +255,7 @@ function insertSegments(
 
 // Helper: Update FTS index
 function updateFTSIndex(
-  db: any,
+  db: Database.Database,
   transcriptId: string,
   title: string,
   note: string,
@@ -260,10 +272,12 @@ function updateFTSIndex(
     .join(' ')
 
   // Insert new entry
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO transcripts_fts (transcript_id, title, note, content, content_translated)
     VALUES (?, ?, ?, ?, ?)
-  `).run(transcriptId, title, note, content, contentTranslated)
+  `
+  ).run(transcriptId, title, note, content, contentTranslated)
 }
 
 // Helper: Format default title from date

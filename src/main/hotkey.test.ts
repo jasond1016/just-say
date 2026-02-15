@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const { listeners, mockUiohook, mockKeys, mockPlatform } = vi.hoisted(() => {
-  const listeners: Record<string, (e: any) => any> = {}
-  const mockUiohook: any = {
-    on: vi.fn((event: string, listener: (e: any) => any) => {
+  type HookEvent = { keycode: number }
+  const listeners: Record<string, (e: HookEvent) => Promise<void> | void> = {}
+  const mockUiohook = {
+    on: vi.fn((event: string, listener: (e: HookEvent) => Promise<void> | void) => {
       listeners[event] = listener
       return mockUiohook
     }),
