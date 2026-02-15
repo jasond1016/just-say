@@ -138,9 +138,15 @@ def resolve_sensevoice_device(device: str) -> str:
         return "cpu"
 
 
+def normalize_model_type(engine: str, model_type: str | None) -> str | None:
+    if engine == "sensevoice":
+        return None
+    return model_type or "tiny"
+
+
 def get_model(
     engine: str,
-    model_type: str,
+    model_type: str | None,
     sensevoice_model_id: str,
     device: str,
     compute_type: str,
@@ -149,16 +155,27 @@ def get_model(
     """Get or create the model singleton."""
     global _model, _model_info
 
+    normalized_model_type = normalize_model_type(engine, model_type)
+
     with _model_lock:
-        need_reload = (
-            _model is None
-            or _model_info["engine"] != engine
-            or _model_info["model_type"] != model_type
-            or _model_info["sensevoice_model_id"] != sensevoice_model_id
-            or _model_info["device"] != device
-            or _model_info["compute_type"] != compute_type
-            or _model_info["download_root"] != download_root
-        )
+        reload_reasons = []
+        if _model is None:
+            reload_reasons.append("model_uninitialized")
+        if _model_info["engine"] != engine:
+            reload_reasons.append("engine_changed")
+        if normalized_model_type != _model_info["model_type"]:
+            reload_reasons.append("model_type_changed")
+        if _model_info["sensevoice_model_id"] != sensevoice_model_id:
+            reload_reasons.append("sensevoice_model_id_changed")
+        if _model_info["device"] != device:
+            reload_reasons.append("device_changed")
+        if _model_info["compute_type"] != compute_type:
+            reload_reasons.append("compute_type_changed")
+        if _model_info["download_root"] != download_root:
+            reload_reasons.append("download_root_changed")
+
+        need_reload = len(reload_reasons) > 0
+        reload_reason = ",".join(reload_reasons) if reload_reasons else "cache_hit"
 
         if need_reload:
             if engine == "sensevoice":
@@ -179,16 +196,23 @@ def get_model(
             _model_info.update(
                 {
                     "engine": engine,
-                    "model_type": model_type,
+                    "model_type": normalized_model_type,
                     "sensevoice_model_id": sensevoice_model_id,
                     "device": device,
                     "compute_type": compute_type,
                     "download_root": download_root,
                 }
             )
-            print("[Server] Model loaded successfully", flush=True)
+            print(f"[Server] Model loaded successfully (reload_reason={reload_reason})", flush=True)
+        else:
+            model_name = model_type if engine == "faster-whisper" else sensevoice_model_id
+            print(
+                f"[Server] Reusing loaded model: engine={engine}, model={model_name}, "
+                f"device={device}, compute={compute_type}",
+                flush=True,
+            )
 
-        return _model
+        return _model, (not need_reload), reload_reason
 
 
 def detect_gpu():
@@ -443,12 +467,12 @@ class WhisperHandler(BaseHTTPRequestHandler):
 
         if _runtime_policy["lock_model"]:
             engine = default_engine
-            model_type = default_model_type
+            model_type = default_model_type if default_engine == "faster-whisper" else None
             sensevoice_model_id = default_sensevoice_model_id
             sensevoice_use_itn = default_sensevoice_use_itn
         else:
             engine = requested_engine
-            model_type = requested_model_type
+            model_type = requested_model_type if engine == "faster-whisper" else None
             sensevoice_model_id = requested_sensevoice_model_id
             sensevoice_use_itn = requested_sensevoice_use_itn
 
@@ -476,7 +500,7 @@ class WhisperHandler(BaseHTTPRequestHandler):
             temp_path = tmp_file.name
 
         try:
-            model = get_model(
+            model, model_reused, reload_reason = get_model(
                 engine=engine,
                 model_type=model_type,
                 sensevoice_model_id=sensevoice_model_id,
@@ -501,6 +525,8 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 "model": model_type if engine == "faster-whisper" else sensevoice_model_id,
                 "device": device,
                 "compute_type": compute_type,
+                "model_reused": model_reused,
+                "reload_reason": reload_reason,
             }
         except Exception as exc:
             model_name = model_type if engine == "faster-whisper" else sensevoice_model_id
@@ -520,6 +546,8 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 "device": device,
                 "compute_type": compute_type,
                 "language": language,
+                "model_reused": False,
+                "reload_reason": "transcribe_failed",
             }
         finally:
             try:
@@ -604,8 +632,9 @@ class WhisperHandler(BaseHTTPRequestHandler):
             if engine == "sensevoice":
                 resolved_sensevoice_device = resolve_sensevoice_device(device)
                 device = "cuda" if resolved_sensevoice_device.startswith("cuda") else "cpu"
+                model_type = None
 
-            get_model(
+            _, model_reused, reload_reason = get_model(
                 engine=engine,
                 model_type=model_type,
                 sensevoice_model_id=sensevoice_model_id,
@@ -620,6 +649,8 @@ class WhisperHandler(BaseHTTPRequestHandler):
                     "engine": engine,
                     "model": model_type if engine == "faster-whisper" else sensevoice_model_id,
                     "sensevoice_use_itn": sensevoice_use_itn,
+                    "model_reused": model_reused,
+                    "reload_reason": reload_reason,
                 }
             )
         except Exception as exc:
@@ -727,12 +758,14 @@ def main():
         print(f"[Server] Pre-loading model: engine={args.engine}, model={model_name}", flush=True)
         try:
             preload_device = args.device
+            preload_model_type = args.preload_model or args.default_model
             if args.engine == "sensevoice":
                 resolved_sensevoice_device = resolve_sensevoice_device(args.device)
                 preload_device = "cuda" if resolved_sensevoice_device.startswith("cuda") else "cpu"
+                preload_model_type = None
             get_model(
                 engine=args.engine,
-                model_type=args.preload_model or args.default_model,
+                model_type=preload_model_type,
                 sensevoice_model_id=args.sensevoice_model_id,
                 device=preload_device,
                 compute_type=args.compute_type,

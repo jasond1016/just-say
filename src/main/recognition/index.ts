@@ -122,4 +122,10 @@ export class RecognitionController extends EventEmitter {
     }
     throw new Error('Current backend does not support model deletion')
   }
+
+  async prewarmLocalBackend(reason = 'manual'): Promise<void> {
+    if (this.recognizer instanceof LocalRecognizer) {
+      await this.recognizer.prewarm(reason)
+    }
+  }
 }

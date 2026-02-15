@@ -69,6 +69,16 @@ function shouldRecreateRecognition(prev: AppConfig, next: AppConfig): boolean {
   return getRecognitionSignature(prev) !== getRecognitionSignature(next)
 }
 
+function prewarmLocalRecognition(reason: string): void {
+  if (!recognitionController) {
+    return
+  }
+
+  void recognitionController.prewarmLocalBackend(reason).catch((err) => {
+    console.error(`[Main] Local recognition prewarm failed (${reason}):`, err)
+  })
+}
+
 function isIndicatorEnabled(): boolean {
   return getConfig().ui?.indicatorEnabled !== false
 }
@@ -326,6 +336,7 @@ async function initializeApp(): Promise<void> {
   // Initialize modules
   audioRecorder = new WebAudioRecorder()
   recognitionController = new RecognitionController(config)
+  prewarmLocalRecognition('app-startup')
   inputSimulator = new InputSimulator()
   hotkeyManager = new HotkeyManager(config.hotkey?.triggerKey)
 
@@ -502,6 +513,7 @@ ipcMain.handle('set-config', (_event, config) => {
   if (!recognitionController || shouldRecreateRecognition(prevConfig, nextConfig)) {
     recognitionController = new RecognitionController(nextConfig)
   }
+  prewarmLocalRecognition('config-update')
   syncIndicatorVisibilityFromConfig()
 })
 

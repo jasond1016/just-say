@@ -36,6 +36,8 @@ export interface TranscribeResult {
   processing_time?: number
   device?: string
   compute_type?: string
+  model_reused?: boolean
+  reload_reason?: string
   error?: string
 }
 
@@ -46,20 +48,22 @@ export interface GpuInfo {
   recommended_compute_type: string
 }
 
+type WhisperServerRuntimeConfig = {
+  host: string
+  port: number
+  modelType: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+  engine: LocalEngine
+  sensevoiceModelId: string
+  sensevoiceUseItn: boolean
+  device: 'cpu' | 'cuda'
+  computeType: string
+  autoStart: boolean
+  mode: 'local' | 'remote'
+  downloadRoot?: string
+}
+
 class WhisperServerClient {
-  private config: {
-    host: string
-    port: number
-    modelType: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
-    engine: LocalEngine
-    sensevoiceModelId: string
-    sensevoiceUseItn: boolean
-    device: 'cpu' | 'cuda'
-    computeType: string
-    autoStart: boolean
-    mode: 'local' | 'remote'
-    downloadRoot?: string
-  }
+  private config: WhisperServerRuntimeConfig
   private serverProcess: ChildProcess | null = null
   private pythonPath: string
   private scriptPath: string
@@ -349,23 +353,26 @@ class WhisperServerClient {
 
     const params = new URLSearchParams()
 
-    if (options?.modelType) {
-      params.set('model', options.modelType)
-    }
-    params.set('engine', options?.engine || this.config.engine)
-    params.set(
-      'sensevoice_model_id',
-      options?.sensevoiceModelId || this.config.sensevoiceModelId
-    )
-    params.set(
-      'sensevoice_use_itn',
-      (options?.sensevoiceUseItn !== undefined
-        ? options.sensevoiceUseItn
-        : this.config.sensevoiceUseItn
+    const engine = options?.engine || this.config.engine
+    params.set('engine', engine)
+
+    if (engine === 'faster-whisper') {
+      params.set('model', options?.modelType || this.config.modelType)
+    } else {
+      params.set(
+        'sensevoice_model_id',
+        options?.sensevoiceModelId || this.config.sensevoiceModelId
       )
-        ? 'true'
-        : 'false'
-    )
+      params.set(
+        'sensevoice_use_itn',
+        (options?.sensevoiceUseItn !== undefined
+          ? options.sensevoiceUseItn
+          : this.config.sensevoiceUseItn
+        )
+          ? 'true'
+          : 'false'
+      )
+    }
     if (options?.device) {
       params.set('device', options.device)
     }
@@ -499,41 +506,41 @@ class WhisperServerClient {
    * Update configuration (will restart server if needed)
    */
   async updateConfig(config: Partial<WhisperServerConfig>): Promise<void> {
+    const prev = { ...this.config }
+    const next: WhisperServerRuntimeConfig = { ...this.config, ...config }
     const needsRestart =
-      config.host !== undefined ||
-      config.port !== undefined ||
-      config.engine !== undefined ||
-      config.sensevoiceModelId !== undefined ||
-      config.sensevoiceUseItn !== undefined ||
-      config.device !== undefined ||
-      config.computeType !== undefined ||
-      config.mode !== undefined ||
-      config.downloadRoot !== undefined
+      prev.host !== next.host ||
+      prev.port !== next.port ||
+      prev.engine !== next.engine ||
+      prev.sensevoiceModelId !== next.sensevoiceModelId ||
+      prev.sensevoiceUseItn !== next.sensevoiceUseItn ||
+      prev.device !== next.device ||
+      prev.computeType !== next.computeType ||
+      prev.mode !== next.mode ||
+      prev.downloadRoot !== next.downloadRoot
+    const needsReload =
+      prev.modelType !== next.modelType ||
+      prev.engine !== next.engine ||
+      prev.sensevoiceModelId !== next.sensevoiceModelId ||
+      prev.sensevoiceUseItn !== next.sensevoiceUseItn
 
-    Object.assign(this.config, config)
+    this.config = next
 
     if (needsRestart && this.serverProcess) {
       await this.stop()
       if (this.config.mode === 'local') {
         await this.start()
       }
-    } else if (
-      (config.modelType || config.engine || config.sensevoiceModelId || config.sensevoiceUseItn !== undefined) &&
-      this.serverProcess &&
-      this.config.mode === 'local'
-    ) {
+    } else if (needsReload && this.serverProcess && this.config.mode === 'local') {
       // Just reload the model
       await this.loadModel(
-        config.modelType || this.config.modelType,
+        this.config.modelType,
         this.config.device,
         this.config.computeType,
         {
-          engine: config.engine || this.config.engine,
-          sensevoiceModelId: config.sensevoiceModelId || this.config.sensevoiceModelId,
-          sensevoiceUseItn:
-            config.sensevoiceUseItn !== undefined
-              ? config.sensevoiceUseItn
-              : this.config.sensevoiceUseItn
+          engine: this.config.engine,
+          sensevoiceModelId: this.config.sensevoiceModelId,
+          sensevoiceUseItn: this.config.sensevoiceUseItn
         }
       )
     }

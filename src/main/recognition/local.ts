@@ -58,6 +58,9 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private scriptPath: string
   private static cachedGpuInfo: GpuInfo | null = null
   private whisperServer: WhisperServerClient | null = null
+  private prewarmPromise: Promise<void> | null = null
+  private lastPrewarmKey: string | null = null
+  private loggedFirstTranscribeWait = false
 
   constructor(config?: LocalRecognizerConfig) {
     super()
@@ -111,8 +114,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         modelType: this.config.modelType,
         sensevoiceModelId: this.getSenseVoiceModelId(),
         sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
-        device: this.config.device === 'auto' ? 'cpu' : this.config.device,
-        computeType: this.config.computeType === 'auto' ? 'int8' : this.config.computeType,
+        device: this.resolveInitialDevice(),
+        computeType: this.resolveInitialComputeType(),
         autoStart: serverMode === 'local'
       })
     }
@@ -219,6 +222,25 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       this.config.computeType === 'default'
 
     console.log('[LocalRecognizer] Recognizing via HTTP server')
+    const prewarmStart = Date.now()
+    await this.prewarmWithRuntime(
+      {
+        engine: this.getEngine(),
+        modelType: this.config.modelType || 'tiny',
+        sensevoiceModelId: this.getSenseVoiceModelId(),
+        sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
+        device,
+        computeType
+      },
+      'recognize'
+    )
+    if (!this.loggedFirstTranscribeWait) {
+      this.loggedFirstTranscribeWait = true
+      console.log(
+        '[LocalRecognizer] First transcribe wait:',
+        JSON.stringify({ first_transcribe_wait_ms: Date.now() - prewarmStart, engine: this.getEngine() })
+      )
+    }
 
     const result = await this.whisperServer!.transcribe(wavBuffer, {
       engine: this.config.engine,
@@ -494,6 +516,26 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     return { device, computeType }
   }
+
+  async prewarm(reason = 'manual'): Promise<void> {
+    if (!this.config.useHttpServer || !this.whisperServer || this.isRemoteMode()) {
+      return
+    }
+
+    const { device, computeType } = await this.resolveAutoSettings()
+    return this.prewarmWithRuntime(
+      {
+        engine: this.getEngine(),
+        modelType: this.config.modelType || 'tiny',
+        sensevoiceModelId: this.getSenseVoiceModelId(),
+        sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
+        device,
+        computeType
+      },
+      reason
+    )
+  }
+
   async downloadModel(modelType: string): Promise<void> {
     if (this.isRemoteMode()) {
       throw new Error('Remote mode does not support local model management')
@@ -699,9 +741,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     if (this.isRemoteMode()) {
       throw new Error('Remote mode does not support starting local server')
     }
-    if (this.whisperServer) {
-      await this.whisperServer.start()
-    }
+    await this.prewarm('manual-start')
   }
 
   private isRemoteMode(): boolean {
@@ -718,6 +758,112 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
   private shouldUseSenseVoiceItn(): boolean {
     return this.config.sensevoice?.useItn !== false
+  }
+
+  private resolveInitialDevice(): 'cpu' | 'cuda' {
+    if (this.config.device === 'cuda' || this.config.device === 'cpu') {
+      return this.config.device
+    }
+    return 'cpu'
+  }
+
+  private resolveInitialComputeType(): string {
+    if (
+      this.config.computeType &&
+      this.config.computeType !== 'auto' &&
+      this.config.computeType !== 'default'
+    ) {
+      return this.config.computeType
+    }
+    return this.resolveInitialDevice() === 'cuda' ? 'float16' : 'int8'
+  }
+
+  private getPrewarmKey(runtime: {
+    engine: LocalEngine
+    modelType: string
+    sensevoiceModelId: string
+    sensevoiceUseItn: boolean
+    device: 'cpu' | 'cuda'
+    computeType: string
+  }): string {
+    return JSON.stringify(runtime)
+  }
+
+  private async ensureServerReadyAndPrewarmed(
+    runtime: {
+      engine: LocalEngine
+      modelType: string
+      sensevoiceModelId: string
+      sensevoiceUseItn: boolean
+      device: 'cpu' | 'cuda'
+      computeType: string
+    },
+    reason: string
+  ): Promise<void> {
+    if (!this.whisperServer) {
+      throw new Error('Whisper server client is not initialized')
+    }
+
+    const key = this.getPrewarmKey(runtime)
+    const healthy = await this.whisperServer.isHealthy()
+    if (healthy && this.lastPrewarmKey === key) {
+      return
+    }
+
+    await this.whisperServer.updateConfig({
+      engine: runtime.engine,
+      modelType: runtime.modelType as LocalRecognizerConfig['modelType'],
+      sensevoiceModelId: runtime.sensevoiceModelId,
+      sensevoiceUseItn: runtime.sensevoiceUseItn,
+      device: runtime.device,
+      computeType: runtime.computeType
+    })
+
+    const serverStartAt = Date.now()
+    await this.whisperServer.start()
+    const serverStartMs = Date.now() - serverStartAt
+
+    const loadStartAt = Date.now()
+    await this.whisperServer.loadModel(runtime.modelType, runtime.device, runtime.computeType, {
+      engine: runtime.engine,
+      sensevoiceModelId: runtime.sensevoiceModelId,
+      sensevoiceUseItn: runtime.sensevoiceUseItn
+    })
+    const prewarmMs = Date.now() - loadStartAt
+    this.lastPrewarmKey = key
+    console.log(
+      '[LocalRecognizer] Prewarm complete:',
+      JSON.stringify({
+        reason,
+        engine: runtime.engine,
+        device: runtime.device,
+        compute_type: runtime.computeType,
+        server_start_ms: serverStartMs,
+        prewarm_ms: prewarmMs
+      })
+    )
+  }
+
+  private async prewarmWithRuntime(
+    runtime: {
+      engine: LocalEngine
+      modelType: string
+      sensevoiceModelId: string
+      sensevoiceUseItn: boolean
+      device: 'cpu' | 'cuda'
+      computeType: string
+    },
+    reason: string
+  ): Promise<void> {
+    if (this.prewarmPromise) {
+      return this.prewarmPromise
+    }
+
+    this.prewarmPromise = this.ensureServerReadyAndPrewarmed(runtime, reason).finally(() => {
+      this.prewarmPromise = null
+    })
+
+    return this.prewarmPromise
   }
 
   private resolveSenseVoiceModelKey(modelType: string): string {
