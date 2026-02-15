@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, type Dispatch, type SetStateAction } from 'react'
 
 export interface Transcript {
   id: string
@@ -42,7 +42,27 @@ export interface PaginatedResult<T> {
 
 export interface SearchResult extends PaginatedResult<Transcript> {}
 
-export function useTranscripts() {
+interface UseTranscriptsResult {
+  transcripts: Transcript[]
+  currentTranscript: TranscriptWithSegments | null
+  loading: boolean
+  error: string | null
+  pagination: {
+    page: number
+    pageSize: number
+    total: number
+    totalPages: number
+  }
+  listTranscripts: (page?: number) => Promise<void>
+  searchTranscripts: (query: string, page?: number) => Promise<void>
+  getTranscript: (id: string) => Promise<TranscriptWithSegments | null>
+  updateTranscript: (id: string, data: { title?: string; note?: string }) => Promise<boolean>
+  deleteTranscript: (id: string) => Promise<boolean>
+  exportTranscript: (id: string) => Promise<string | null>
+  setCurrentTranscript: Dispatch<SetStateAction<TranscriptWithSegments | null>>
+}
+
+export function useTranscripts(): UseTranscriptsResult {
   const [transcripts, setTranscripts] = useState<Transcript[]>([])
   const [currentTranscript, setCurrentTranscript] = useState<TranscriptWithSegments | null>(null)
   const [loading, setLoading] = useState(false)
@@ -55,53 +75,59 @@ export function useTranscripts() {
   })
 
   // Load transcripts list
-  const listTranscripts = useCallback(async (page = 1) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await window.api.listTranscripts({
-        page,
-        pageSize: pagination.pageSize
-      })
-      setTranscripts(result.items as Transcript[])
-      setPagination({
-        page: result.page,
-        pageSize: result.pageSize,
-        total: result.total,
-        totalPages: result.totalPages
-      })
-    } catch (err) {
-      setError('Failed to load transcripts')
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }, [pagination.pageSize])
+  const listTranscripts = useCallback(
+    async (page = 1) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await window.api.listTranscripts({
+          page,
+          pageSize: pagination.pageSize
+        })
+        setTranscripts(result.items as Transcript[])
+        setPagination({
+          page: result.page,
+          pageSize: result.pageSize,
+          total: result.total,
+          totalPages: result.totalPages
+        })
+      } catch (err) {
+        setError('Failed to load transcripts')
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [pagination.pageSize]
+  )
 
   // Search transcripts
-  const searchTranscripts = useCallback(async (query: string, page = 1) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await window.api.searchTranscripts({
-        query,
-        page,
-        pageSize: pagination.pageSize
-      })
-      setTranscripts(result.items as Transcript[])
-      setPagination({
-        page: result.page,
-        pageSize: result.pageSize,
-        total: result.total,
-        totalPages: result.totalPages
-      })
-    } catch (err) {
-      setError('Search failed')
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }, [pagination.pageSize])
+  const searchTranscripts = useCallback(
+    async (query: string, page = 1) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const result = await window.api.searchTranscripts({
+          query,
+          page,
+          pageSize: pagination.pageSize
+        })
+        setTranscripts(result.items as Transcript[])
+        setPagination({
+          page: result.page,
+          pageSize: result.pageSize,
+          total: result.total,
+          totalPages: result.totalPages
+        })
+      } catch (err) {
+        setError('Search failed')
+        console.error(err)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [pagination.pageSize]
+  )
 
   // Get single transcript with segments
   const getTranscript = useCallback(async (id: string) => {
@@ -124,55 +150,59 @@ export function useTranscripts() {
   }, [])
 
   // Update transcript
-  const updateTranscript = useCallback(async (id: string, data: { title?: string; note?: string }) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const success = await window.api.updateTranscript(id, data)
-      if (success) {
-        // Update local state
-        setCurrentTranscript((prev) => {
-          if (prev && prev.id === id) {
-            return { ...prev, ...data } as TranscriptWithSegments
-          }
-          return prev
-        })
-        setTranscripts((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, ...data } : t))
-        )
+  const updateTranscript = useCallback(
+    async (id: string, data: { title?: string; note?: string }) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const success = await window.api.updateTranscript(id, data)
+        if (success) {
+          // Update local state
+          setCurrentTranscript((prev) => {
+            if (prev && prev.id === id) {
+              return { ...prev, ...data } as TranscriptWithSegments
+            }
+            return prev
+          })
+          setTranscripts((prev) => prev.map((t) => (t.id === id ? { ...t, ...data } : t)))
+        }
+        return success
+      } catch (err) {
+        setError('Failed to update transcript')
+        console.error(err)
+        return false
+      } finally {
+        setLoading(false)
       }
-      return success
-    } catch (err) {
-      setError('Failed to update transcript')
-      console.error(err)
-      return false
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+    },
+    []
+  )
 
   // Delete transcript
-  const deleteTranscript = useCallback(async (id: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const success = await window.api.deleteTranscript(id)
-      if (success) {
-        setTranscripts((prev) => prev.filter((t) => t.id !== id))
-        if (currentTranscript?.id === id) {
-          setCurrentTranscript(null)
+  const deleteTranscript = useCallback(
+    async (id: string) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const success = await window.api.deleteTranscript(id)
+        if (success) {
+          setTranscripts((prev) => prev.filter((t) => t.id !== id))
+          if (currentTranscript?.id === id) {
+            setCurrentTranscript(null)
+          }
+          setPagination((prev) => ({ ...prev, total: prev.total - 1 }))
         }
-        setPagination((prev) => ({ ...prev, total: prev.total - 1 }))
+        return success
+      } catch (err) {
+        setError('Failed to delete transcript')
+        console.error(err)
+        return false
+      } finally {
+        setLoading(false)
       }
-      return success
-    } catch (err) {
-      setError('Failed to delete transcript')
-      console.error(err)
-      return false
-    } finally {
-      setLoading(false)
-    }
-  }, [currentTranscript])
+    },
+    [currentTranscript]
+  )
 
   // Export transcript as JSON
   const exportTranscript = useCallback(async (id: string): Promise<string | null> => {

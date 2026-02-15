@@ -374,15 +374,13 @@ class WhisperServerClient {
     if (engine === 'faster-whisper') {
       params.set('model', options?.modelType || this.config.modelType)
     } else {
-      params.set(
-        'sensevoice_model_id',
-        options?.sensevoiceModelId || this.config.sensevoiceModelId
-      )
+      params.set('sensevoice_model_id', options?.sensevoiceModelId || this.config.sensevoiceModelId)
       params.set(
         'sensevoice_use_itn',
-        (options?.sensevoiceUseItn !== undefined
-          ? options.sensevoiceUseItn
-          : this.config.sensevoiceUseItn
+        (
+          options?.sensevoiceUseItn !== undefined
+            ? options.sensevoiceUseItn
+            : this.config.sensevoiceUseItn
         )
           ? 'true'
           : 'false'
@@ -555,9 +553,7 @@ class WhisperServerClient {
     const prev = { ...this.config }
     const next: WhisperServerRuntimeConfig = { ...this.config, ...config }
     const needsRestart =
-      prev.host !== next.host ||
-      prev.port !== next.port ||
-      prev.mode !== next.mode
+      prev.host !== next.host || prev.port !== next.port || prev.mode !== next.mode
     const needsReload =
       prev.modelType !== next.modelType ||
       prev.engine !== next.engine ||
@@ -576,16 +572,11 @@ class WhisperServerClient {
       }
     } else if (needsReload && this.config.mode === 'local') {
       // Just reload the model
-      await this.loadModel(
-        this.config.modelType,
-        this.config.device,
-        this.config.computeType,
-        {
-          engine: this.config.engine,
-          sensevoiceModelId: this.config.sensevoiceModelId,
-          sensevoiceUseItn: this.config.sensevoiceUseItn
-        }
-      )
+      await this.loadModel(this.config.modelType, this.config.device, this.config.computeType, {
+        engine: this.config.engine,
+        sensevoiceModelId: this.config.sensevoiceModelId,
+        sensevoiceUseItn: this.config.sensevoiceUseItn
+      })
     }
   }
 }

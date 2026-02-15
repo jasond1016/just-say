@@ -31,7 +31,7 @@ describe('deepMerge', () => {
       a?: string
       b?: number
       c?: number
-    }
+    } | null
     array?: string[]
   }
 
@@ -89,7 +89,7 @@ describe('deepMerge', () => {
       nested: { a: 'hello' }
     }
     const source: Partial<TestConfig> = {
-      nested: null as any
+      nested: null
     }
 
     // null is not undefined, so it should be assigned

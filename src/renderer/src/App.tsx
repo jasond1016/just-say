@@ -1,17 +1,14 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import './styles/design-system.css'
-import { Layout } from './components/Layout'
-import { Sidebar } from './components/Sidebar'
-import { StatusBar } from './components/StatusBar'
-import { PushToTalk } from './pages/PushToTalk'
 import { MeetingTranscription } from './pages/MeetingTranscription'
-import { Settings } from './pages/Settings'
 import { TranscriptHistory } from './pages/TranscriptHistory'
 import { TranscriptDetail } from './pages/TranscriptDetail'
+import { DashboardHome } from './pages/DashboardHome'
+import { DashboardSidebar, type DashboardView } from './components/dashboard/DashboardSidebar'
+import { DashboardSettingsModal } from './components/dashboard/DashboardSettingsModal'
 import { DEFAULT_TRIGGER_KEY, getTriggerKeyLabel } from '../../shared/hotkey'
 
 type ThemeOption = 'system' | 'light' | 'dark'
-type ViewType = 'ptt' | 'meeting' | 'settings' | 'history' | 'detail'
+type ViewType = 'ptt' | 'meeting' | 'history' | 'detail'
 
 interface AppConfig {
   ui?: {
@@ -29,8 +26,8 @@ function App(): React.JSX.Element {
   const [activeView, setActiveView] = useState<ViewType>('ptt')
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null)
   const [theme, setTheme] = useState<ThemeOption>('system')
-  const [pttStatus, setPttStatus] = useState<'idle' | 'recording' | 'processing'>('idle')
   const [config, setConfig] = useState<AppConfig | null>(null)
+  const [dashboardSettingsOpen, setDashboardSettingsOpen] = useState(false)
 
   const loadConfig = useCallback(async (): Promise<void> => {
     try {
@@ -61,7 +58,7 @@ function App(): React.JSX.Element {
       effectiveTheme = themeOption
     }
 
-    // Apply to document
+    document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')
     if (effectiveTheme === 'light') {
       document.documentElement.setAttribute('data-theme', 'light')
     } else {
@@ -87,34 +84,18 @@ function App(): React.JSX.Element {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [theme, applyTheme])
 
-  // Listen for recording state changes from main process
-  useEffect(() => {
-    const handleRecordingState = (state: { recording?: boolean; processing?: boolean }): void => {
-      if (state.recording) {
-        setPttStatus('recording')
-      } else if (state.processing) {
-        setPttStatus('processing')
-      } else {
-        setPttStatus('idle')
-      }
-    }
-
-    if (window.api?.onRecordingState) {
-      window.api.onRecordingState(handleRecordingState)
-    }
-  }, [])
-
   const handleThemeChange = (newTheme: ThemeOption): void => {
     setTheme(newTheme)
   }
 
   const hotkey = getTriggerKeyLabel(config?.hotkey?.triggerKey || DEFAULT_TRIGGER_KEY)
-  const engine =
-    config?.recognition?.backend === 'soniox'
-      ? 'Soniox'
-      : config?.recognition?.backend === 'api'
-        ? 'OpenAI'
-        : 'Local'
+  const dashboardHotkey = hotkey === 'Right Ctrl' ? 'R Ctrl' : hotkey
+
+  const handleDashboardNavigate = useCallback((nextView: DashboardView) => {
+    setActiveView(nextView)
+    setSelectedTranscriptId(null)
+    setDashboardSettingsOpen(false)
+  }, [])
 
   const handleNavigateToDetail = useCallback((id: string) => {
     setSelectedTranscriptId(id)
@@ -126,43 +107,56 @@ function App(): React.JSX.Element {
     setActiveView('history')
   }, [])
 
-  const handleBackFromHistory = useCallback(() => {
-    setActiveView('ptt')
-  }, [])
+  const sidebarActiveView: DashboardView =
+    activeView === 'meeting'
+      ? 'meeting'
+      : activeView === 'history' || activeView === 'detail'
+        ? 'history'
+        : 'ptt'
 
   return (
-    <Layout
-      sidebar={
-        <Sidebar
-          activeView={activeView}
-          onViewChange={(v) => {
-            setActiveView(v as ViewType)
-            if (v !== 'detail') {
-              setSelectedTranscriptId(null)
-            }
-          }}
+    <>
+      <div className="h-full w-full bg-background">
+        <div className="mx-auto h-full w-full max-w-[1200px] overflow-hidden bg-background">
+          <div className="flex h-full w-full">
+            <DashboardSidebar activeView={sidebarActiveView} onNavigate={handleDashboardNavigate} />
+
+            {activeView === 'ptt' && (
+              <DashboardHome
+                hotkey={dashboardHotkey}
+                onNavigate={handleDashboardNavigate}
+                onOpenSettings={() => setDashboardSettingsOpen(true)}
+                onOpenTranscript={handleNavigateToDetail}
+              />
+            )}
+
+            {activeView === 'meeting' && (
+              <MeetingTranscription onOpenSettings={() => setDashboardSettingsOpen(true)} />
+            )}
+
+            {activeView === 'history' && (
+              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+            )}
+
+            {activeView === 'detail' && selectedTranscriptId && (
+              <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
+            )}
+
+            {activeView === 'detail' && !selectedTranscriptId && (
+              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {dashboardSettingsOpen && (
+        <DashboardSettingsModal
+          onClose={() => setDashboardSettingsOpen(false)}
+          onSaved={loadConfig}
+          onThemeChange={handleThemeChange}
         />
-      }
-      statusBar={<StatusBar status={pttStatus} engine={engine} hotkey={hotkey} />}
-    >
-      {activeView === 'ptt' && <PushToTalk status={pttStatus} hotkey={hotkey} />}
-      {activeView === 'meeting' && <MeetingTranscription />}
-      {activeView === 'settings' && (
-        <Settings currentTheme={theme} onThemeChange={handleThemeChange} />
       )}
-      {activeView === 'history' && (
-        <TranscriptHistory
-          onNavigateToDetail={handleNavigateToDetail}
-          onBack={handleBackFromHistory}
-        />
-      )}
-      {activeView === 'detail' && selectedTranscriptId && (
-        <TranscriptDetail
-          id={selectedTranscriptId}
-          onBack={handleBackFromDetail}
-        />
-      )}
-    </Layout>
+    </>
   )
 }
 

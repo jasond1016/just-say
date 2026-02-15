@@ -163,7 +163,10 @@ export class StreamingGroqRecognizer extends EventEmitter {
       this.config.previewIntervalMs,
       previewDefaults.interval
     )
-    this.previewMinAudioMs = this.normalizeMs(this.config.previewMinAudioMs, previewDefaults.minAudio)
+    this.previewMinAudioMs = this.normalizeMs(
+      this.config.previewMinAudioMs,
+      previewDefaults.minAudio
+    )
     this.previewWindowMs = this.normalizeMs(this.config.previewWindowMs, previewDefaults.window)
     this.previewMinNewAudioMs = this.normalizeMs(
       this.config.previewMinNewAudioMs,
@@ -281,7 +284,9 @@ export class StreamingGroqRecognizer extends EventEmitter {
     const audioLengthMs = this.getDurationMsFromBytes(this.previewAudioBytes)
     if (audioLengthMs < this.previewMinAudioMs) return
 
-    const newAudioMs = this.getDurationMsFromBytes(this.previewAudioBytes - this.lastPreviewAudioBytes)
+    const newAudioMs = this.getDurationMsFromBytes(
+      this.previewAudioBytes - this.lastPreviewAudioBytes
+    )
     if (newAudioMs < this.previewMinNewAudioMs) return
 
     const previewRevision = this.finalRevision
@@ -591,9 +596,7 @@ export class StreamingGroqRecognizer extends EventEmitter {
         ? this.minRequestIntervalMs - (now - this.lastRequestAt)
         : 0
     const rpmDelay =
-      this.requestTimestamps.length >= this.targetRpm
-        ? this.requestTimestamps[0] + 60_000 - now
-        : 0
+      this.requestTimestamps.length >= this.targetRpm ? this.requestTimestamps[0] + 60_000 - now : 0
 
     return Math.max(0, backoffDelay, intervalDelay, rpmDelay)
   }
@@ -663,7 +666,11 @@ export class StreamingGroqRecognizer extends EventEmitter {
     this.backoffUntil = 0
   }
 
-  private createHttpError(scope: 'transcription' | 'translation', status: number, body: string): Error {
+  private createHttpError(
+    scope: 'transcription' | 'translation',
+    status: number,
+    body: string
+  ): Error {
     const error = new Error(`Groq ${scope} API error ${status}: ${body}`) as Error & {
       status?: number
     }

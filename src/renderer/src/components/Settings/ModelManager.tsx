@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react'
 
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
 type LocalEngine = 'faster-whisper' | 'sensevoice'
 
 const FASTER_WHISPER_MODEL_INFO: Record<string, { label: string; size: string; params: string }> = {
@@ -73,7 +77,7 @@ export function ModelManager({
   }
 
   const handleDelete = async (model: string): Promise<void> => {
-    if (!confirm(`Delete model "${model}"? This will free up disk space.`)) return
+    if (!window.confirm(`Delete model "${model}"? This will free up disk space.`)) return
 
     setDeleting(model)
     setError(null)
@@ -88,10 +92,14 @@ export function ModelManager({
   }
 
   return (
-    <div className="model-manager">
-      <h3>Local Models</h3>
-      {error && <div className="error-banner">{error}</div>}
-      <div className="models-list">
+    <div className="bg-card mt-5 rounded-lg border p-4">
+      <h3 className="mb-3 text-sm font-semibold">Local Models</h3>
+      {error && (
+        <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+          {error}
+        </div>
+      )}
+      <div className="flex flex-col gap-2.5">
         {(() => {
           const modelInfo =
             engine === 'sensevoice' ? SENSEVOICE_MODEL_INFO : FASTER_WHISPER_MODEL_INFO
@@ -106,53 +114,69 @@ export function ModelManager({
             return (
               <div
                 key={model}
-                className={`model-item ${isCurrent ? 'active' : ''} ${isDownloaded ? 'downloaded' : 'not-downloaded'}`}
+                className={cn(
+                  'bg-muted/25 flex items-center justify-between gap-3 rounded-md border p-3 transition-colors',
+                  !isDownloaded && 'opacity-70',
+                  isCurrent && 'border-violet-300 bg-violet-50'
+                )}
               >
-                <div className="model-info">
-                  <div className="model-header">
-                    <span className="model-name">{info.label}</span>
-                    {isCurrent && <span className="badge current">Active</span>}
-                    {isDownloaded && !isCurrent && <span className="badge downloaded">✓</span>}
+                <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">{info.label}</span>
+                    {isCurrent && <Badge className="bg-violet-600 text-white">Active</Badge>}
+                    {isDownloaded && !isCurrent && (
+                      <Badge className="bg-emerald-600 text-white">Downloaded</Badge>
+                    )}
                   </div>
-                  <div className="model-meta">
+                  <div className="text-muted-foreground text-xs">
                     {info.size} · {info.params} params
                   </div>
                 </div>
-                <div className="model-actions">
+                <div className="flex items-center gap-2">
                   {isDownloaded ? (
                     <>
                       {!isCurrent && (
-                        <button onClick={() => onModelChange(model)} disabled={!!downloading || !!deleting}>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onModelChange(model)}
+                          disabled={!!downloading || !!deleting}
+                        >
                           Select
-                        </button>
+                        </Button>
                       )}
-                      <button
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleDelete(model)}
                         disabled={!!downloading || !!deleting || isCurrent}
-                        className="delete-btn"
+                        className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
                         title={isCurrent ? 'Cannot delete active model' : 'Delete model'}
                       >
                         {deleting === model ? '...' : '✕'}
-                      </button>
+                      </Button>
                     </>
                   ) : isDownloading ? (
-                    <div className="download-progress">
-                      <div className="progress-text">{progress?.status || 'Downloading...'}</div>
-                      <div className="progress-bar">
+                    <div className="min-w-[180px]">
+                      <div className="text-muted-foreground mb-1 text-right text-xs">
+                        {progress?.status || 'Downloading...'}
+                      </div>
+                      <div className="bg-border h-1.5 w-full overflow-hidden rounded-full">
                         <div
-                          className="progress-fill"
+                          className="h-full rounded-full bg-violet-600 transition-all"
                           style={{ width: `${Math.min(progress?.percent || 0, 100)}%` }}
                         />
                       </div>
                     </div>
                   ) : (
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => handleDownload(model)}
                       disabled={!!downloading}
-                      className="download-btn"
                     >
                       Download
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -160,131 +184,6 @@ export function ModelManager({
           })
         })()}
       </div>
-      <style>{`
-        .model-manager {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 8px;
-          padding: 16px;
-          margin-top: 20px;
-        }
-        .models-list {
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
-        .model-item {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 12px;
-          background: rgba(0, 0, 0, 0.2);
-          border-radius: 6px;
-          border: 1px solid transparent;
-          transition: all 0.2s ease;
-        }
-        .model-item.not-downloaded {
-          opacity: 0.6;
-        }
-        .model-item.downloaded {
-          opacity: 1;
-        }
-        .model-item.active {
-          border-color: #646cff;
-          background: rgba(100, 108, 255, 0.15);
-        }
-        .model-info {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-        }
-        .model-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .model-name {
-          font-weight: bold;
-          text-transform: capitalize;
-        }
-        .model-meta {
-          font-size: 0.8em;
-          color: #888;
-        }
-        .badge {
-          font-size: 0.75em;
-          padding: 2px 6px;
-          border-radius: 4px;
-        }
-        .badge.current {
-          background: #646cff;
-          color: white;
-        }
-        .badge.downloaded {
-          background: #4caf50;
-          color: white;
-        }
-        button {
-          padding: 6px 12px;
-          border-radius: 4px;
-          border: 1px solid #646cff;
-          background: transparent;
-          color: #646cff;
-          cursor: pointer;
-        }
-        button:hover:not(:disabled) {
-          background: #646cff;
-          color: white;
-        }
-        button:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        .model-actions {
-          display: flex;
-          gap: 8px;
-          align-items: center;
-        }
-        .delete-btn {
-          padding: 4px 8px;
-          border-color: #ff6b6b;
-          color: #ff6b6b;
-          font-size: 0.9em;
-        }
-        .delete-btn:hover:not(:disabled) {
-          background: #ff6b6b;
-          color: white;
-        }
-        .error-banner {
-          background: #ff444433;
-          color: #ff8888;
-          padding: 10px;
-          border-radius: 4px;
-          margin-bottom: 10px;
-        }
-        .download-progress {
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
-          min-width: 150px;
-        }
-        .progress-text {
-          font-size: 0.75em;
-          color: #aaa;
-          text-align: right;
-        }
-        .progress-bar {
-          height: 6px;
-          background: rgba(255, 255, 255, 0.1);
-          border-radius: 3px;
-          overflow: hidden;
-        }
-        .progress-fill {
-          height: 100%;
-          background: #646cff;
-          border-radius: 3px;
-          transition: width 0.3s ease;
-        }
-      `}</style>
     </div>
   )
 }

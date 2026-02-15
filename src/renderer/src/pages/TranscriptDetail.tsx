@@ -1,241 +1,196 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useCallback, useEffect, useMemo } from 'react'
+import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react'
+
+import { Button } from '@/components/ui/button'
 import { useTranscripts } from '../hooks/useTranscripts'
-import './TranscriptDetail.css'
 
 interface TranscriptDetailProps {
   id: string
   onBack: () => void
 }
 
+function formatDateLabel(isoString: string): string {
+  const date = new Date(isoString)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+
+  if (isToday) {
+    return `Today, ${time}`
+  }
+
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) {
+    return `Yesterday, ${time}`
+  }
+
+  return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time}`
+}
+
+function formatDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  const remaining = seconds % 60
+  if (minutes === 0) {
+    return `${remaining}s`
+  }
+  return `${minutes} min`
+}
+
+function formatSegmentTime(index: number, total: number, durationSeconds: number): string {
+  if (total <= 1 || durationSeconds <= 0) {
+    return '0:00'
+  }
+  const estimated = Math.floor((index / (total - 1)) * durationSeconds)
+  const minutes = Math.floor(estimated / 60)
+  const seconds = estimated % 60
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
 export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.JSX.Element {
-  const {
-    currentTranscript,
-    loading,
-    error,
-    getTranscript,
-    updateTranscript,
-    exportTranscript
-  } = useTranscripts()
+  const { currentTranscript, loading, error, getTranscript, deleteTranscript, exportTranscript } =
+    useTranscripts()
 
-  const [isEditing, setIsEditing] = useState(false)
-  const [editTitle, setEditTitle] = useState('')
-  const [editNote, setEditNote] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  // Load transcript on mount
   useEffect(() => {
-    getTranscript(id)
-  }, [id])
+    void getTranscript(id)
+  }, [getTranscript, id])
 
-  // Update edit state when transcript loads
-  useEffect(() => {
-    if (currentTranscript) {
-      setEditTitle(currentTranscript.title)
-      setEditNote(currentTranscript.note || '')
-    }
-  }, [currentTranscript])
-
-  const handleSave = useCallback(async () => {
-    if (!currentTranscript) return
-
-    setSaving(true)
-    try {
-      await updateTranscript(id, {
-        title: editTitle.trim() || currentTranscript.title,
-        note: editNote.trim() || undefined
+  const fullText = useMemo(() => {
+    if (!currentTranscript) return ''
+    return currentTranscript.segments
+      .map((segment) => {
+        const translated = segment.translated_text ? `\n${segment.translated_text}` : ''
+        return `Speaker ${segment.speaker + 1}: ${segment.text}${translated}`
       })
-      setIsEditing(false)
-    } catch (err) {
-      console.error('Failed to save:', err)
-    } finally {
-      setSaving(false)
-    }
-  }, [currentTranscript, id, editTitle, editNote, updateTranscript])
-
-  const handleCancel = useCallback(() => {
-    if (currentTranscript) {
-      setEditTitle(currentTranscript.title)
-      setEditNote(currentTranscript.note || '')
-    }
-    setIsEditing(false)
+      .join('\n\n')
   }, [currentTranscript])
+
+  const speakerCount = useMemo(() => {
+    if (!currentTranscript) return 0
+    return new Set(currentTranscript.segments.map((segment) => segment.speaker)).size
+  }, [currentTranscript])
+
+  const handleCopy = useCallback(async () => {
+    if (!fullText) return
+    try {
+      await navigator.clipboard.writeText(fullText)
+    } catch (err) {
+      console.error('Failed to copy transcript:', err)
+    }
+  }, [fullText])
+
+  const handleDelete = useCallback(async () => {
+    if (!currentTranscript) return
+    const confirmed = window.confirm('Delete this transcript? This action cannot be undone.')
+    if (!confirmed) return
+
+    const ok = await deleteTranscript(currentTranscript.id)
+    if (ok) {
+      onBack()
+    }
+  }, [currentTranscript, deleteTranscript, onBack])
 
   const handleExport = useCallback(async () => {
     await exportTranscript(id)
-  }, [id, exportTranscript])
-
-  const formatDuration = (seconds: number): string => {
-    const h = Math.floor(seconds / 3600)
-    const m = Math.floor((seconds % 3600) / 60)
-    const s = seconds % 60
-    if (h > 0) {
-      return `${h}小时 ${m}分 ${s}秒`
-    }
-    return `${m}分 ${s}秒`
-  }
-
-  const formatDate = (isoString: string): string => {
-    const date = new Date(isoString)
-    return date.toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
-  const getSpeakerClass = (speaker: number): string => {
-    return `speaker-${speaker % 8}`
-  }
+  }, [exportTranscript, id])
 
   if (loading) {
     return (
-      <div className="content-view transcript-detail">
-        <div className="transcript-detail__loading">
-          <div className="loading-spinner" />
-          <span>加载中...</span>
-        </div>
+      <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
+        Loading transcript...
       </div>
     )
   }
 
   if (error || !currentTranscript) {
     return (
-      <div className="content-view transcript-detail">
-        <div className="transcript-detail__error">
-          <h3>加载失败</h3>
-          <p>{error || '未找到转录记录'}</p>
-          <button className="btn btn--primary" onClick={onBack}>
-            返回
-          </button>
-        </div>
+      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+        <p>{error || 'Transcript not found.'}</p>
+        <Button onClick={onBack}>Back</Button>
       </div>
     )
   }
 
   return (
-    <div className="content-view transcript-detail">
-      <div className="transcript-detail__header">
-        <button className="btn btn--ghost btn--sm" onClick={onBack}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="m15 18-6-6 6-6" />
-          </svg>
-          返回
-        </button>
-
-        <div className="transcript-detail__actions">
-          <button className="btn btn--ghost" onClick={handleExport}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            导出 JSON
-          </button>
-          {!isEditing && (
-            <button className="btn btn--ghost" onClick={() => setIsEditing(true)}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-              编辑
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="transcript-detail__meta">
-        {isEditing ? (
-          <div className="transcript-detail__edit-form">
-            <input
-              type="text"
-              className="form-input"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              placeholder="输入标题"
-            />
-            <textarea
-              className="form-textarea"
-              value={editNote}
-              onChange={(e) => setEditNote(e.target.value)}
-              placeholder="添加备注..."
-              rows={3}
-            />
-            <div className="transcript-detail__edit-actions">
-              <button className="btn btn--ghost" onClick={handleCancel} disabled={saving}>
-                取消
-              </button>
-              <button className="btn btn--primary" onClick={handleSave} disabled={saving}>
-                {saving ? '保存中...' : '保存'}
-              </button>
-            </div>
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+      <header className="flex h-[53px] items-center justify-between border-b px-6">
+        <div className="min-w-0">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 gap-1.5 rounded-md px-2.5 text-[13px] font-medium"
+              onClick={onBack}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </Button>
+            <h1 className="truncate text-base font-semibold">{currentTranscript.title}</h1>
           </div>
-        ) : (
-          <>
-            <h1 className="transcript-detail__title">{currentTranscript.title}</h1>
-            {currentTranscript.note && (
-              <p className="transcript-detail__note">{currentTranscript.note}</p>
-            )}
-          </>
-        )}
-
-        <div className="transcript-detail__info">
-          <span className="transcript-detail__info-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            {formatDuration(currentTranscript.duration_seconds)}
-          </span>
-          <span className="transcript-detail__info-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-            {formatDate(currentTranscript.created_at)}
-          </span>
-          {currentTranscript.translation_enabled === 1 && (
-            <span className="transcript-detail__badge transcript-detail__badge--translation">
-              翻译
-            </span>
-          )}
-          {currentTranscript.include_microphone === 1 && (
-            <span className="transcript-detail__badge transcript-detail__badge--mic">
-              麦克风
-            </span>
-          )}
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatDateLabel(currentTranscript.created_at)} ·{' '}
+            {formatDuration(currentTranscript.duration_seconds)} · {speakerCount} speakers
+          </p>
         </div>
-      </div>
 
-      <div className="transcript-detail__content">
-        {currentTranscript.segments.map((segment, idx) => {
-          const pairs = segment.sentence_pairs?.length
-            ? segment.sentence_pairs
-            : [{ original: segment.text, translated: segment.translated_text, pair_order: 0 }]
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+            onClick={handleCopy}
+          >
+            <Copy className="h-4 w-4" />
+            Copy
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+            onClick={() => {
+              void handleExport()
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 border-red-300 px-4 text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-600"
+            onClick={handleDelete}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
+        </div>
+      </header>
 
-          return (
-            <div key={segment.id || idx} className={`transcript-segment ${getSpeakerClass(segment.speaker)}`}>
-              <div className="transcript-segment__meta">
-                <span className={`transcript-segment__speaker ${getSpeakerClass(segment.speaker)}`}>
-                  说话人 {segment.speaker + 1}
-                </span>
-              </div>
-              <div className="transcript-segment__sentences">
-                {pairs.map((pair, sentIdx) => (
-                  <div key={sentIdx} className="sentence-pair">
-                    <div className="sentence-original">{pair.original}</div>
-                    {pair.translated && (
-                      <div className="sentence-translated">{pair.translated}</div>
-                    )}
-                  </div>
-                ))}
+      <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+        <div className="space-y-5">
+          {currentTranscript.segments.map((segment, index) => (
+            <div key={segment.id} className="flex gap-3">
+              <span className="w-10 shrink-0 pt-0.5 text-xs text-muted-foreground">
+                {formatSegmentTime(
+                  index,
+                  currentTranscript.segments.length,
+                  currentTranscript.duration_seconds
+                )}
+              </span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <p className="text-[13px] font-semibold text-[#7C3AED]">
+                  Speaker {segment.speaker + 1}
+                </p>
+                <p className="text-sm leading-[1.5]">{segment.text}</p>
+                {segment.translated_text && (
+                  <p className="text-sm leading-[1.5] text-emerald-500">
+                    {segment.translated_text}
+                  </p>
+                )}
               </div>
             </div>
-          )
-        })}
+          ))}
+        </div>
       </div>
     </div>
   )

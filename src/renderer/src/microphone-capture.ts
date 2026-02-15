@@ -62,11 +62,7 @@ export async function startMicrophoneCapture(
   try {
     const settings = await loadAudioSettings()
     const resolvedDeviceId =
-      deviceId !== undefined
-        ? deviceId !== 'default'
-          ? deviceId
-          : undefined
-        : settings.deviceId
+      deviceId !== undefined ? (deviceId !== 'default' ? deviceId : undefined) : settings.deviceId
     const resolvedSampleRate =
       typeof sampleRate === 'number' && Number.isFinite(sampleRate)
         ? sampleRate
@@ -80,9 +76,7 @@ export async function startMicrophoneCapture(
     )
 
     const constraints: MediaStreamConstraints = {
-      audio: resolvedDeviceId
-        ? { deviceId: { exact: resolvedDeviceId } }
-        : true,
+      audio: resolvedDeviceId ? { deviceId: { exact: resolvedDeviceId } } : true,
       video: false
     }
 

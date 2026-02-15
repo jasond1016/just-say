@@ -319,7 +319,7 @@ export class StreamingSonioxRecognizer extends EventEmitter {
           ? {
               speaker: this.currentSpeaker,
               text: currentText + interim,
-              translatedText: (currentTranslation + interimTranslation) || undefined,
+              translatedText: currentTranslation + interimTranslation || undefined,
               isFinal: true,
               sentencePairs: finalSentencePairs.length > 0 ? finalSentencePairs : undefined
             }
@@ -336,7 +336,12 @@ export class StreamingSonioxRecognizer extends EventEmitter {
     }
 
     return new Promise((resolve) => {
-      const buildResult = () => {
+      const buildResult = (): {
+        text: string
+        durationMs: number
+        segments: SpeakerSegment[]
+        currentSegment: SpeakerSegment | null
+      } => {
         const result = getFinalResult()
         return { ...result, durationMs: Date.now() - this.startTime }
       }
@@ -418,7 +423,10 @@ export class StreamingSonioxRecognizer extends EventEmitter {
                 text: segmentText,
                 translatedText: segmentTranslation || undefined,
                 isFinal: true,
-                sentencePairs: this.completedSentencePairs.length > 0 ? [...this.completedSentencePairs] : undefined
+                sentencePairs:
+                  this.completedSentencePairs.length > 0
+                    ? [...this.completedSentencePairs]
+                    : undefined
               })
             }
             // Start new segment
@@ -480,7 +488,9 @@ export class StreamingSonioxRecognizer extends EventEmitter {
           this.currentSentenceText.length > 0 || this.interimText.length > 0
             ? {
                 original: this.currentSentenceText.join('') + this.interimText.join(''),
-                translated: this.currentSentenceTranslation.join('') + this.interimTranslation.join('') || undefined
+                translated:
+                  this.currentSentenceTranslation.join('') + this.interimTranslation.join('') ||
+                  undefined
               }
             : null
 

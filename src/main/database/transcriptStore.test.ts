@@ -72,34 +72,50 @@ const mockTranscripts: Map<string, Transcript> = new Map()
 const mockSegments: Map<string, TranscriptSegment[]> = new Map()
 const mockSentencePairs: Map<string, SentencePair[]> = new Map()
 
-const createMockDb = () => ({
-  prepare: (sql: string) => ({
-    run: (...args: any[]) => {
+interface MockRunResult {
+  lastInsertRowid?: number
+  changes: number
+}
+
+interface MockStatement {
+  run: (...args: unknown[]) => MockRunResult
+  get: (...args: unknown[]) => unknown
+  all: (...args: unknown[]) => unknown[]
+}
+
+interface MockDb {
+  prepare: (sql: string) => MockStatement
+  transaction: <TArgs extends unknown[]>(fn: (...args: TArgs) => void) => (...args: TArgs) => void
+}
+
+const createMockDb = (): MockDb => ({
+  prepare: (sql: string): MockStatement => ({
+    run: (...args: unknown[]): MockRunResult => {
       // Handle INSERT
       if (sql.includes('INSERT INTO transcripts')) {
-        const id = args[0]
+        const id = String(args[0])
         const transcript: Transcript = {
           id,
-          title: args[1],
-          note: args[2],
-          duration_seconds: args[3],
-          created_at: args[4],
-          updated_at: args[5],
-          translation_enabled: args[6],
-          target_language: args[7],
-          include_microphone: args[8]
+          title: String(args[1]),
+          note: (args[2] as string | null) ?? null,
+          duration_seconds: Number(args[3]),
+          created_at: String(args[4]),
+          updated_at: String(args[5]),
+          translation_enabled: Number(args[6]),
+          target_language: (args[7] as string | null) ?? null,
+          include_microphone: Number(args[8])
         }
         mockTranscripts.set(id, transcript)
         return { lastInsertRowid: 1, changes: 1 }
       }
       // Handle UPDATE
       if (sql.includes('UPDATE transcripts')) {
-        const id = args[args.length - 1]
+        const id = String(args[args.length - 1])
         const existing = mockTranscripts.get(id)
         if (existing) {
-          existing.updated_at = args[args.length - 2] || existing.updated_at
+          existing.updated_at = String(args[args.length - 2] || existing.updated_at)
           if (sql.includes('title = ?')) {
-            existing.title = args[args.length - 3] || existing.title
+            existing.title = String(args[args.length - 3] || existing.title)
           }
         }
         return { changes: existing ? 1 : 0 }
@@ -110,7 +126,7 @@ const createMockDb = () => ({
       }
       // Handle DELETE from main table
       if (sql.includes('DELETE FROM transcripts WHERE')) {
-        const id = args[0]
+        const id = String(args[0])
         const existed = mockTranscripts.has(id)
         mockTranscripts.delete(id)
         return { changes: existed ? 1 : 0 }
@@ -121,15 +137,15 @@ const createMockDb = () => ({
       }
       // Handle INSERT segments
       if (sql.includes('INSERT INTO transcript_segments')) {
-        const transcriptId = args[0]
+        const transcriptId = String(args[0])
         const segmentId = `seg-${Date.now()}`
         const segment: TranscriptSegment = {
           id: segmentId,
           transcript_id: transcriptId,
-          speaker: args[1],
-          text: args[2],
-          translated_text: args[3],
-          segment_order: args[4]
+          speaker: (args[1] as string | null) ?? null,
+          text: String(args[2]),
+          translated_text: (args[3] as string | null) ?? null,
+          segment_order: Number(args[4])
         }
         const existing = mockSegments.get(transcriptId) || []
         existing.push(segment)
@@ -138,13 +154,13 @@ const createMockDb = () => ({
       }
       // Handle INSERT sentence_pairs
       if (sql.includes('INSERT INTO sentence_pairs')) {
-        const segmentId = args[0]
+        const segmentId = String(args[0])
         const pair: SentencePair = {
           id: `pair-${Date.now()}`,
           segment_id: segmentId,
-          original: args[1],
-          translated: args[2],
-          pair_order: args[3]
+          original: String(args[1]),
+          translated: (args[2] as string | null) ?? null,
+          pair_order: Number(args[3])
         }
         const existing = mockSentencePairs.get(segmentId) || []
         existing.push(pair)
@@ -153,10 +169,10 @@ const createMockDb = () => ({
       }
       return { changes: 0 }
     },
-    get: (...args: any[]) => {
+    get: (...args: unknown[]): unknown => {
       // Handle SELECT * FROM transcripts WHERE id = ?
       if (sql.includes('SELECT * FROM transcripts WHERE id = ?')) {
-        return mockTranscripts.get(args[0]) || undefined
+        return mockTranscripts.get(String(args[0])) || undefined
       }
       // Handle SELECT COUNT(*) FROM transcripts
       if (sql.includes('SELECT COUNT(*) as count FROM transcripts')) {
@@ -164,31 +180,33 @@ const createMockDb = () => ({
       }
       return undefined
     },
-    all: (...args: any[]) => {
+    all: (...args: unknown[]): unknown[] => {
       // Handle SELECT * FROM transcripts ORDER BY with LIMIT/OFFSET
       if (sql.includes('SELECT * FROM transcripts') && sql.includes('ORDER BY')) {
         const allItems = Array.from(mockTranscripts.values())
         // Handle LIMIT and OFFSET if present
-        const limitIndex = args.findIndex((arg: any) => typeof arg === 'number')
+        const limitIndex = args.findIndex((arg: unknown) => typeof arg === 'number')
         if (limitIndex !== -1) {
           const limit = args[limitIndex] as number
-          const offset = args[limitIndex + 1] as number || 0
+          const offset = (args[limitIndex + 1] as number) || 0
           return allItems.slice(offset, offset + limit)
         }
         return allItems
       }
       // Handle SELECT * FROM transcript_segments
       if (sql.includes('SELECT * FROM transcript_segments')) {
-        return mockSegments.get(args[0]) || []
+        return mockSegments.get(String(args[0])) || []
       }
       // Handle SELECT * FROM sentence_pairs
       if (sql.includes('SELECT * FROM sentence_pairs')) {
-        return mockSentencePairs.get(args[0]) || []
+        return mockSentencePairs.get(String(args[0])) || []
       }
       return []
     }
   }),
-  transaction: (fn: any) => fn
+  transaction: <TArgs extends unknown[]>(
+    fn: (...args: TArgs) => void
+  ): ((...args: TArgs) => void) => fn
 })
 
 describe('transcriptStore', () => {
@@ -217,16 +235,24 @@ describe('transcriptStore', () => {
         const id = `test-${Date.now()}`
         const title = data.title || formatDefaultTitle(now)
 
-        mockDb.prepare(`
+        mockDb
+          .prepare(
+            `
           INSERT INTO transcripts (id, title, note, duration_seconds, created_at, updated_at, translation_enabled, target_language, include_microphone)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          id, title, data.note || null, data.duration_seconds,
-          now, now,
-          data.translation_enabled ? 1 : 0,
-          data.target_language || null,
-          data.include_microphone ? 1 : 0
-        )
+        `
+          )
+          .run(
+            id,
+            title,
+            data.note || null,
+            data.duration_seconds,
+            now,
+            now,
+            data.translation_enabled ? 1 : 0,
+            data.target_language || null,
+            data.include_microphone ? 1 : 0
+          )
 
         return mockDb.prepare('SELECT * FROM transcripts WHERE id = ?').get(id) as Transcript
       }
@@ -250,13 +276,14 @@ describe('transcriptStore', () => {
         const id = `test-${Date.now()}`
         const title = data.title || formatDefaultTitle(now)
 
-        mockDb.prepare(`
+        mockDb
+          .prepare(
+            `
           INSERT INTO transcripts (id, title, note, duration_seconds, created_at, updated_at, translation_enabled, target_language, include_microphone)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          id, title, data.note || null, data.duration_seconds,
-          now, now, 0, null, 0
-        )
+        `
+          )
+          .run(id, title, data.note || null, data.duration_seconds, now, now, 0, null, 0)
 
         return mockDb.prepare('SELECT * FROM transcripts WHERE id = ?').get(id) as Transcript
       }
@@ -322,18 +349,26 @@ describe('transcriptStore', () => {
         })
       }
 
-      const listTranscripts = (options: { page?: number; pageSize?: number } = {}): PaginatedResult<Transcript> => {
+      const listTranscripts = (
+        options: { page?: number; pageSize?: number } = {}
+      ): PaginatedResult<Transcript> => {
         const page = options.page || 1
         const pageSize = options.pageSize || 20
         const offset = (page - 1) * pageSize
 
-        const items = mockDb.prepare(`
+        const items = mockDb
+          .prepare(
+            `
           SELECT * FROM transcripts
           ORDER BY created_at DESC
           LIMIT ? OFFSET ?
-        `).all(pageSize, offset) as Transcript[]
+        `
+          )
+          .all(pageSize, offset) as Transcript[]
 
-        const total = mockDb.prepare('SELECT COUNT(*) as count FROM transcripts').get() as { count: number }
+        const total = mockDb.prepare('SELECT COUNT(*) as count FROM transcripts').get() as {
+          count: number
+        }
 
         return {
           items,
@@ -421,11 +456,15 @@ describe('transcriptStore', () => {
         values.push(new Date().toISOString())
         values.push(testId)
 
-        const result = mockDb.prepare(`
+        const result = mockDb
+          .prepare(
+            `
           UPDATE transcripts
           SET ${updates.join(', ')}
           WHERE id = ?
-        `).run(...values)
+        `
+          )
+          .run(...values)
 
         return result.changes > 0
       }
@@ -480,10 +519,16 @@ describe('transcriptStore', () => {
       ])
 
       const exportTranscript = (testId: string): string | null => {
-        const transcript = mockDb.prepare('SELECT * FROM transcripts WHERE id = ?').get(testId) as Transcript | undefined
+        const transcript = mockDb.prepare('SELECT * FROM transcripts WHERE id = ?').get(testId) as
+          | Transcript
+          | undefined
         if (!transcript) return null
 
-        const segments = mockDb.prepare('SELECT * FROM transcript_segments WHERE transcript_id = ? ORDER BY segment_order').all(testId)
+        const segments = mockDb
+          .prepare(
+            'SELECT * FROM transcript_segments WHERE transcript_id = ? ORDER BY segment_order'
+          )
+          .all(testId)
 
         return JSON.stringify({ ...transcript, segments }, null, 2)
       }
@@ -499,7 +544,9 @@ describe('transcriptStore', () => {
 
     it('should return null when transcript does not exist', () => {
       const exportTranscript = (testId: string): string | null => {
-        const transcript = mockDb.prepare('SELECT * FROM transcripts WHERE id = ?').get(testId) as Transcript | undefined
+        const transcript = mockDb.prepare('SELECT * FROM transcripts WHERE id = ?').get(testId) as
+          | Transcript
+          | undefined
         if (!transcript) return null
         return JSON.stringify(transcript)
       }
