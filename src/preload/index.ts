@@ -164,6 +164,7 @@ const api = {
     translation_enabled: boolean
     target_language?: string
     include_microphone: boolean
+    source_mode?: 'ptt' | 'meeting'
     segments: {
       speaker: number
       text: string
@@ -180,6 +181,7 @@ const api = {
     translation_enabled: 0 | 1
     target_language: string | null
     include_microphone: 0 | 1
+    source_mode: 'ptt' | 'meeting'
   }> => ipcRenderer.invoke('save-transcript', data),
 
   listTranscripts: (options?: {
@@ -215,7 +217,25 @@ const api = {
   deleteTranscript: (id: string): Promise<boolean> => ipcRenderer.invoke('delete-transcript', id),
 
   exportTranscript: (id: string): Promise<string | null> =>
-    ipcRenderer.invoke('export-transcript', id)
+    ipcRenderer.invoke('export-transcript', id),
+
+  getHomeStats: (): Promise<{
+    todayPttCount: number
+    todayChars: number
+    todayPttDelta: number
+    todayCharsDelta: number
+    daily: Array<{
+      start_ms: number
+      ptt_count: number
+      chars_sum: number
+    }>
+  }> => ipcRenderer.invoke('get-home-stats'),
+
+  onHomeStatsUpdated: (callback: () => void): (() => void) => {
+    const handler = (): void => callback()
+    ipcRenderer.on('home-stats-updated', handler)
+    return () => ipcRenderer.removeListener('home-stats-updated', handler)
+  }
 }
 
 if (process.contextIsolated) {

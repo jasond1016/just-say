@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import type { Transcript } from '@/hooks/useTranscripts'
+import { getTranscriptSourceMode } from '@/lib/transcript-source'
 
 interface RecentTranscriptsProps {
   onViewAll: () => void
@@ -94,7 +95,8 @@ export function RecentTranscripts({
 
         {!loading &&
           items.map((item, index) => {
-            const kind = item.include_microphone === 1 ? 'Meeting' : 'PTT'
+            const mode = getTranscriptSourceMode(item)
+            const kind = mode === 'meeting' ? 'Meeting' : 'PTT'
             return (
               <div key={item.id}>
                 <button

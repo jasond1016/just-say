@@ -99,6 +99,7 @@ interface JustSayAPI {
     translation_enabled: boolean
     target_language?: string
     include_microphone: boolean
+    source_mode?: 'ptt' | 'meeting'
     segments: {
       speaker: number
       text: string
@@ -115,6 +116,7 @@ interface JustSayAPI {
     translation_enabled: 0 | 1
     target_language: string | null
     include_microphone: 0 | 1
+    source_mode: 'ptt' | 'meeting'
   }>
 
   listTranscripts: (options?: {
@@ -145,6 +147,20 @@ interface JustSayAPI {
   deleteTranscript: (id: string) => Promise<boolean>
 
   exportTranscript: (id: string) => Promise<string | null>
+
+  getHomeStats: () => Promise<{
+    todayPttCount: number
+    todayChars: number
+    todayPttDelta: number
+    todayCharsDelta: number
+    daily: Array<{
+      start_ms: number
+      ptt_count: number
+      chars_sum: number
+    }>
+  }>
+
+  onHomeStatsUpdated: (callback: () => void) => () => void
 }
 
 declare global {

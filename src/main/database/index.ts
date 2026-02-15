@@ -29,7 +29,8 @@ export function initDatabase(): Database.Database {
       updated_at TEXT NOT NULL,
       translation_enabled INTEGER DEFAULT 0,
       target_language TEXT,
-      include_microphone INTEGER DEFAULT 0
+      include_microphone INTEGER DEFAULT 0,
+      source_mode TEXT NOT NULL DEFAULT 'meeting'
     );
 
     -- Speaker segments table
@@ -53,6 +54,16 @@ export function initDatabase(): Database.Database {
       FOREIGN KEY (segment_id) REFERENCES transcript_segments(id) ON DELETE CASCADE
     );
 
+    -- Usage events table (PTT/meeting stats)
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mode TEXT NOT NULL,
+      chars INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER,
+      success INTEGER NOT NULL DEFAULT 1,
+      created_at_ms INTEGER NOT NULL
+    );
+
     -- Full-text search (FTS5)
     CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
       transcript_id,
@@ -64,11 +75,28 @@ export function initDatabase(): Database.Database {
     );
   `)
 
+  // Schema migration for existing databases created before `source_mode` was introduced.
+  try {
+    db.exec("ALTER TABLE transcripts ADD COLUMN source_mode TEXT NOT NULL DEFAULT 'meeting';")
+  } catch {
+    // Ignore duplicate-column errors for already migrated databases.
+  }
+
+  db.exec(`
+    UPDATE transcripts
+    SET source_mode = CASE
+      WHEN source_mode IS NULL OR source_mode = '' THEN 'meeting'
+      ELSE source_mode
+    END
+  `)
+
   // Create indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_transcripts_created_at ON transcripts(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_transcript_segments_transcript_id ON transcript_segments(transcript_id);
     CREATE INDEX IF NOT EXISTS idx_sentence_pairs_segment_id ON sentence_pairs(segment_id);
+    CREATE INDEX IF NOT EXISTS idx_usage_events_mode_created_at ON usage_events(mode, created_at_ms DESC);
+    CREATE INDEX IF NOT EXISTS idx_usage_events_created_at ON usage_events(created_at_ms DESC);
   `)
 
   console.log('[Database] Initialized at:', dbPath)

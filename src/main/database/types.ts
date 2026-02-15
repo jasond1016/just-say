@@ -9,6 +9,7 @@ export interface Transcript {
   translation_enabled: 0 | 1
   target_language: string | null
   include_microphone: 0 | 1
+  source_mode: UsageMode
 }
 
 export interface TranscriptSegment {
@@ -45,6 +46,7 @@ export interface SaveTranscriptRequest {
   translation_enabled: boolean
   target_language?: string
   include_microphone: boolean
+  source_mode?: UsageMode
   segments: {
     speaker: number
     text: string
@@ -76,4 +78,29 @@ export interface PaginatedResult<T> {
   page: number
   pageSize: number
   totalPages: number
+}
+
+export type UsageMode = 'ptt' | 'meeting'
+
+export interface UsageEvent {
+  id: number
+  mode: UsageMode
+  chars: number
+  duration_ms: number | null
+  success: 0 | 1
+  created_at_ms: number
+}
+
+export interface HomeStatsDay {
+  start_ms: number
+  ptt_count: number
+  chars_sum: number
+}
+
+export interface HomeStats {
+  todayPttCount: number
+  todayChars: number
+  todayPttDelta: number
+  todayCharsDelta: number
+  daily: HomeStatsDay[]
 }

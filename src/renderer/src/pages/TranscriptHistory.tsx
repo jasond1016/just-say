@@ -4,6 +4,7 @@ import { ChevronRight, Clock3, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useTranscripts } from '../hooks/useTranscripts'
+import { getTranscriptSourceMode } from '@/lib/transcript-source'
 
 interface TranscriptHistoryProps {
   onNavigateToDetail: (id: string) => void
@@ -146,7 +147,8 @@ export function TranscriptHistory({
         {!loading && !error && items.length > 0 && (
           <div className="py-2">
             {items.map((transcript, index) => {
-              const kind = transcript.include_microphone === 1 ? 'Meeting' : 'PTT'
+              const mode = getTranscriptSourceMode(transcript)
+              const kind = mode === 'meeting' ? 'Meeting' : 'PTT'
               return (
                 <button
                   key={transcript.id}

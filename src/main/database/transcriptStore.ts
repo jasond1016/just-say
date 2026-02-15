@@ -21,8 +21,10 @@ export function createTranscript(data: SaveTranscriptRequest): Transcript {
   const title = data.title || formatDefaultTitle(now)
 
   const stmt = db.prepare(`
-    INSERT INTO transcripts (id, title, note, duration_seconds, created_at, updated_at, translation_enabled, target_language, include_microphone)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO transcripts (
+      id, title, note, duration_seconds, created_at, updated_at, translation_enabled, target_language, include_microphone, source_mode
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   stmt.run(
@@ -34,7 +36,8 @@ export function createTranscript(data: SaveTranscriptRequest): Transcript {
     now,
     data.translation_enabled ? 1 : 0,
     data.target_language || null,
-    data.include_microphone ? 1 : 0
+    data.include_microphone ? 1 : 0,
+    data.source_mode || 'meeting'
   )
 
   // Insert segments

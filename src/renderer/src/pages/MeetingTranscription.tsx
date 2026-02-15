@@ -132,6 +132,7 @@ export function MeetingTranscription({
           duration_seconds: seconds,
           translation_enabled: false,
           include_microphone: false,
+          source_mode: 'meeting',
           segments: allSegments.map((segment) => ({
             speaker: segment.speaker,
             text: segment.text,

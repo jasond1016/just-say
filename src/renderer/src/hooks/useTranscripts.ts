@@ -10,6 +10,7 @@ export interface Transcript {
   translation_enabled: 0 | 1
   target_language: string | null
   include_microphone: 0 | 1
+  source_mode?: 'ptt' | 'meeting'
 }
 
 export interface TranscriptSegment {

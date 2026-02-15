@@ -16,6 +16,7 @@ import {
   deleteTranscript,
   exportTranscript
 } from './database/transcriptStore'
+import { getHomeStats, recordUsageEvent } from './database/statsStore'
 import { WebAudioRecorder } from './audio/web-recorder'
 import { WebStreamingAudioRecorder } from './audio/web-streaming-recorder'
 import { RecognitionController, DownloadProgress } from './recognition'
@@ -54,6 +55,7 @@ let recognitionController: RecognitionController | null = null
 let inputSimulator: InputSimulator | null = null
 let meetingTranscription: MeetingTranscriptionManager | null = null
 let translationService: TranslationService | null = null
+let pttRecordingStartedAt: number | null = null
 
 function sendMeetingEvent(
   channel: 'meeting-transcript' | 'meeting-status',
@@ -336,6 +338,25 @@ function notifyIndicatorOutputText(text: string): void {
   indicatorWindow.webContents.send('output-text', { text })
 }
 
+function notifyHomeStatsUpdated(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('home-stats-updated')
+}
+
+function trackPttUsage(text: string, startedAt: number | null): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+
+  const durationMs = startedAt ? Math.max(0, Date.now() - startedAt) : undefined
+  recordUsageEvent({
+    mode: 'ptt',
+    chars: trimmed.length,
+    durationMs,
+    success: true
+  })
+  notifyHomeStatsUpdated()
+}
+
 /**
  * Create MeetingTranscriptionManager based on global backend setting.
  * Supports Soniox/Groq and local faster-whisper (including remote LAN server mode).
@@ -448,6 +469,7 @@ async function initializeApp(): Promise<void> {
     // Streaming mode: start WebSocket connection and recording together
     hotkeyManager.on('recordStart', async () => {
       console.log('[Main] Recording started (streaming)')
+      pttRecordingStartedAt = Date.now()
       updateTrayStatus('recording')
       setIndicatorState({ recording: true })
       if (isSoundFeedbackEnabled()) shell.beep()
@@ -497,6 +519,7 @@ async function initializeApp(): Promise<void> {
             autoSpace: config.output?.autoSpace,
             capitalize: config.output?.capitalize
           })
+          trackPttUsage(finalText || translatedText || result.text, pttRecordingStartedAt)
           if (finalText) {
             notifyIndicatorOutputText(finalText)
           }
@@ -507,6 +530,7 @@ async function initializeApp(): Promise<void> {
       } catch (error) {
         console.error('[Main] Streaming recognition error:', error)
       } finally {
+        pttRecordingStartedAt = null
         updateTrayStatus('idle')
         setIndicatorState({ recording: false })
       }
@@ -520,6 +544,7 @@ async function initializeApp(): Promise<void> {
 
     hotkeyManager.on('recordStart', async () => {
       console.log('[Main] Recording started')
+      pttRecordingStartedAt = Date.now()
       updateTrayStatus('recording')
       setIndicatorState({ recording: true })
       if (isSoundFeedbackEnabled()) shell.beep()
@@ -545,6 +570,7 @@ async function initializeApp(): Promise<void> {
               autoSpace: config.output?.autoSpace,
               capitalize: config.output?.capitalize
             })
+            trackPttUsage(finalText || translatedText || result.text, pttRecordingStartedAt)
             if (finalText) {
               notifyIndicatorOutputText(finalText)
             }
@@ -556,6 +582,7 @@ async function initializeApp(): Promise<void> {
       } catch (error) {
         console.error('[Main] Recognition error:', error)
       } finally {
+        pttRecordingStartedAt = null
         updateTrayStatus('idle')
         setIndicatorState({ recording: false })
       }
@@ -804,6 +831,7 @@ ipcMain.handle(
       translation_enabled: boolean
       target_language?: string
       include_microphone: boolean
+      source_mode?: 'ptt' | 'meeting'
       segments: {
         speaker: number
         text: string
@@ -856,4 +884,8 @@ ipcMain.handle('delete-transcript', (_event, id: string) => {
 
 ipcMain.handle('export-transcript', (_event, id: string) => {
   return exportTranscript(id)
+})
+
+ipcMain.handle('get-home-stats', () => {
+  return getHomeStats()
 })
