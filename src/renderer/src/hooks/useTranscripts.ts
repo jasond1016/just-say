@@ -43,6 +43,8 @@ export interface PaginatedResult<T> {
 
 export interface SearchResult extends PaginatedResult<Transcript> {}
 
+export type TranscriptFilterMode = 'all' | 'ptt' | 'meeting'
+
 interface UseTranscriptsResult {
   transcripts: Transcript[]
   currentTranscript: TranscriptWithSegments | null
@@ -54,8 +56,12 @@ interface UseTranscriptsResult {
     total: number
     totalPages: number
   }
-  listTranscripts: (page?: number) => Promise<void>
-  searchTranscripts: (query: string, page?: number) => Promise<void>
+  listTranscripts: (page?: number, filterMode?: TranscriptFilterMode) => Promise<void>
+  searchTranscripts: (
+    query: string,
+    page?: number,
+    filterMode?: TranscriptFilterMode
+  ) => Promise<void>
   getTranscript: (id: string) => Promise<TranscriptWithSegments | null>
   updateTranscript: (id: string, data: { title?: string; note?: string }) => Promise<boolean>
   deleteTranscript: (id: string) => Promise<boolean>
@@ -77,13 +83,15 @@ export function useTranscripts(): UseTranscriptsResult {
 
   // Load transcripts list
   const listTranscripts = useCallback(
-    async (page = 1) => {
+    async (page = 1, filterMode: TranscriptFilterMode = 'all') => {
       setLoading(true)
       setError(null)
       try {
+        const sourceMode = filterMode === 'all' ? undefined : filterMode
         const result = await window.api.listTranscripts({
           page,
-          pageSize: pagination.pageSize
+          pageSize: pagination.pageSize,
+          sourceMode
         })
         setTranscripts(result.items as Transcript[])
         setPagination({
@@ -104,14 +112,16 @@ export function useTranscripts(): UseTranscriptsResult {
 
   // Search transcripts
   const searchTranscripts = useCallback(
-    async (query: string, page = 1) => {
+    async (query: string, page = 1, filterMode: TranscriptFilterMode = 'all') => {
       setLoading(true)
       setError(null)
       try {
+        const sourceMode = filterMode === 'all' ? undefined : filterMode
         const result = await window.api.searchTranscripts({
           query,
           page,
-          pageSize: pagination.pageSize
+          pageSize: pagination.pageSize,
+          sourceMode
         })
         setTranscripts(result.items as Transcript[])
         setPagination({

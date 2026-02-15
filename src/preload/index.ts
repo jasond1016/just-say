@@ -189,6 +189,7 @@ const api = {
     pageSize?: number
     orderBy?: string
     order?: string
+    sourceMode?: 'ptt' | 'meeting'
   }): Promise<{
     items: unknown[]
     total: number
@@ -201,6 +202,7 @@ const api = {
     query: string
     page?: number
     pageSize?: number
+    sourceMode?: 'ptt' | 'meeting'
   }): Promise<{
     items: unknown[]
     total: number

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { join } from 'path'
 import { app } from 'electron'
-import type { Transcript } from './types'
+import type { Transcript, UsageMode } from './types'
 
 let db: Database.Database | null = null
 
@@ -140,32 +140,49 @@ export function getTranscriptCount(): number {
   return result.count
 }
 
-export function searchTranscriptsFTS(query: string, limit = 50, offset = 0): Transcript[] {
+export function searchTranscriptsFTS(
+  query: string,
+  limit = 50,
+  offset = 0,
+  sourceMode?: UsageMode
+): Transcript[] {
   const database = getDatabase()
+  const whereBySource = sourceMode ? ' AND t.source_mode = ?' : ''
+  const args: Array<string | number> = [`${query}*`]
+  if (sourceMode) {
+    args.push(sourceMode)
+  }
+  args.push(limit, offset)
+
   // Search in FTS index
   return database
     .prepare(
       `
     SELECT DISTINCT t.* FROM transcripts t
     JOIN transcripts_fts fts ON t.id = fts.transcript_id
-    WHERE transcripts_fts MATCH ?
+    WHERE transcripts_fts MATCH ?${whereBySource}
     ORDER BY t.created_at DESC
     LIMIT ? OFFSET ?
   `
     )
-    .all(`${query}*`, limit, offset) as Transcript[]
+    .all(...args) as Transcript[]
 }
 
-export function searchTranscriptsCount(query: string): number {
+export function searchTranscriptsCount(query: string, sourceMode?: UsageMode): number {
   const database = getDatabase()
+  const whereBySource = sourceMode ? ' AND t.source_mode = ?' : ''
+  const args: string[] = [`${query}*`]
+  if (sourceMode) {
+    args.push(sourceMode)
+  }
   const result = database
     .prepare(
       `
     SELECT COUNT(DISTINCT t.id) as count FROM transcripts t
     JOIN transcripts_fts fts ON t.id = fts.transcript_id
-    WHERE transcripts_fts MATCH ?
+    WHERE transcripts_fts MATCH ?${whereBySource}
   `
     )
-    .get(`${query}*`) as { count: number }
+    .get(...args) as { count: number }
   return result.count
 }

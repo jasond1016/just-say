@@ -3,7 +3,7 @@ import { ChevronRight, Clock3, Search } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useTranscripts } from '../hooks/useTranscripts'
+import { useTranscripts, type TranscriptFilterMode } from '../hooks/useTranscripts'
 import { getTranscriptSourceMode } from '@/lib/transcript-source'
 
 interface TranscriptHistoryProps {
@@ -44,31 +44,33 @@ export function TranscriptHistory({
   const { transcripts, loading, error, pagination, listTranscripts, searchTranscripts } =
     useTranscripts()
   const [query, setQuery] = useState('')
+  const [filterMode, setFilterMode] = useState<TranscriptFilterMode>('all')
   const searchInputRef = useRef<HTMLInputElement | null>(null)
 
   const isSearching = query.trim().length > 0
+  const isFiltering = filterMode !== 'all'
 
   useEffect(() => {
     const timer = setTimeout(() => {
       if (query.trim()) {
-        searchTranscripts(query.trim(), 1)
+        searchTranscripts(query.trim(), 1, filterMode)
       } else {
-        listTranscripts(1)
+        listTranscripts(1, filterMode)
       }
     }, 240)
 
     return () => clearTimeout(timer)
-  }, [listTranscripts, query, searchTranscripts])
+  }, [filterMode, listTranscripts, query, searchTranscripts])
 
   const handlePageChange = useCallback(
     (page: number) => {
       if (isSearching) {
-        searchTranscripts(query.trim(), page)
+        searchTranscripts(query.trim(), page, filterMode)
       } else {
-        listTranscripts(page)
+        listTranscripts(page, filterMode)
       }
     },
-    [isSearching, listTranscripts, query, searchTranscripts]
+    [filterMode, isSearching, listTranscripts, query, searchTranscripts]
   )
 
   const items = useMemo(() => transcripts, [transcripts])
@@ -103,6 +105,12 @@ export function TranscriptHistory({
     return () => window.removeEventListener('keydown', handleKeydown)
   }, [query])
 
+  const filterOptions: Array<{ id: TranscriptFilterMode; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'ptt', label: 'PTT' },
+    { id: 'meeting', label: 'Meeting' }
+  ]
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       <header className="flex h-[53px] items-center justify-between border-b px-6">
@@ -112,6 +120,25 @@ export function TranscriptHistory({
           <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {pagination.total}
           </span>
+          <div className="ml-1 flex items-center gap-1">
+            {filterOptions.map((option) => {
+              const active = filterMode === option.id
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setFilterMode(option.id)}
+                  className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/35 ${
+                    active
+                      ? 'border-[#7C3AED]/30 bg-[#F5F3FF] text-[#6D28D9]'
+                      : 'border-border text-muted-foreground hover:bg-muted/30'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
 
         <div className="relative w-[220px]">
@@ -140,7 +167,11 @@ export function TranscriptHistory({
 
         {!loading && !error && items.length === 0 && (
           <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-            {isSearching ? 'No matching transcripts.' : 'No transcripts yet.'}
+            {isSearching
+              ? 'No matching transcripts.'
+              : isFiltering
+                ? 'No transcripts in this filter.'
+                : 'No transcripts yet.'}
           </div>
         )}
 

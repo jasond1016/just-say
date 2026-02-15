@@ -64,6 +64,7 @@ export interface ListTranscriptsOptions {
   pageSize?: number
   orderBy?: 'created_at' | 'updated_at' | 'duration_seconds'
   order?: 'ASC' | 'DESC'
+  sourceMode?: UsageMode
 }
 
 // Search options

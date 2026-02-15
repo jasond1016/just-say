@@ -110,21 +110,28 @@ export function listTranscripts(options: ListTranscriptsOptions = {}): Paginated
   const pageSize = options.pageSize || 20
   const orderBy = options.orderBy || 'created_at'
   const order = options.order || 'DESC'
+  const sourceMode = options.sourceMode
 
   const db = getDatabase()
   const offset = (page - 1) * pageSize
+  const whereBySource = sourceMode ? 'WHERE source_mode = ?' : ''
 
   const items = db
     .prepare(
       `
     SELECT * FROM transcripts
+    ${whereBySource}
     ORDER BY ${orderBy} ${order}
     LIMIT ? OFFSET ?
   `
     )
-    .all(pageSize, offset) as Transcript[]
+    .all(...(sourceMode ? [sourceMode, pageSize, offset] : [pageSize, offset])) as Transcript[]
 
-  const total = db.prepare('SELECT COUNT(*) as count FROM transcripts').get() as { count: number }
+  const total = sourceMode
+    ? (db
+        .prepare('SELECT COUNT(*) as count FROM transcripts WHERE source_mode = ?')
+        .get(sourceMode) as { count: number })
+    : (db.prepare('SELECT COUNT(*) as count FROM transcripts').get() as { count: number })
 
   return {
     items,
@@ -141,8 +148,8 @@ export function searchTranscripts(options: SearchTranscriptsOptions): PaginatedR
   const pageSize = options.pageSize || 20
   const offset = (page - 1) * pageSize
 
-  const items = searchTranscriptsFTS(options.query, pageSize, offset)
-  const total = searchTranscriptsCount(options.query)
+  const items = searchTranscriptsFTS(options.query, pageSize, offset, options.sourceMode)
+  const total = searchTranscriptsCount(options.query, options.sourceMode)
 
   return {
     items,

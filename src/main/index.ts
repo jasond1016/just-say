@@ -888,7 +888,16 @@ ipcMain.handle(
 
 ipcMain.handle(
   'list-transcripts',
-  (_event, options?: { page?: number; pageSize?: number; orderBy?: string; order?: string }) => {
+  (
+    _event,
+    options?: {
+      page?: number
+      pageSize?: number
+      orderBy?: string
+      order?: string
+      sourceMode?: 'ptt' | 'meeting'
+    }
+  ) => {
     return listTranscripts(
       options as
         | {
@@ -896,6 +905,7 @@ ipcMain.handle(
             pageSize?: number
             orderBy?: 'created_at' | 'updated_at' | 'duration_seconds'
             order?: 'ASC' | 'DESC'
+            sourceMode?: 'ptt' | 'meeting'
           }
         | undefined
     )
@@ -904,7 +914,10 @@ ipcMain.handle(
 
 ipcMain.handle(
   'search-transcripts',
-  (_event, options: { query: string; page?: number; pageSize?: number }) => {
+  (
+    _event,
+    options: { query: string; page?: number; pageSize?: number; sourceMode?: 'ptt' | 'meeting' }
+  ) => {
     return searchTranscripts(options)
   }
 )
