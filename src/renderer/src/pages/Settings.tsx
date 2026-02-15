@@ -13,6 +13,7 @@ interface SettingsProps {
 }
 
 type RecognitionBackend = 'local' | 'api' | 'network' | 'soniox' | 'groq'
+type LocalEngine = 'faster-whisper' | 'sensevoice'
 
 const recognitionLanguageOptions = [
   { value: 'zh', label: '中文' },
@@ -203,9 +204,29 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   }
 
   const handleModelChange = async (modelType: string): Promise<void> => {
+    const localEngine = (config?.recognition?.local?.engine || 'faster-whisper') as LocalEngine
+    if (localEngine === 'sensevoice') {
+      await updateConfig({
+        recognition: {
+          local: {
+            sensevoice: { modelId: 'FunAudioLLM/SenseVoiceSmall' }
+          }
+        }
+      })
+      return
+    }
+
     await updateConfig({
       recognition: {
         local: { modelType }
+      }
+    })
+  }
+
+  const handleLocalEngineChange = async (engine: LocalEngine): Promise<void> => {
+    await updateConfig({
+      recognition: {
+        local: { engine }
       }
     })
   }
@@ -359,8 +380,12 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
   const sampleRateOptions = [8000, 16000, 22050, 44100, 48000]
   const recognitionBackend = (config.recognition?.backend || 'local') as RecognitionBackend
   const isLocalBackend = !config.recognition?.backend || config.recognition?.backend === 'local'
+  const localEngine = (config.recognition?.local?.engine || 'faster-whisper') as LocalEngine
   const localServerMode = config.recognition?.local?.serverMode || 'local'
   const isRemoteServerMode = localServerMode === 'remote'
+  const currentLocalModel = localEngine === 'sensevoice'
+    ? 'sensevoice-small'
+    : config.recognition?.local?.modelType || 'tiny'
   const recognitionLanguage = config.recognition?.language || 'auto'
   const recognitionLanguageLocked = recognitionLanguage !== 'auto'
   const recognitionLanguageSupport = getRecognitionLanguageSupport(recognitionBackend)
@@ -587,7 +612,7 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   value={config.recognition?.backend || 'local'}
                   onChange={(e) => updateConfig({ recognition: { backend: e.target.value } })}
                 >
-                  <option value="local">本地 (Faster-Whisper)</option>
+                  <option value="local">本地 (Faster-Whisper / SenseVoice)</option>
                   <option value="soniox">Soniox (流式)</option>
                   <option value="api">OpenAI API</option>
                   <option value="groq">Groq (快速云端)</option>
@@ -596,6 +621,24 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
 
               {isLocalBackend && (
                 <>
+                  <div className="settings-row">
+                    <div className="settings-row__info">
+                      <div className="settings-row__label">本地引擎</div>
+                      <div className="settings-row__desc">切换 Faster-Whisper 或 SenseVoiceSmall</div>
+                    </div>
+                    <select
+                      className="form-input form-select"
+                      style={{ width: 240 }}
+                      value={localEngine}
+                      onChange={(e) => {
+                        void handleLocalEngineChange(e.target.value as LocalEngine)
+                      }}
+                    >
+                      <option value="faster-whisper">Faster-Whisper</option>
+                      <option value="sensevoice">SenseVoiceSmall</option>
+                    </select>
+                  </div>
+
                   <div className="settings-row">
                     <div className="settings-row__info">
                       <div className="settings-row__label">运行模式</div>
@@ -694,7 +737,8 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
 
                   {!isRemoteServerMode && (
                     <ModelManager
-                      currentModel={config.recognition?.local?.modelType || 'tiny'}
+                      engine={localEngine}
+                      currentModel={currentLocalModel}
                       onModelChange={handleModelChange}
                     />
                   )}
@@ -702,8 +746,10 @@ export function Settings({ currentTheme, onThemeChange }: SettingsProps): React.
                   {isRemoteServerMode && (
                     <div className="settings-row">
                       <div className="settings-row__info">
-                        <div className="settings-row__label">本地模型</div>
-                        <div className="settings-row__desc">远程模式不支持本地模型管理</div>
+                        <div className="settings-row__label">模型管理</div>
+                        <div className="settings-row__desc">
+                          远程模式不支持本地模型管理，请在远端服务配置对应引擎与模型
+                        </div>
                       </div>
                     </div>
                   )}

@@ -11,10 +11,15 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as http from 'http'
 
+export type LocalEngine = 'faster-whisper' | 'sensevoice'
+
 export interface WhisperServerConfig {
   host?: string
   port?: number
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+  engine?: LocalEngine
+  sensevoiceModelId?: string
+  sensevoiceUseItn?: boolean
   device?: 'cpu' | 'cuda'
   computeType?: string
   autoStart?: boolean
@@ -46,6 +51,9 @@ class WhisperServerClient {
     host: string
     port: number
     modelType: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+    engine: LocalEngine
+    sensevoiceModelId: string
+    sensevoiceUseItn: boolean
     device: 'cpu' | 'cuda'
     computeType: string
     autoStart: boolean
@@ -63,6 +71,9 @@ class WhisperServerClient {
       host: '127.0.0.1',
       port: 8765,
       modelType: 'tiny',
+      engine: 'faster-whisper',
+      sensevoiceModelId: 'FunAudioLLM/SenseVoiceSmall',
+      sensevoiceUseItn: true,
       device: 'cpu',
       computeType: 'int8',
       autoStart: true,
@@ -159,16 +170,22 @@ class WhisperServerClient {
       this.config.host,
       '--port',
       this.config.port.toString(),
+      '--engine',
+      this.config.engine,
       '--device',
       this.config.device,
       '--compute-type',
-      this.config.computeType
+      this.config.computeType,
+      '--sensevoice-model-id',
+      this.config.sensevoiceModelId,
+      '--sensevoice-use-itn',
+      this.config.sensevoiceUseItn ? 'true' : 'false'
     ]
 
     args.push('--download-root', downloadRoot)
 
     // Pre-load model on startup
-    if (this.config.modelType) {
+    if (this.config.engine === 'faster-whisper' && this.config.modelType) {
       args.push('--preload-model', this.config.modelType)
     }
 
@@ -275,13 +292,28 @@ class WhisperServerClient {
   async loadModel(
     modelType: string,
     device: 'cpu' | 'cuda' = 'cpu',
-    computeType: string = 'int8'
+    computeType: string = 'int8',
+    options?: {
+      engine?: LocalEngine
+      sensevoiceModelId?: string
+      sensevoiceUseItn?: boolean
+    }
   ): Promise<void> {
     await this.ensureRunning()
+    const engine = options?.engine || this.config.engine
     const payload: Record<string, unknown> = {
-      model: modelType,
+      engine,
       device,
       compute_type: computeType
+    }
+    if (engine === 'faster-whisper') {
+      payload.model = modelType
+    } else {
+      payload.sensevoice_model_id = options?.sensevoiceModelId || this.config.sensevoiceModelId
+      payload.sensevoice_use_itn =
+        options?.sensevoiceUseItn !== undefined
+          ? options.sensevoiceUseItn
+          : this.config.sensevoiceUseItn
     }
     const downloadRoot = this.modelsPath
     if (downloadRoot) {
@@ -305,6 +337,9 @@ class WhisperServerClient {
     audioBuffer: Buffer,
     options?: {
       modelType?: string
+      engine?: LocalEngine
+      sensevoiceModelId?: string
+      sensevoiceUseItn?: boolean
       device?: 'cpu' | 'cuda'
       computeType?: string
       language?: string
@@ -317,6 +352,20 @@ class WhisperServerClient {
     if (options?.modelType) {
       params.set('model', options.modelType)
     }
+    params.set('engine', options?.engine || this.config.engine)
+    params.set(
+      'sensevoice_model_id',
+      options?.sensevoiceModelId || this.config.sensevoiceModelId
+    )
+    params.set(
+      'sensevoice_use_itn',
+      (options?.sensevoiceUseItn !== undefined
+        ? options.sensevoiceUseItn
+        : this.config.sensevoiceUseItn
+      )
+        ? 'true'
+        : 'false'
+    )
     if (options?.device) {
       params.set('device', options.device)
     }
@@ -453,6 +502,9 @@ class WhisperServerClient {
     const needsRestart =
       config.host !== undefined ||
       config.port !== undefined ||
+      config.engine !== undefined ||
+      config.sensevoiceModelId !== undefined ||
+      config.sensevoiceUseItn !== undefined ||
       config.device !== undefined ||
       config.computeType !== undefined ||
       config.mode !== undefined ||
@@ -465,9 +517,25 @@ class WhisperServerClient {
       if (this.config.mode === 'local') {
         await this.start()
       }
-    } else if (config.modelType && this.serverProcess && this.config.mode === 'local') {
+    } else if (
+      (config.modelType || config.engine || config.sensevoiceModelId || config.sensevoiceUseItn !== undefined) &&
+      this.serverProcess &&
+      this.config.mode === 'local'
+    ) {
       // Just reload the model
-      await this.loadModel(config.modelType, this.config.device, this.config.computeType)
+      await this.loadModel(
+        config.modelType || this.config.modelType,
+        this.config.device,
+        this.config.computeType,
+        {
+          engine: config.engine || this.config.engine,
+          sensevoiceModelId: config.sensevoiceModelId || this.config.sensevoiceModelId,
+          sensevoiceUseItn:
+            config.sensevoiceUseItn !== undefined
+              ? config.sensevoiceUseItn
+              : this.config.sensevoiceUseItn
+        }
+      )
     }
   }
 }

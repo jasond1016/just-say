@@ -4,7 +4,21 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import { EventEmitter } from 'events'
 import { SpeechRecognizer, RecognitionResult } from './index'
-import { getWhisperServer, WhisperServerClient } from './whisperServer'
+import { getWhisperServer, WhisperServerClient, LocalEngine } from './whisperServer'
+
+const DEFAULT_SENSEVOICE_MODEL_ID = 'FunAudioLLM/SenseVoiceSmall'
+const SENSEVOICE_SMALL_MODEL_KEY = 'sensevoice-small'
+
+interface LocalModelManifest {
+  sensevoice?: Record<
+    string,
+    {
+      modelId: string
+      cachePath?: string
+      downloadedAt: string
+    }
+  >
+}
 
 export interface DownloadProgress {
   model: string
@@ -21,7 +35,12 @@ export interface GpuInfo {
 
 export interface LocalRecognizerConfig {
   modelPath?: string
+  engine?: LocalEngine
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+  sensevoice?: {
+    modelId?: string
+    useItn?: boolean
+  }
   device?: 'cpu' | 'cuda' | 'auto'
   language?: string
   threads?: number
@@ -43,7 +62,12 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   constructor(config?: LocalRecognizerConfig) {
     super()
     this.config = {
+      engine: 'faster-whisper',
       modelType: 'tiny',
+      sensevoice: {
+        modelId: DEFAULT_SENSEVOICE_MODEL_ID,
+        useItn: true
+      },
       device: 'auto',
       language: 'auto',
       threads: 4,
@@ -83,7 +107,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         mode: serverMode,
         host: serverHost,
         port: serverPort,
+        engine: this.config.engine,
         modelType: this.config.modelType,
+        sensevoiceModelId: this.getSenseVoiceModelId(),
+        sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
         device: this.config.device === 'auto' ? 'cpu' : this.config.device,
         computeType: this.config.computeType === 'auto' ? 'int8' : this.config.computeType,
         autoStart: serverMode === 'local'
@@ -169,6 +196,9 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     if (this.isRemoteMode()) {
       console.log('[LocalRecognizer] Recognizing via remote HTTP server (server-controlled params)')
       const remoteResult = await this.whisperServer!.transcribe(wavBuffer, {
+        engine: this.config.engine,
+        sensevoiceModelId: this.getSenseVoiceModelId(),
+        sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
         language: this.config.language
       })
       if (!remoteResult.success) {
@@ -191,7 +221,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     console.log('[LocalRecognizer] Recognizing via HTTP server')
 
     const result = await this.whisperServer!.transcribe(wavBuffer, {
+      engine: this.config.engine,
       modelType: this.config.modelType,
+      sensevoiceModelId: this.getSenseVoiceModelId(),
+      sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
       device,
       computeType,
       language: this.config.language
@@ -200,6 +233,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     if (!result.success) {
       const errMessage = result.error || 'Transcription failed'
       if (
+        this.getEngine() === 'faster-whisper' &&
         autoComputeType &&
         device === 'cuda' &&
         computeType === 'float16' &&
@@ -207,7 +241,10 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       ) {
         console.warn('[LocalRecognizer] CUDA float16 failed, retrying with int8_float16')
         const retry = await this.whisperServer!.transcribe(wavBuffer, {
+          engine: this.config.engine,
           modelType: this.config.modelType,
+          sensevoiceModelId: this.getSenseVoiceModelId(),
+          sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
           device,
           computeType: 'int8_float16',
           language: this.config.language
@@ -263,8 +300,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         this.scriptPath,
         '--audio',
         audioPath,
-        '--model',
-        this.config.modelType || 'tiny',
+        '--engine',
+        this.config.engine || 'faster-whisper',
         '--device',
         device,
         '--compute-type',
@@ -273,6 +310,13 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         modelsPath
       ]
 
+      if ((this.config.engine || 'faster-whisper') === 'faster-whisper') {
+        args.push('--model', this.config.modelType || 'tiny')
+      } else {
+        args.push('--sensevoice-model-id', this.getSenseVoiceModelId())
+        args.push('--sensevoice-use-itn', this.shouldUseSenseVoiceItn() ? 'true' : 'false')
+      }
+
       if (this.config.language && this.config.language !== 'auto') {
         args.push('--language', this.config.language)
       }
@@ -280,7 +324,12 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       console.log('[LocalRecognizer] Running:', this.pythonPath, args.join(' '))
 
       const proc = spawn(this.pythonPath, args, {
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        env: {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',
+          HF_HOME: modelsPath,
+          MODELSCOPE_CACHE: modelsPath
+        }
       })
       let stdout = ''
       let stderr = ''
@@ -342,7 +391,11 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     }
 
     try {
-      execSync(`${this.pythonPath} -c "import faster_whisper; print('OK')"`, {
+      const checkScript =
+        this.getEngine() === 'sensevoice'
+          ? "import funasr; print('OK')"
+          : "import faster_whisper; print('OK')"
+      execSync(`${this.pythonPath} -c "${checkScript}"`, {
         encoding: 'utf8',
         timeout: 10000,
         stdio: 'pipe'
@@ -454,6 +507,12 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     return new Promise((resolve, reject) => {
       const args = [
         this.scriptPath,
+        '--engine',
+        this.getEngine(),
+        '--sensevoice-model-id',
+        this.getSenseVoiceModelId(),
+        '--sensevoice-use-itn',
+        this.shouldUseSenseVoiceItn() ? 'true' : 'false',
         '--model',
         modelType,
         '--download-root',
@@ -463,7 +522,12 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
       console.log('[LocalRecognizer] Downloading model:', modelType)
       const proc = spawn(this.pythonPath, args, {
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        env: {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',
+          HF_HOME: modelsPath,
+          MODELSCOPE_CACHE: modelsPath
+        }
       })
 
       let stderrBuffer = ''
@@ -495,6 +559,20 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
       proc.on('close', (code) => {
         if (code === 0) {
+          if (this.getEngine() === 'sensevoice') {
+            const manifest = this.readModelManifest()
+            const key = this.resolveSenseVoiceModelKey(modelType)
+            const cachePath = this.findSenseVoiceCachePath(modelsPath)
+            manifest.sensevoice = {
+              ...(manifest.sensevoice || {}),
+              [key]: {
+                modelId: this.getSenseVoiceModelId(),
+                cachePath,
+                downloadedAt: new Date().toISOString()
+              }
+            }
+            this.writeModelManifest(manifest)
+          }
           resolve()
         } else {
           reject(new Error(`Download failed: ${stderrBuffer}`))
@@ -518,6 +596,11 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     }
 
     try {
+      if (this.getEngine() === 'sensevoice') {
+        const manifest = this.readModelManifest()
+        return Object.keys(manifest.sensevoice || {})
+      }
+
       const files = fs.readdirSync(modelsPath)
       // Filter for huggingface cache folders
       // Format: models--Systran--faster-whisper-{type}
@@ -538,6 +621,44 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     }
 
     const modelsPath = join(app.getPath('userData'), 'models')
+
+    if (this.getEngine() === 'sensevoice') {
+      const key = this.resolveSenseVoiceModelKey(modelType)
+      const manifest = this.readModelManifest()
+      const entry = manifest.sensevoice?.[key]
+
+      if (!entry) {
+        throw new Error(`Model ${modelType} not found`)
+      }
+
+      if (entry.cachePath && fs.existsSync(entry.cachePath)) {
+        fs.rmSync(entry.cachePath, { recursive: true, force: true })
+      } else {
+        const fallbackPaths = this.getSenseVoiceCacheCandidates(modelsPath)
+        let removed = false
+        for (const path of fallbackPaths) {
+          if (fs.existsSync(path)) {
+            fs.rmSync(path, { recursive: true, force: true })
+            removed = true
+          }
+        }
+        if (!removed) {
+          throw new Error(
+            'SenseVoice cache path not tracked. Please clean cache directory manually.'
+          )
+        }
+      }
+
+      const nextManifest: LocalModelManifest = {
+        ...manifest,
+        sensevoice: { ...(manifest.sensevoice || {}) }
+      }
+      delete nextManifest.sensevoice?.[key]
+      this.writeModelManifest(nextManifest)
+      console.log(`[LocalRecognizer] Deleted model: ${modelType}`)
+      return
+    }
+
     const modelDir = join(modelsPath, `models--Systran--faster-whisper-${modelType}`)
 
     if (!fs.existsSync(modelDir)) {
@@ -585,5 +706,69 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
   private isRemoteMode(): boolean {
     return this.config.serverMode === 'remote'
+  }
+
+  private getEngine(): LocalEngine {
+    return this.config.engine || 'faster-whisper'
+  }
+
+  private getSenseVoiceModelId(): string {
+    return this.config.sensevoice?.modelId || DEFAULT_SENSEVOICE_MODEL_ID
+  }
+
+  private shouldUseSenseVoiceItn(): boolean {
+    return this.config.sensevoice?.useItn !== false
+  }
+
+  private resolveSenseVoiceModelKey(modelType: string): string {
+    return modelType === SENSEVOICE_SMALL_MODEL_KEY ? modelType : SENSEVOICE_SMALL_MODEL_KEY
+  }
+
+  private getModelManifestPath(modelsPath: string): string {
+    return join(modelsPath, 'justsay-models.json')
+  }
+
+  private readModelManifest(): LocalModelManifest {
+    const modelsPath = join(app.getPath('userData'), 'models')
+    if (!fs.existsSync(modelsPath)) {
+      return {}
+    }
+    const manifestPath = this.getModelManifestPath(modelsPath)
+    if (!fs.existsSync(manifestPath)) {
+      return {}
+    }
+    try {
+      const raw = fs.readFileSync(manifestPath, 'utf8')
+      return JSON.parse(raw) as LocalModelManifest
+    } catch (error) {
+      console.error('[LocalRecognizer] Failed to read model manifest:', error)
+      return {}
+    }
+  }
+
+  private writeModelManifest(manifest: LocalModelManifest): void {
+    const modelsPath = join(app.getPath('userData'), 'models')
+    if (!fs.existsSync(modelsPath)) {
+      fs.mkdirSync(modelsPath, { recursive: true })
+    }
+    const manifestPath = this.getModelManifestPath(modelsPath)
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+  }
+
+  private getSenseVoiceCacheCandidates(modelsPath: string): string[] {
+    return [
+      join(modelsPath, 'hub', 'models--FunAudioLLM--SenseVoiceSmall'),
+      join(modelsPath, 'models--FunAudioLLM--SenseVoiceSmall'),
+      join(modelsPath, 'FunAudioLLM', 'SenseVoiceSmall')
+    ]
+  }
+
+  private findSenseVoiceCachePath(modelsPath: string): string | undefined {
+    for (const path of this.getSenseVoiceCacheCandidates(modelsPath)) {
+      if (fs.existsSync(path)) {
+        return path
+      }
+    }
+    return undefined
   }
 }

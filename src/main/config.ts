@@ -22,7 +22,12 @@ export interface AppConfig {
     punctuation?: boolean
     local?: {
       modelPath?: string
+      engine?: 'faster-whisper' | 'sensevoice'
       modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+      sensevoice?: {
+        modelId?: string
+        useItn?: boolean
+      }
       device?: 'cpu' | 'cuda'
       threads?: number
       computeType?: string
@@ -87,7 +92,12 @@ const defaultConfig: AppConfig = {
     language: 'auto',
     punctuation: true,
     local: {
+      engine: 'faster-whisper',
       modelType: 'tiny',
+      sensevoice: {
+        modelId: 'FunAudioLLM/SenseVoiceSmall',
+        useItn: true
+      },
       device: 'cpu',
       threads: 4,
       computeType: 'int8',

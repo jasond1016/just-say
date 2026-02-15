@@ -5,7 +5,12 @@ import { VADState } from './vad-utils'
 import { findTextOverlap, mergeText } from './text-utils'
 
 export interface StreamingLocalConfig {
+  engine?: 'faster-whisper' | 'sensevoice'
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+  sensevoice?: {
+    modelId?: string
+    useItn?: boolean
+  }
   device?: 'cpu' | 'cuda' | 'auto'
   computeType?: string
   language?: string
@@ -16,7 +21,7 @@ export interface StreamingLocalConfig {
 }
 
 /**
- * Local/remote faster-whisper streaming adapter for meeting transcription.
+ * Local/remote local ASR streaming adapter for meeting transcription.
  *
  * It buffers PCM chunks, performs endpointing with simple VAD + silence timing,
  * then sends finalized chunks to LocalRecognizer (HTTP server path).
@@ -48,7 +53,12 @@ export class StreamingLocalRecognizer extends EventEmitter {
   constructor(config?: StreamingLocalConfig) {
     super()
     this.config = {
+      engine: 'faster-whisper',
       modelType: 'tiny',
+      sensevoice: {
+        modelId: 'FunAudioLLM/SenseVoiceSmall',
+        useItn: true
+      },
       device: 'auto',
       computeType: 'auto',
       language: 'auto',
@@ -60,7 +70,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
     }
 
     this.recognizer = new LocalRecognizer({
+      engine: this.config.engine,
       modelType: this.config.modelType,
+      sensevoice: this.config.sensevoice,
       device: this.config.device,
       computeType: this.config.computeType,
       language: this.config.language,

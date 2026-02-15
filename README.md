@@ -19,9 +19,11 @@ pnpm install
 
 ### 2. 安装 Python 依赖（本地识别）
 
+推荐使用 Python 3.12（尤其是启用 SenseVoiceSmall 时）：
+
 ```bash
 cd python
-uv sync
+uv sync --frozen --python 3.12
 ```
 
 ### 3. 运行
@@ -53,9 +55,11 @@ pnpm build:linux # Linux
 ## LAN Whisper Server / 内网服务器模式
 
 1. On Linux server:
+   `cd python && uv sync --frozen --python 3.12`
+2. 启动服务:
    `python whisper_server.py --host 0.0.0.0 --port 8765`
-2. Open firewall for port 8765.
-3. In Settings -> Recognition backend = Local -> 运行模式 = 内网服务器, fill host/port.
+3. Open firewall for port 8765.
+4. In Settings -> Recognition backend = Local -> 运行模式 = 内网服务器, fill host/port.
 
 ## License
 

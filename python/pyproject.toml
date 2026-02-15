@@ -5,6 +5,27 @@ description = "Faster-Whisper service for JustSay"
 requires-python = ">=3.10"
 dependencies = [
     "faster-whisper>=1.0.0",
-    "nvidia-cublas-cu12>=12.9.1.4; sys_platform == 'linux' or sys_platform == 'win32'",
-    "nvidia-cudnn-cu12>=9.17.0.29; sys_platform == 'linux' or sys_platform == 'win32'",
+    "funasr>=1.1.2",
+    "torch>=1.13,<2.2; python_version < '3.12'",
+    "torchaudio>=2.0,<2.2; python_version < '3.12'",
+    "torch>=2.2; python_version >= '3.12'",
+    "torchaudio>=2.2; python_version >= '3.12'",
+    "modelscope",
+    "huggingface_hub",
+    "numpy<=1.26.4",
+    "nvidia-cublas-cu12; sys_platform == 'linux' or sys_platform == 'win32'",
+    "nvidia-cudnn-cu12; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'win32' and python_version >= '3.12'" }
+]
+torchaudio = [
+    { index = "pytorch-cu128", marker = "sys_platform == 'win32' and python_version >= '3.12'" }
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

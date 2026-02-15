@@ -1,16 +1,21 @@
 import React, { useEffect, useState } from 'react'
 
-const MODEL_INFO: Record<string, { size: string; params: string }> = {
-  tiny: { size: '~75 MB', params: '39M' },
-  base: { size: '~145 MB', params: '74M' },
-  small: { size: '~465 MB', params: '244M' },
-  medium: { size: '~1.5 GB', params: '769M' },
-  'large-v3': { size: '~3 GB', params: '1550M' }
+type LocalEngine = 'faster-whisper' | 'sensevoice'
+
+const FASTER_WHISPER_MODEL_INFO: Record<string, { label: string; size: string; params: string }> = {
+  tiny: { label: 'tiny', size: '~75 MB', params: '39M' },
+  base: { label: 'base', size: '~145 MB', params: '74M' },
+  small: { label: 'small', size: '~465 MB', params: '244M' },
+  medium: { label: 'medium', size: '~1.5 GB', params: '769M' },
+  'large-v3': { label: 'large-v3', size: '~3 GB', params: '1550M' }
 }
 
-const ALL_MODELS = Object.keys(MODEL_INFO)
+const SENSEVOICE_MODEL_INFO: Record<string, { label: string; size: string; params: string }> = {
+  'sensevoice-small': { label: 'SenseVoiceSmall', size: '~300 MB+', params: 'N/A' }
+}
 
 interface ModelManagerProps {
+  engine: LocalEngine
   currentModel: string
   onModelChange: (model: string) => void
 }
@@ -22,6 +27,7 @@ interface DownloadProgress {
 }
 
 export function ModelManager({
+  engine,
   currentModel,
   onModelChange
 }: ModelManagerProps): React.JSX.Element {
@@ -33,7 +39,7 @@ export function ModelManager({
 
   useEffect(() => {
     loadModels()
-  }, [])
+  }, [engine])
 
   useEffect(() => {
     const unsubscribe = window.api.onDownloadProgress((p) => {
@@ -86,67 +92,73 @@ export function ModelManager({
       <h3>Local Models</h3>
       {error && <div className="error-banner">{error}</div>}
       <div className="models-list">
-        {ALL_MODELS.map((model) => {
-          const isDownloaded = downloadedModels.includes(model)
-          const isCurrent = currentModel === model
-          const isDownloading = downloading === model
+        {(() => {
+          const modelInfo =
+            engine === 'sensevoice' ? SENSEVOICE_MODEL_INFO : FASTER_WHISPER_MODEL_INFO
+          const allModels = Object.keys(modelInfo)
 
-          const info = MODEL_INFO[model]
-          return (
-            <div
-              key={model}
-              className={`model-item ${isCurrent ? 'active' : ''} ${isDownloaded ? 'downloaded' : 'not-downloaded'}`}
-            >
-              <div className="model-info">
-                <div className="model-header">
-                  <span className="model-name">{model}</span>
-                  {isCurrent && <span className="badge current">Active</span>}
-                  {isDownloaded && !isCurrent && <span className="badge downloaded">✓</span>}
-                </div>
-                <div className="model-meta">
-                  {info.size} · {info.params} params
-                </div>
-              </div>
-              <div className="model-actions">
-                {isDownloaded ? (
-                  <>
-                    {!isCurrent && (
-                      <button onClick={() => onModelChange(model)} disabled={!!downloading || !!deleting}>
-                        Select
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete(model)}
-                      disabled={!!downloading || !!deleting || isCurrent}
-                      className="delete-btn"
-                      title={isCurrent ? 'Cannot delete active model' : 'Delete model'}
-                    >
-                      {deleting === model ? '...' : '✕'}
-                    </button>
-                  </>
-                ) : isDownloading ? (
-                  <div className="download-progress">
-                    <div className="progress-text">{progress?.status || 'Downloading...'}</div>
-                    <div className="progress-bar">
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${Math.min(progress?.percent || 0, 100)}%` }}
-                      />
-                    </div>
+          return allModels.map((model) => {
+            const isDownloaded = downloadedModels.includes(model)
+            const isCurrent = currentModel === model
+            const isDownloading = downloading === model
+            const info = modelInfo[model]
+
+            return (
+              <div
+                key={model}
+                className={`model-item ${isCurrent ? 'active' : ''} ${isDownloaded ? 'downloaded' : 'not-downloaded'}`}
+              >
+                <div className="model-info">
+                  <div className="model-header">
+                    <span className="model-name">{info.label}</span>
+                    {isCurrent && <span className="badge current">Active</span>}
+                    {isDownloaded && !isCurrent && <span className="badge downloaded">✓</span>}
                   </div>
-                ) : (
-                  <button
-                    onClick={() => handleDownload(model)}
-                    disabled={!!downloading}
-                    className="download-btn"
-                  >
-                    Download
-                  </button>
-                )}
+                  <div className="model-meta">
+                    {info.size} · {info.params} params
+                  </div>
+                </div>
+                <div className="model-actions">
+                  {isDownloaded ? (
+                    <>
+                      {!isCurrent && (
+                        <button onClick={() => onModelChange(model)} disabled={!!downloading || !!deleting}>
+                          Select
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleDelete(model)}
+                        disabled={!!downloading || !!deleting || isCurrent}
+                        className="delete-btn"
+                        title={isCurrent ? 'Cannot delete active model' : 'Delete model'}
+                      >
+                        {deleting === model ? '...' : '✕'}
+                      </button>
+                    </>
+                  ) : isDownloading ? (
+                    <div className="download-progress">
+                      <div className="progress-text">{progress?.status || 'Downloading...'}</div>
+                      <div className="progress-bar">
+                        <div
+                          className="progress-fill"
+                          style={{ width: `${Math.min(progress?.percent || 0, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleDownload(model)}
+                      disabled={!!downloading}
+                      className="download-btn"
+                    >
+                      Download
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })
+        })()}
       </div>
       <style>{`
         .model-manager {
