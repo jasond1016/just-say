@@ -357,6 +357,46 @@ function trackPttUsage(text: string, startedAt: number | null): void {
   notifyHomeStatsUpdated()
 }
 
+function getPttDurationSeconds(startedAt: number | null): number {
+  if (!startedAt) return 0
+  return Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+}
+
+function persistPttTranscript(
+  sourceText: string,
+  translatedText: string,
+  startedAt: number | null
+): void {
+  const original = sourceText.trim()
+  const translated = translatedText.trim()
+  if (!original) return
+
+  const config = getConfig()
+  const pttTranslationEnabled = config.recognition?.translation?.enabledForPtt === true
+  const targetLanguage = config.recognition?.translation?.targetLanguage
+  const hasTranslation = pttTranslationEnabled && translated.length > 0 && translated !== original
+
+  try {
+    const transcript = createTranscript({
+      duration_seconds: getPttDurationSeconds(startedAt),
+      translation_enabled: hasTranslation,
+      target_language: hasTranslation ? targetLanguage : undefined,
+      include_microphone: false,
+      source_mode: 'ptt',
+      segments: [
+        {
+          speaker: 0,
+          text: original,
+          translated_text: hasTranslation ? translated : undefined
+        }
+      ]
+    })
+    console.log(`[Main] Saved PTT transcript: ${transcript.id}`)
+  } catch (err) {
+    console.error('[Main] Failed to save PTT transcript:', err)
+  }
+}
+
 /**
  * Create MeetingTranscriptionManager based on global backend setting.
  * Supports Soniox/Groq and local faster-whisper (including remote LAN server mode).
@@ -520,6 +560,7 @@ async function initializeApp(): Promise<void> {
             capitalize: config.output?.capitalize
           })
           trackPttUsage(finalText || translatedText || result.text, pttRecordingStartedAt)
+          persistPttTranscript(result.text, translatedText, pttRecordingStartedAt)
           if (finalText) {
             notifyIndicatorOutputText(finalText)
           }
@@ -571,6 +612,7 @@ async function initializeApp(): Promise<void> {
               capitalize: config.output?.capitalize
             })
             trackPttUsage(finalText || translatedText || result.text, pttRecordingStartedAt)
+            persistPttTranscript(result.text, translatedText, pttRecordingStartedAt)
             if (finalText) {
               notifyIndicatorOutputText(finalText)
             }
