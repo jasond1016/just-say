@@ -57,6 +57,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   private pythonPath: string
   private scriptPath: string
   private static cachedGpuInfo: GpuInfo | null = null
+  private static gpuDetectPromise: Promise<GpuInfo> | null = null
+  private static autoComputeTypeHints = new Map<string, string>()
   private static globalPrewarmPromise: Promise<void> | null = null
   private static globalPrewarmKey: string | null = null
   private whisperServer: WhisperServerClient | null = null
@@ -312,6 +314,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
           language: this.config.language
         })
         if (retry.success) {
+          this.rememberAutoComputeTypeHint(device, 'int8_float16')
           return {
             text: retry.text || '',
             language: retry.language,
@@ -473,59 +476,69 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       return LocalRecognizer.cachedGpuInfo
     }
 
-    if (this.isRemoteMode()) {
-      if (!this.whisperServer) {
-        throw new Error('Remote server not configured')
-      }
-      const info = await this.whisperServer.detectGpu()
-      LocalRecognizer.cachedGpuInfo = info
-      return info
+    if (LocalRecognizer.gpuDetectPromise) {
+      return LocalRecognizer.gpuDetectPromise
     }
 
-    return new Promise((resolve) => {
-      const args = [this.scriptPath, '--detect-gpu']
-      const proc = spawn(this.pythonPath, args, {
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
-      })
-      let stdout = ''
+    LocalRecognizer.gpuDetectPromise = (async () => {
+      if (this.isRemoteMode()) {
+        if (!this.whisperServer) {
+          throw new Error('Remote server not configured')
+        }
+        const info = await this.whisperServer.detectGpu()
+        LocalRecognizer.cachedGpuInfo = info
+        return info
+      }
 
-      proc.stdout.on('data', (data: Buffer) => {
-        stdout += data.toString('utf8')
-      })
+      return new Promise<GpuInfo>((resolve) => {
+        const args = [this.scriptPath, '--detect-gpu']
+        const proc = spawn(this.pythonPath, args, {
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+        })
+        let stdout = ''
 
-      proc.on('close', (code) => {
-        if (code === 0) {
-          try {
-            const info = JSON.parse(stdout.trim()) as GpuInfo
-            LocalRecognizer.cachedGpuInfo = info
-            console.log('[LocalRecognizer] GPU detection:', info)
-            resolve(info)
-            return
-          } catch {
-            // Parse error, fall through
+        proc.stdout.on('data', (data: Buffer) => {
+          stdout += data.toString('utf8')
+        })
+
+        proc.on('close', (code) => {
+          if (code === 0) {
+            try {
+              const info = JSON.parse(stdout.trim()) as GpuInfo
+              LocalRecognizer.cachedGpuInfo = info
+              console.log('[LocalRecognizer] GPU detection:', info)
+              resolve(info)
+              return
+            } catch {
+              // Parse error, fall through
+            }
           }
-        }
-        // Default fallback
-        const fallback: GpuInfo = {
-          cuda_available: false,
-          device_name: null,
-          recommended_device: 'cpu',
-          recommended_compute_type: 'int8'
-        }
-        LocalRecognizer.cachedGpuInfo = fallback
-        resolve(fallback)
-      })
+          const fallback: GpuInfo = {
+            cuda_available: false,
+            device_name: null,
+            recommended_device: 'cpu',
+            recommended_compute_type: 'int8'
+          }
+          LocalRecognizer.cachedGpuInfo = fallback
+          resolve(fallback)
+        })
 
-      proc.on('error', () => {
-        const fallback: GpuInfo = {
-          cuda_available: false,
-          device_name: null,
-          recommended_device: 'cpu',
-          recommended_compute_type: 'int8'
-        }
-        resolve(fallback)
+        proc.on('error', () => {
+          const fallback: GpuInfo = {
+            cuda_available: false,
+            device_name: null,
+            recommended_device: 'cpu',
+            recommended_compute_type: 'int8'
+          }
+          LocalRecognizer.cachedGpuInfo = fallback
+          resolve(fallback)
+        })
       })
+    })().finally(() => {
+      LocalRecognizer.gpuDetectPromise = null
     })
+
+    return LocalRecognizer.gpuDetectPromise
   }
 
   private async resolveAutoSettings(): Promise<{ device: 'cpu' | 'cuda'; computeType: string }> {
@@ -544,14 +557,22 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     // Determine compute type based on device
     let computeType: string
-    if (
-      !this.config.computeType ||
-      this.config.computeType === 'auto' ||
-      this.config.computeType === 'default'
-    ) {
-      computeType = device === 'cuda' ? 'float16' : 'int8'
+    if (this.isAutoComputeTypeConfigured()) {
+      const hintKey = this.getAutoComputeHintKey(device)
+      const hintedComputeType = LocalRecognizer.autoComputeTypeHints.get(hintKey)
+      if (hintedComputeType) {
+        return { device, computeType: hintedComputeType }
+      }
+
+      const fallbackComputeType = device === 'cuda' ? 'float16' : 'int8'
+      computeType =
+        device === gpuInfo.recommended_device
+          ? gpuInfo.recommended_compute_type || fallbackComputeType
+          : fallbackComputeType
+
+      LocalRecognizer.autoComputeTypeHints.set(hintKey, computeType)
     } else {
-      computeType = this.config.computeType
+      computeType = this.config.computeType as string
     }
 
     return { device, computeType }
@@ -818,6 +839,27 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     return this.resolveInitialDevice() === 'cuda' ? 'float16' : 'int8'
   }
 
+  private isAutoComputeTypeConfigured(): boolean {
+    return (
+      !this.config.computeType ||
+      this.config.computeType === 'auto' ||
+      this.config.computeType === 'default'
+    )
+  }
+
+  private getAutoComputeHintKey(device: 'cpu' | 'cuda'): string {
+    const modelIdentity =
+      this.getEngine() === 'sensevoice' ? this.getSenseVoiceModelId() : this.config.modelType || 'tiny'
+    return `${this.getEngine()}|${modelIdentity}|${device}`
+  }
+
+  private rememberAutoComputeTypeHint(device: 'cpu' | 'cuda', computeType: string): void {
+    if (!this.isAutoComputeTypeConfigured()) {
+      return
+    }
+    LocalRecognizer.autoComputeTypeHints.set(this.getAutoComputeHintKey(device), computeType)
+  }
+
   private getPrewarmKey(runtime: {
     engine: LocalEngine
     modelType: string
@@ -854,13 +896,6 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       return
     }
 
-    const healthy = await this.whisperServer.isHealthy()
-    if (healthy) {
-      this.lastPrewarmKey = key
-      LocalRecognizer.globalPrewarmKey = key
-      return
-    }
-
     await this.whisperServer.updateConfig({
       engine: runtime.engine,
       modelType: runtime.modelType as LocalRecognizerConfig['modelType'],
@@ -870,9 +905,12 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       computeType: runtime.computeType
     })
 
-    const serverStartAt = Date.now()
-    await this.whisperServer.start()
-    const serverStartMs = Date.now() - serverStartAt
+    let serverStartMs = 0
+    if (!(await this.whisperServer.isHealthy())) {
+      const serverStartAt = Date.now()
+      await this.whisperServer.start()
+      serverStartMs = Date.now() - serverStartAt
+    }
 
     const loadStartAt = Date.now()
     await this.whisperServer.loadModel(runtime.modelType, runtime.device, runtime.computeType, {

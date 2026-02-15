@@ -35,6 +35,8 @@ type TranscriptionStatus = 'idle' | 'transcribing' | 'error'
 
 export function MeetingTranscription(): React.JSX.Element {
     const [status, setStatus] = useState<TranscriptionStatus>('idle')
+    const [isPreconnecting, setIsPreconnecting] = useState(false)
+    const [preconnectFailed, setPreconnectFailed] = useState(false)
     const [includeMic, setIncludeMic] = useState(false)
     const [enableTranslation, setEnableTranslation] = useState(false)
     const [targetLanguage, setTargetLanguage] = useState('en')
@@ -80,7 +82,7 @@ export function MeetingTranscription(): React.JSX.Element {
 
     // Start transcription
     const startTranscription = async (): Promise<void> => {
-        if (stopInProgressRef.current) return
+        if (stopInProgressRef.current || isPreconnecting) return
         try {
             // First start the recognition service in main process
             await window.api.startMeetingTranscription({
@@ -246,9 +248,32 @@ export function MeetingTranscription(): React.JSX.Element {
 
     // Pre-connect backend when entering meeting page to reduce first-start latency.
     useEffect(() => {
-        void window.api.preconnectMeetingTranscription().catch((err) => {
-            console.warn('[MeetingTranscription] Preconnect failed:', err)
-        })
+        let active = true
+        setIsPreconnecting(true)
+        setPreconnectFailed(false)
+
+        void window.api
+            .preconnectMeetingTranscription()
+            .then((ok) => {
+                if (!ok) {
+                    throw new Error('Preconnect returned unavailable')
+                }
+            })
+            .catch((err) => {
+                console.warn('[MeetingTranscription] Preconnect failed:', err)
+                if (active) {
+                    setPreconnectFailed(true)
+                }
+            })
+            .finally(() => {
+                if (active) {
+                    setIsPreconnecting(false)
+                }
+            })
+
+        return () => {
+            active = false
+        }
     }, [])
 
     // Auto-scroll to bottom
@@ -299,7 +324,11 @@ export function MeetingTranscription(): React.JSX.Element {
                         <div className="meeting-transcript__placeholder">
                             <div className="placeholder-icon">📝</div>
                             <div className="placeholder-text">
-                                {isTranscribing ? '等待语音输入...' : '点击下方按钮开始转录'}
+                                {isTranscribing
+                                    ? '等待语音输入...'
+                                    : isPreconnecting
+                                      ? '正在预热识别服务，请稍候...'
+                                      : '点击下方按钮开始转录'}
                             </div>
                         </div>
                     ) : (
@@ -380,10 +409,19 @@ export function MeetingTranscription(): React.JSX.Element {
             {!isTranscribing && (
                 <div className="meeting-control-bar">
                     <div className="meeting-control-bar__primary">
-                        <button className="btn btn--primary" onClick={startTranscription}>
+                        <button
+                            className="btn btn--primary"
+                            onClick={startTranscription}
+                            disabled={isPreconnecting}
+                        >
                             <span className="btn-icon">▶️</span>
-                            开始转录
+                            {isPreconnecting ? '预热中...' : '开始转录'}
                         </button>
+                        {preconnectFailed && (
+                            <div className="meeting-preconnect-warning">
+                                预连接失败，将在开始时冷启动
+                            </div>
+                        )}
                     </div>
 
                     <div className="meeting-control-bar__settings">

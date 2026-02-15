@@ -69,6 +69,7 @@ class WhisperServerClient {
   private scriptPath: string
   private isStarting = false
   private startPromise: Promise<void> | null = null
+  private lastLoadedModelSignature: string | null = null
 
   constructor(config?: WhisperServerConfig) {
     this.config = {
@@ -211,11 +212,13 @@ class WhisperServerClient {
     this.serverProcess.on('close', (code) => {
       console.log(`[WhisperServer] Process exited with code ${code}`)
       this.serverProcess = null
+      this.lastLoadedModelSignature = null
     })
 
     this.serverProcess.on('error', (err) => {
       console.error('[WhisperServer] Process error:', err)
       this.serverProcess = null
+      this.lastLoadedModelSignature = null
     })
 
     // Wait for server to be ready
@@ -268,6 +271,7 @@ class WhisperServerClient {
     })
 
     this.serverProcess = null
+    this.lastLoadedModelSignature = null
   }
 
   /**
@@ -305,6 +309,12 @@ class WhisperServerClient {
   ): Promise<void> {
     await this.ensureRunning()
     const engine = options?.engine || this.config.engine
+    const signature = this.getModelLoadSignature(modelType, device, computeType, options)
+    if (this.lastLoadedModelSignature === signature) {
+      console.log('[WhisperServer] Skipping duplicate model load request')
+      return
+    }
+
     const payload: Record<string, unknown> = {
       engine,
       device,
@@ -324,6 +334,7 @@ class WhisperServerClient {
       payload.download_root = downloadRoot
     }
     await this.httpPost('/model/load', payload)
+    this.lastLoadedModelSignature = signature
   }
 
   /**
@@ -332,6 +343,7 @@ class WhisperServerClient {
   async unloadModel(): Promise<void> {
     await this.ensureRunning()
     await this.httpPost('/model/unload', {})
+    this.lastLoadedModelSignature = null
   }
 
   /**
@@ -409,6 +421,37 @@ class WhisperServerClient {
     if (this.config.autoStart && !(await this.isHealthy())) {
       await this.start()
     }
+  }
+
+  private getModelLoadSignature(
+    modelType: string,
+    device: 'cpu' | 'cuda',
+    computeType: string,
+    options?: {
+      engine?: LocalEngine
+      sensevoiceModelId?: string
+      sensevoiceUseItn?: boolean
+    }
+  ): string {
+    const engine = options?.engine || this.config.engine
+    const signature: Record<string, unknown> = {
+      engine,
+      device,
+      computeType,
+      downloadRoot: this.modelsPath || null
+    }
+
+    if (engine === 'faster-whisper') {
+      signature.modelType = modelType
+    } else {
+      signature.sensevoiceModelId = options?.sensevoiceModelId || this.config.sensevoiceModelId
+      signature.sensevoiceUseItn =
+        options?.sensevoiceUseItn !== undefined
+          ? options.sensevoiceUseItn
+          : this.config.sensevoiceUseItn
+    }
+
+    return JSON.stringify(signature)
   }
 
   private httpGet<T>(path: string): Promise<T> {
@@ -514,18 +557,15 @@ class WhisperServerClient {
     const needsRestart =
       prev.host !== next.host ||
       prev.port !== next.port ||
+      prev.mode !== next.mode
+    const needsReload =
+      prev.modelType !== next.modelType ||
       prev.engine !== next.engine ||
       prev.sensevoiceModelId !== next.sensevoiceModelId ||
       prev.sensevoiceUseItn !== next.sensevoiceUseItn ||
       prev.device !== next.device ||
       prev.computeType !== next.computeType ||
-      prev.mode !== next.mode ||
       prev.downloadRoot !== next.downloadRoot
-    const needsReload =
-      prev.modelType !== next.modelType ||
-      prev.engine !== next.engine ||
-      prev.sensevoiceModelId !== next.sensevoiceModelId ||
-      prev.sensevoiceUseItn !== next.sensevoiceUseItn
 
     this.config = next
 
@@ -534,7 +574,7 @@ class WhisperServerClient {
       if (this.config.mode === 'local') {
         await this.start()
       }
-    } else if (needsReload && this.serverProcess && this.config.mode === 'local') {
+    } else if (needsReload && this.config.mode === 'local') {
       // Just reload the model
       await this.loadModel(
         this.config.modelType,

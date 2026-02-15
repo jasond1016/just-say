@@ -288,7 +288,14 @@
 
 .meeting-control-bar__primary {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-xs);
+}
+
+.meeting-preconnect-warning {
+    font-size: var(--font-size-xs);
+    color: var(--color-warning);
 }
 
 .meeting-control-bar__settings {
