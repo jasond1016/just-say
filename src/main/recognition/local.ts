@@ -200,12 +200,27 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
     if (this.isRemoteMode()) {
       console.log('[LocalRecognizer] Recognizing via remote HTTP server (server-controlled params)')
-      const remoteResult = await this.whisperServer!.transcribe(wavBuffer, {
+      const requestOptions = {
         engine: this.config.engine,
         sensevoiceModelId: this.getSenseVoiceModelId(),
         sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
         language: this.config.language
-      })
+      }
+
+      let remoteResult
+      try {
+        remoteResult = await this.whisperServer!.transcribe(wavBuffer, {
+          ...requestOptions,
+          skipHealthCheck: true
+        })
+      } catch (error) {
+        // Remote fast path failed: run one checked retry for recovery.
+        remoteResult = await this.whisperServer!.transcribe(wavBuffer, requestOptions)
+        console.warn(
+          '[LocalRecognizer] Remote fast transcribe failed, recovered via checked retry:',
+          error instanceof Error ? error.message : String(error)
+        )
+      }
       if (!remoteResult.success) {
         throw new Error(remoteResult.error || 'Transcription failed')
       }
