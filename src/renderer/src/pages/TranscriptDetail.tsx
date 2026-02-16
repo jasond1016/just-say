@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo } from 'react'
 import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react'
 
+import { BilingualSegment } from '@/components/transcript/BilingualSegment'
+import { toSentencePairsFromStored } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
 import { useTranscripts } from '../hooks/useTranscripts'
 
@@ -8,6 +10,8 @@ interface TranscriptDetailProps {
   id: string
   onBack: () => void
 }
+
+const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
 
 function formatDateLabel(isoString: string): string {
   const date = new Date(isoString)
@@ -59,8 +63,13 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
     if (!currentTranscript) return ''
     return currentTranscript.segments
       .map((segment) => {
-        const translated = segment.translated_text ? `\n${segment.translated_text}` : ''
-        return `Speaker ${segment.speaker + 1}: ${segment.text}${translated}`
+        const pairLines = toSentencePairsFromStored(segment)
+          .map((pair) => {
+            const translated = pair.translated ? `\n${pair.translated}` : ''
+            return `${pair.original}${translated}`
+          })
+          .join('\n')
+        return `Speaker ${segment.speaker + 1}: ${pairLines}`
       })
       .join('\n\n')
   }, [currentTranscript])
@@ -178,15 +187,17 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
                 )}
               </span>
               <div className="min-w-0 flex-1 space-y-1">
-                <p className="text-[13px] font-semibold text-[#7C3AED]">
+                <p
+                  className="text-[13px] font-semibold"
+                  style={{ color: speakerColors[segment.speaker % speakerColors.length] }}
+                >
                   Speaker {segment.speaker + 1}
                 </p>
-                <p className="text-sm leading-[1.5]">{segment.text}</p>
-                {segment.translated_text && (
-                  <p className="text-sm leading-[1.5] text-emerald-500">
-                    {segment.translated_text}
-                  </p>
-                )}
+                <BilingualSegment
+                  pairs={toSentencePairsFromStored(segment)}
+                  originalText={segment.text}
+                  translatedText={segment.translated_text}
+                />
               </div>
             </div>
           ))}

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Headphones, Languages, Play, Settings2, Square } from 'lucide-react'
+import { ArrowLeft, Headphones, Play, Settings2, Square } from 'lucide-react'
 
+import { BilingualSegment } from '@/components/transcript/BilingualSegment'
+import { toSentencePairsFromLive } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
 
 export interface SentencePair {
@@ -196,10 +198,6 @@ export function MeetingTranscription({
           <div className="space-y-5">
             {state.segments.map((segment, index) => {
               const speakerColor = speakerColors[segment.speaker % speakerColors.length]
-              const pairs =
-                segment.sentencePairs && segment.sentencePairs.length > 0
-                  ? segment.sentencePairs
-                  : [{ original: segment.text, translated: segment.translatedText }]
 
               return (
                 <div key={`${segment.speaker}-${index}`} className="flex gap-3 text-sm">
@@ -210,24 +208,14 @@ export function MeetingTranscription({
                     <p className="text-[13px] font-semibold" style={{ color: speakerColor }}>
                       Speaker {segment.speaker + 1}
                     </p>
-                    {pairs.map((pair, pairIndex) => (
-                      <div key={pairIndex} className="space-y-1">
-                        <p className="text-sm leading-[1.5]">{pair.original}</p>
-                        {pair.translated && (
-                          <div className="flex items-start gap-2 rounded-md bg-emerald-50 px-3 py-2 text-emerald-600">
-                            <Languages className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                            <p className="text-sm leading-[1.5]">{pair.translated}</p>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                    <BilingualSegment pairs={toSentencePairsFromLive(segment)} />
                   </div>
                 </div>
               )
             })}
 
             {state.currentSegment && (
-              <div className="flex gap-3 text-sm opacity-80">
+              <div className="flex gap-3 text-sm">
                 <span className="w-10 shrink-0 pt-0.5 text-xs text-muted-foreground">
                   {formatSegmentTime(state.currentSegment.timestamp)}
                 </span>
@@ -240,14 +228,7 @@ export function MeetingTranscription({
                   >
                     Speaker {state.currentSegment.speaker + 1}
                   </p>
-                  <p className="text-sm leading-[1.5]">
-                    <span>{state.currentSegment.stableText}</span>
-                    {state.currentSegment.previewText && (
-                      <span className="text-muted-foreground">
-                        {state.currentSegment.previewText}
-                      </span>
-                    )}
-                  </p>
+                  <BilingualSegment pairs={toSentencePairsFromLive(state.currentSegment)} />
                 </div>
               </div>
             )}

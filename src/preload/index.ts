@@ -86,7 +86,23 @@ const api = {
     ipcRenderer.invoke('get-ptt-runtime-state'),
 
   onMeetingTranscript: (
-    callback: (segment: { text: string; timestamp: number; isFinal: boolean }) => void
+    callback: (segment: {
+      text: string
+      timestamp: number
+      isFinal: boolean
+      speakerSegments?: Array<{
+        speaker: number
+        text: string
+        translatedText?: string
+        sentencePairs?: Array<{ original: string; translated?: string }>
+      }>
+      currentSpeakerSegment?: {
+        speaker: number
+        text: string
+        translatedText?: string
+        sentencePairs?: Array<{ original: string; translated?: string }>
+      }
+    }) => void
   ): void => {
     ipcRenderer.on('meeting-transcript', (_event, segment) => callback(segment))
   },

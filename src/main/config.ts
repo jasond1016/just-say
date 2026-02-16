@@ -23,6 +23,7 @@ export interface AppConfig {
     translation?: {
       provider?: 'openai-compatible'
       enabledForPtt?: boolean
+      enabledForMeeting?: boolean
       targetLanguage?: string
       endpoint?: string
       model?: string
@@ -109,6 +110,7 @@ const defaultConfig: AppConfig = {
     translation: {
       provider: 'openai-compatible',
       enabledForPtt: false,
+      enabledForMeeting: false,
       targetLanguage: 'en',
       endpoint: 'https://api.openai.com/v1',
       model: 'gpt-4o-mini',

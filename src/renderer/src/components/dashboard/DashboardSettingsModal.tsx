@@ -9,6 +9,7 @@ type ModalTab = 'recognition' | 'appearance' | 'about'
 type Backend = 'local' | 'api' | 'network' | 'soniox' | 'groq'
 type LocalEngine = 'faster-whisper' | 'sensevoice'
 type ModelType = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
+type TranslationProvider = 'openai-compatible'
 
 interface RendererConfig {
   hotkey?: {
@@ -18,8 +19,12 @@ interface RendererConfig {
     backend?: Backend
     language?: string
     translation?: {
+      provider?: TranslationProvider
       enabledForPtt?: boolean
+      enabledForMeeting?: boolean
       targetLanguage?: string
+      endpoint?: string
+      model?: string
     }
     local?: {
       engine?: LocalEngine
@@ -92,7 +97,15 @@ export function DashboardSettingsModal({
   const [modelSize, setModelSize] = useState<ModelType>('large-v3')
   const [hotkey, setHotkey] = useState<TriggerKey>('RCtrl')
   const [translationEnabled, setTranslationEnabled] = useState(false)
+  const [meetingTranslationEnabled, setMeetingTranslationEnabled] = useState(false)
   const [targetLanguage, setTargetLanguage] = useState('zh')
+  const [translationProvider, setTranslationProvider] =
+    useState<TranslationProvider>('openai-compatible')
+  const [translationEndpoint, setTranslationEndpoint] = useState('https://api.openai.com/v1')
+  const [translationModel, setTranslationModel] = useState('gpt-4o-mini')
+  const [translationApiKeyInput, setTranslationApiKeyInput] = useState('')
+  const [translationApiKeyConfigured, setTranslationApiKeyConfigured] = useState(false)
+  const [updatingApiKey, setUpdatingApiKey] = useState(false)
   const [theme, setTheme] = useState<ThemeOption>('system')
   const [indicatorEnabled, setIndicatorEnabled] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(true)
@@ -118,13 +131,32 @@ export function DashboardSettingsModal({
 
         setEngine(engineValue)
         setLanguage(cfg.recognition?.language || 'auto')
-        setModelSize((cfg.recognition?.local?.modelType || 'large-v3') as ModelType)
+        const nextModelSize = (cfg.recognition?.local?.modelType || 'large-v3') as ModelType
+        setModelSize(engineValue === 'local-sensevoice' ? 'small' : nextModelSize)
         setHotkey((cfg.hotkey?.triggerKey || 'RCtrl') as TriggerKey)
         setTranslationEnabled(cfg.recognition?.translation?.enabledForPtt === true)
+        setMeetingTranslationEnabled(cfg.recognition?.translation?.enabledForMeeting === true)
         setTargetLanguage(cfg.recognition?.translation?.targetLanguage || 'zh')
+        setTranslationProvider(cfg.recognition?.translation?.provider || 'openai-compatible')
+        setTranslationEndpoint(
+          cfg.recognition?.translation?.endpoint || 'https://api.openai.com/v1'
+        )
+        setTranslationModel(cfg.recognition?.translation?.model || 'gpt-4o-mini')
         setTheme(cfg.ui?.theme || 'system')
         setIndicatorEnabled(cfg.ui?.indicatorEnabled !== false)
         setSoundEnabled(cfg.ui?.soundFeedback !== false)
+        void window.api
+          .hasApiKey('openai')
+          .then((hasKey) => {
+            if (mounted) {
+              setTranslationApiKeyConfigured(hasKey)
+            }
+          })
+          .catch(() => {
+            if (mounted) {
+              setTranslationApiKeyConfigured(false)
+            }
+          })
       })
       .finally(() => {
         if (mounted) {
@@ -141,8 +173,28 @@ export function DashboardSettingsModal({
     () => engine === 'local-faster-whisper' || engine === 'local-sensevoice',
     [engine]
   )
+  const isSenseVoiceEngine = engine === 'local-sensevoice'
+  const anyTranslationEnabled = translationEnabled || meetingTranslationEnabled
   const fieldClassName =
     'h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/35'
+
+  useEffect(() => {
+    if (isSenseVoiceEngine) {
+      setModelSize('small')
+    }
+  }, [isSenseVoiceEngine])
+
+  const clearTranslationApiKey = async (): Promise<void> => {
+    if (updatingApiKey) return
+    setUpdatingApiKey(true)
+    try {
+      await window.api.deleteApiKey('openai')
+      setTranslationApiKeyConfigured(false)
+      setTranslationApiKeyInput('')
+    } finally {
+      setUpdatingApiKey(false)
+    }
+  }
 
   const setTabRef = useCallback(
     (tab: ModalTab) =>
@@ -249,12 +301,16 @@ export function DashboardSettingsModal({
           backend,
           language,
           translation: {
+            provider: translationProvider,
             enabledForPtt: translationEnabled,
-            targetLanguage
+            enabledForMeeting: meetingTranslationEnabled,
+            targetLanguage,
+            endpoint: translationEndpoint.trim(),
+            model: translationModel.trim()
           },
           local: {
             engine: localEngine,
-            modelType: modelSize
+            modelType: localEngine === 'sensevoice' ? 'small' : modelSize
           }
         },
         ui: {
@@ -263,6 +319,13 @@ export function DashboardSettingsModal({
           soundFeedback: soundEnabled
         }
       })
+
+      const nextApiKey = translationApiKeyInput.trim()
+      if (nextApiKey) {
+        await window.api.setApiKey('openai', nextApiKey)
+        setTranslationApiKeyConfigured(true)
+        setTranslationApiKeyInput('')
+      }
 
       onThemeChange(theme)
       await onSaved()
@@ -413,23 +476,27 @@ export function DashboardSettingsModal({
                     </label>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <label className="space-y-1.5" htmlFor="settings-model-size">
-                      <span className="text-sm font-medium">Model Size</span>
-                      <select
-                        id="settings-model-size"
-                        className={`${fieldClassName} disabled:opacity-50`}
-                        value={modelSize}
-                        onChange={(event) => setModelSize(event.target.value as ModelType)}
-                        disabled={!isLocalEngine}
-                      >
-                        <option value="tiny">tiny</option>
-                        <option value="base">base</option>
-                        <option value="small">small</option>
-                        <option value="medium">medium</option>
-                        <option value="large-v3">large-v3</option>
-                      </select>
-                    </label>
+                  <div
+                    className={`grid gap-4 ${isSenseVoiceEngine ? 'grid-cols-1' : 'grid-cols-2'}`}
+                  >
+                    {!isSenseVoiceEngine ? (
+                      <label className="space-y-1.5" htmlFor="settings-model-size">
+                        <span className="text-sm font-medium">Model Size</span>
+                        <select
+                          id="settings-model-size"
+                          className={`${fieldClassName} disabled:opacity-50`}
+                          value={modelSize}
+                          onChange={(event) => setModelSize(event.target.value as ModelType)}
+                          disabled={!isLocalEngine}
+                        >
+                          <option value="tiny">tiny</option>
+                          <option value="base">base</option>
+                          <option value="small">small</option>
+                          <option value="medium">medium</option>
+                          <option value="large-v3">large-v3</option>
+                        </select>
+                      </label>
+                    ) : null}
 
                     <label className="space-y-1.5" htmlFor="settings-hotkey">
                       <span className="text-sm font-medium">Hotkey</span>
@@ -449,17 +516,33 @@ export function DashboardSettingsModal({
 
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p id="settings-translation-label" className="text-sm font-medium">
-                        Enable Translation
+                      <p id="settings-translation-ptt-label" className="text-sm font-medium">
+                        Enable Translation for PTT
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Translate transcribed text to target language
+                        Translate push-to-talk transcription to target language
                       </p>
                     </div>
                     <Toggle
                       checked={translationEnabled}
                       onChange={setTranslationEnabled}
-                      labelledBy="settings-translation-label"
+                      labelledBy="settings-translation-ptt-label"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p id="settings-translation-meeting-label" className="text-sm font-medium">
+                        Enable Translation for Meeting
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Translate meeting transcription in real time
+                      </p>
+                    </div>
+                    <Toggle
+                      checked={meetingTranslationEnabled}
+                      onChange={setMeetingTranslationEnabled}
+                      labelledBy="settings-translation-meeting-label"
                     />
                   </div>
 
@@ -471,7 +554,7 @@ export function DashboardSettingsModal({
                         className={`${fieldClassName} disabled:opacity-50`}
                         value={targetLanguage}
                         onChange={(event) => setTargetLanguage(event.target.value)}
-                        disabled={!translationEnabled}
+                        disabled={!anyTranslationEnabled}
                       >
                         <option value="zh">Chinese (Simplified)</option>
                         <option value="en">English</option>
@@ -481,6 +564,88 @@ export function DashboardSettingsModal({
                     </label>
                     <div />
                   </div>
+
+                  {anyTranslationEnabled && (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <label className="space-y-1.5" htmlFor="settings-translation-provider">
+                          <span className="text-sm font-medium">Translation Provider</span>
+                          <select
+                            id="settings-translation-provider"
+                            className={fieldClassName}
+                            value={translationProvider}
+                            onChange={(event) =>
+                              setTranslationProvider(event.target.value as TranslationProvider)
+                            }
+                          >
+                            <option value="openai-compatible">OpenAI-Compatible</option>
+                          </select>
+                        </label>
+
+                        <label className="space-y-1.5" htmlFor="settings-translation-model">
+                          <span className="text-sm font-medium">Translation Model</span>
+                          <input
+                            id="settings-translation-model"
+                            type="text"
+                            className={fieldClassName}
+                            value={translationModel}
+                            onChange={(event) => setTranslationModel(event.target.value)}
+                            placeholder="gpt-4o-mini"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <label className="space-y-1.5" htmlFor="settings-translation-endpoint">
+                          <span className="text-sm font-medium">Translation Endpoint</span>
+                          <input
+                            id="settings-translation-endpoint"
+                            type="text"
+                            className={fieldClassName}
+                            value={translationEndpoint}
+                            onChange={(event) => setTranslationEndpoint(event.target.value)}
+                            placeholder="https://api.openai.com/v1"
+                          />
+                        </label>
+                        <label className="space-y-1.5" htmlFor="settings-translation-api-key">
+                          <span className="text-sm font-medium">Translation API Key</span>
+                          <input
+                            id="settings-translation-api-key"
+                            type="password"
+                            className={fieldClassName}
+                            value={translationApiKeyInput}
+                            onChange={(event) => setTranslationApiKeyInput(event.target.value)}
+                            placeholder={
+                              translationApiKeyConfigured
+                                ? 'Stored key is configured (enter to replace)'
+                                : 'sk-...'
+                            }
+                          />
+                        </label>
+                      </div>
+
+                      <div className="flex items-center justify-between rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                        <p className="text-xs text-muted-foreground">
+                          API Key status:{' '}
+                          <span className="font-medium text-foreground">
+                            {translationApiKeyConfigured ? 'Configured' : 'Not configured'}
+                          </span>
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-3 text-xs"
+                          onClick={() => {
+                            void clearTranslationApiKey()
+                          }}
+                          disabled={!translationApiKeyConfigured || updatingApiKey || saving}
+                        >
+                          Remove Stored Key
+                        </Button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -495,7 +660,7 @@ export function DashboardSettingsModal({
                     <span className="text-sm font-medium">Theme</span>
                     <select
                       id="settings-theme"
-                      className={`${fieldClassName} w-[240px]`}
+                      className={fieldClassName}
                       value={theme}
                       onChange={(event) => setTheme(event.target.value as ThemeOption)}
                     >

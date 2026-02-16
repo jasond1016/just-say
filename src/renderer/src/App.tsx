@@ -26,6 +26,10 @@ interface AppConfig {
   }
   recognition?: {
     backend?: string
+    translation?: {
+      enabledForMeeting?: boolean
+      targetLanguage?: string
+    }
   }
 }
 
@@ -65,6 +69,39 @@ function splitStablePreview(prev: string, next: string): { stable: string; previ
 
 function isMeetingActiveStatus(status: MeetingSessionState['status']): boolean {
   return status === 'starting' || status === 'transcribing' || status === 'stopping'
+}
+
+function mergeSpeakerSegments(
+  prevSegments: SpeakerSegment[],
+  incoming: SpeakerSegment[]
+): SpeakerSegment[] {
+  if (incoming.length === 0) {
+    return prevSegments
+  }
+
+  const nextSegments = [...prevSegments]
+  for (let i = 0; i < incoming.length; i += 1) {
+    const incomingSegment = incoming[i]
+    if (!incomingSegment.text.trim()) {
+      continue
+    }
+
+    if (i < nextSegments.length) {
+      const existing = nextSegments[i]
+      nextSegments[i] = {
+        ...existing,
+        ...incomingSegment,
+        timestamp: existing.timestamp ?? Date.now()
+      }
+    } else {
+      nextSegments.push({
+        ...incomingSegment,
+        timestamp: Date.now()
+      })
+    }
+  }
+
+  return nextSegments
 }
 
 function App(): React.JSX.Element {
@@ -110,26 +147,33 @@ function App(): React.JSX.Element {
 
   const handleMeetingTranscript = useCallback((segment: MeetingTranscriptEvent) => {
     setMeetingState((prev) => {
+      const speakerSegments = segment.speakerSegments || []
+
       if (segment.isFinal) {
-        const nextSegments = [...prev.segments]
+        const nextSegments = mergeSpeakerSegments(prev.segments, speakerSegments)
+
         if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
-          nextSegments.push({ ...segment.currentSpeakerSegment, timestamp: Date.now() })
+          const lastSegment = nextSegments[nextSegments.length - 1]
+          const isSameAsLast =
+            !!lastSegment &&
+            lastSegment.speaker === segment.currentSpeakerSegment.speaker &&
+            lastSegment.text === segment.currentSpeakerSegment.text
+
+          if (isSameAsLast) {
+            nextSegments[nextSegments.length - 1] = {
+              ...lastSegment,
+              ...segment.currentSpeakerSegment,
+              timestamp: lastSegment.timestamp ?? Date.now()
+            }
+          } else {
+            nextSegments.push({ ...segment.currentSpeakerSegment, timestamp: Date.now() })
+          }
         }
         lastCurrentTextRef.current = ''
         return { ...prev, segments: nextSegments, currentSegment: null }
       }
 
-      let nextSegments = prev.segments
-      const speakerSegments = segment.speakerSegments || []
-      if (speakerSegments.length > 0) {
-        const appendedSegments = speakerSegments
-          .slice(prev.segments.length)
-          .filter((item) => item.text.trim())
-          .map((item) => ({ ...item, timestamp: Date.now() }))
-        if (appendedSegments.length > 0) {
-          nextSegments = [...prev.segments, ...appendedSegments]
-        }
-      }
+      const nextSegments = mergeSpeakerSegments(prev.segments, speakerSegments)
 
       let nextCurrentSegment: SpeakerSegment | null = null
       if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
@@ -215,9 +259,13 @@ function App(): React.JSX.Element {
     }))
 
     try {
+      const runtimeConfig = (await window.api.getConfig()) as AppConfig
+      const translationEnabled = runtimeConfig.recognition?.translation?.enabledForMeeting === true
+      const targetLanguage = runtimeConfig.recognition?.translation?.targetLanguage
       await window.api.startMeetingTranscription({
         includeMicrophone: false,
-        translationEnabled: false
+        translationEnabled,
+        targetLanguage: translationEnabled ? targetLanguage : undefined
       })
       await startSystemAudioCapture(null)
       lastCurrentTextRef.current = ''

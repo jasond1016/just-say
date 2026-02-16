@@ -13,11 +13,19 @@ interface MeetingTranscriptSegment {
     speaker: number
     text: string
     translatedText?: string
+    sentencePairs?: Array<{
+      original: string
+      translated?: string
+    }>
   }>
   currentSpeakerSegment?: {
     speaker: number
     text: string
     translatedText?: string
+    sentencePairs?: Array<{
+      original: string
+      translated?: string
+    }>
   }
 }
 
