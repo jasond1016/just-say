@@ -13,7 +13,7 @@ export function DashboardHeader({ onOpenSettings }: DashboardHeaderProps): JSX.E
         <h1 className="text-[18px] leading-none font-semibold">Home</h1>
       </div>
 
-      <p className="text-muted-foreground text-[13px]">Good afternoon, Jason</p>
+      <p className="text-muted-foreground text-[13px]">Ready when you are</p>
 
       <button
         type="button"

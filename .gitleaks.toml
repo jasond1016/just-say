@@ -1,0 +1,9 @@
+title = "JustSay Gitleaks Config"
+
+[[allowlists]]
+description = "Test-only mock key names in secure store unit tests"
+paths = ["src/main/secureStore.test.ts"]
+regexes = [
+  "soniox_api_key",
+  "groq_api_key"
+]

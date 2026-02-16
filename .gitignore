@@ -3,6 +3,7 @@ dist
 out
 .DS_Store
 .eslintcache
+*.tsbuildinfo
 *.log*
 
 # Python
@@ -19,3 +20,10 @@ models/
 # IDE
 .idea/
 
+# Local assistant/workflow files
+.agent/
+.claude/
+@/
+
+# Security scan artifacts
+gitleaks-report.json

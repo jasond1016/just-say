@@ -1,10 +1,18 @@
 {
   "name": "justsay",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "Push-to-talk and meeting transcription desktop app built with Electron, React, and TypeScript",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "Jason <jasond1016@gmail.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/jasond1016/just-say",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jasond1016/just-say.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jasond1016/just-say/issues"
+  },
   "scripts": {
     "test": "vitest",
     "format": "prettier --write .",
@@ -65,6 +73,12 @@
     "vitest": "^2.0.0"
   },
   "pnpm": {
+    "overrides": {
+      "tar": "^7.5.7",
+      "@isaacs/brace-expansion": "^5.0.1",
+      "lodash": "^4.17.23",
+      "esbuild": "^0.25.0"
+    },
     "onlyBuiltDependencies": [
       "electron",
       "esbuild"

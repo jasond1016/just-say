@@ -1,65 +1,55 @@
-# JustSay - 语音转录工具
+# JustSay
 
-按住快捷键说话，松开即可将语音转为文字并输入到当前窗口。
+JustSay 是一个桌面语音转录工具，提供：
 
-## 功能特性
+1. `PTT (Push-to-talk)`：按住快捷键说话，松开后自动识别并输出文本。
+2. `Meeting Transcription`：持续转录会议音频并保存历史记录。
 
-- 🎤 **按住说话** - 按住右 Alt 键录音，松开自动识别
-- 🤖 **本地识别** - 使用 Faster-Whisper 本地模型，无需联网
-- 🌐 **多后端** - 支持本地模型、局域网服务、云端 API
-- 💻 **跨平台** - 支持 Windows、macOS、Linux
+## Features
 
-## 快速开始
+1. 多识别后端：Local / Groq / Soniox / Network / API
+2. 历史记录：搜索、分页、来源筛选（All/PTT/Meeting）
+3. 主页统计：今日 PTT 次数、字符数、近 7 天趋势
+4. 跨平台：Windows / macOS / Linux（持续完善）
 
-### 1. 安装 Node.js 依赖
+## Quick Start
 
+1. 安装 Node 依赖：
 ```bash
 pnpm install
 ```
-
-### 2. 安装 Python 依赖（本地识别）
-
-推荐使用 Python 3.12（尤其是启用 SenseVoiceSmall 时）：
-
+2. 安装 Python 依赖（本地识别/LAN 模式）：
 ```bash
 cd python
 uv sync --frozen --python 3.12
 ```
-
-### 3. 运行
-
+3. 启动开发环境：
 ```bash
 pnpm dev
 ```
 
-## 使用说明
+## Usage
 
-1. 启动后程序在系统托盘运行
-2. 按住 **Right Alt** 键开始录音
-3. 对麦克风说话
-4. 松开按键，等待识别
-5. 识别结果自动输入到当前焦点窗口
+1. 启动后程序在系统托盘运行。
+2. 默认按住 `Right Ctrl` 开始 PTT 录音（可在设置中修改）。
+3. 松开后自动识别并按配置输出到当前焦点窗口/剪贴板/弹窗。
+4. Meeting 模式可持续转录并自动存入历史。
 
-## 配置
-
-双击系统托盘图标打开设置界面。
-
-## 打包
+## Build
 
 ```bash
-pnpm build:win   # Windows
-pnpm build:mac   # macOS
-pnpm build:linux # Linux
+pnpm build:win
+pnpm build:mac
+pnpm build:linux
 ```
 
-## LAN Whisper Server / 内网服务器模式
+## Security Notes
 
-1. On Linux server:
-   `cd python && uv sync --frozen --python 3.12`
-2. 启动服务:
-   `python whisper_server.py --host 0.0.0.0 --port 8765`
-3. Open firewall for port 8765.
-4. In Settings -> Recognition backend = Local -> 运行模式 = 内网服务器, fill host/port.
+1. API Key 在运行时通过 `electron-store + safeStorage` 存储，不应提交到仓库。
+2. 提交前建议运行：
+```bash
+gitleaks git
+```
 
 ## License
 
