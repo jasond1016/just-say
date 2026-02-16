@@ -1,17 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { Headphones, Languages, Play, Settings2, Square } from 'lucide-react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, Headphones, Languages, Play, Settings2, Square } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 
-import { startSystemAudioCapture, stopSystemAudioCapture } from '../system-audio-capture'
-import { stopMicrophoneCapture } from '../microphone-capture'
-
-interface SentencePair {
+export interface SentencePair {
   original: string
   translated?: string
 }
 
-interface SpeakerSegment {
+export interface SpeakerSegment {
   speaker: number
   text: string
   translatedText?: string
@@ -21,13 +18,26 @@ interface SpeakerSegment {
   timestamp?: number
 }
 
-interface TranscriptSegment {
-  isFinal: boolean
-  speakerSegments?: SpeakerSegment[]
-  currentSpeakerSegment?: SpeakerSegment
+export type TranscriptionStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
+
+export interface MeetingSessionState {
+  status: TranscriptionStatus
+  isPreconnecting: boolean
+  preconnectFailed: boolean
+  seconds: number
+  startedAt: number | null
+  segments: SpeakerSegment[]
+  currentSegment: SpeakerSegment | null
+  lastError: string | null
 }
 
-type TranscriptionStatus = 'idle' | 'transcribing' | 'error'
+interface MeetingTranscriptionProps {
+  state: MeetingSessionState
+  onOpenSettings?: () => void
+  onStart: () => Promise<void>
+  onStopAndReturn: () => Promise<void>
+  onReturnToWorkspace: () => void
+}
 
 const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
 
@@ -37,228 +47,46 @@ function formatClock(totalSeconds: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
-function splitStablePreview(prev: string, next: string): { stable: string; preview: string } {
-  if (!next) {
-    return { stable: '', preview: '' }
-  }
-  if (!prev) {
-    return { stable: '', preview: next }
-  }
-
-  const max = Math.min(prev.length, next.length)
-  let index = 0
-  while (index < max && prev[index] === next[index]) {
-    index += 1
-  }
-
-  return { stable: next.slice(0, index), preview: next.slice(index) }
-}
-
-interface MeetingTranscriptionProps {
-  onOpenSettings?: () => void
-}
-
 export function MeetingTranscription({
-  onOpenSettings
+  state,
+  onOpenSettings,
+  onStart,
+  onStopAndReturn,
+  onReturnToWorkspace
 }: MeetingTranscriptionProps): React.JSX.Element {
-  const [status, setStatus] = useState<TranscriptionStatus>('idle')
-  const [isPreconnecting, setIsPreconnecting] = useState(false)
-  const [preconnectFailed, setPreconnectFailed] = useState(false)
-  const [seconds, setSeconds] = useState(0)
-  const [segments, setSegments] = useState<SpeakerSegment[]>([])
-  const [currentSegment, setCurrentSegment] = useState<SpeakerSegment | null>(null)
-  const [lastError, setLastError] = useState<string | null>(null)
-
   const transcriptRef = useRef<HTMLDivElement>(null)
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const lastCurrentTextRef = useRef('')
-  const stopInProgressRef = useRef(false)
-  const startedAtRef = useRef<number | null>(null)
+  const [actionInProgress, setActionInProgress] = useState(false)
+  const isTranscribing =
+    state.status === 'starting' || state.status === 'transcribing' || state.status === 'stopping'
+  const hasContent = state.segments.length > 0 || state.currentSegment
 
-  const formatSegmentTime = useCallback((timestamp?: number): string => {
-    if (!timestamp || !startedAtRef.current) {
-      return '--:--'
-    }
-    const elapsed = Math.max(0, Math.floor((timestamp - startedAtRef.current) / 1000))
-    return formatClock(elapsed)
-  }, [])
+  const formatSegmentTime = useMemo(
+    () =>
+      (timestamp?: number): string => {
+        if (!timestamp || !state.startedAt) {
+          return '--:--'
+        }
+        const elapsed = Math.max(0, Math.floor((timestamp - state.startedAt) / 1000))
+        return formatClock(elapsed)
+      },
+    [state.startedAt]
+  )
 
-  const startTranscription = async (): Promise<void> => {
-    if (stopInProgressRef.current || isPreconnecting) return
-
+  const runAction = async (action: () => Promise<void>): Promise<void> => {
+    if (actionInProgress) return
+    setActionInProgress(true)
     try {
-      setLastError(null)
-      await window.api.startMeetingTranscription({
-        includeMicrophone: false,
-        translationEnabled: false
-      })
-      await startSystemAudioCapture(null)
-
-      setStatus('transcribing')
-      setSeconds(0)
-      setSegments([])
-      setCurrentSegment(null)
-      lastCurrentTextRef.current = ''
-      startedAtRef.current = Date.now()
-
-      timerRef.current = setInterval(() => {
-        setSeconds((value) => value + 1)
-      }, 1000)
-    } catch (err) {
-      setStatus('error')
-      setLastError(err instanceof Error ? err.message : String(err))
-      stopSystemAudioCapture()
-      stopMicrophoneCapture()
+      await action()
+    } finally {
+      setActionInProgress(false)
     }
   }
-
-  const stopTranscription = useCallback(async (): Promise<void> => {
-    if (stopInProgressRef.current || status !== 'transcribing') return
-    stopInProgressRef.current = true
-
-    try {
-      stopSystemAudioCapture()
-      stopMicrophoneCapture()
-
-      try {
-        await window.api.stopMeetingTranscription()
-      } catch (err) {
-        console.error('Stop error:', err)
-      }
-
-      const allSegments = [...segments, ...(currentSegment ? [currentSegment] : [])]
-      if (allSegments.length > 0) {
-        await window.api.saveTranscript({
-          duration_seconds: seconds,
-          translation_enabled: false,
-          include_microphone: false,
-          source_mode: 'meeting',
-          segments: allSegments.map((segment) => ({
-            speaker: segment.speaker,
-            text: segment.text,
-            translated_text: segment.translatedText,
-            sentence_pairs: segment.sentencePairs?.map((pair) => ({
-              original: pair.original,
-              translated: pair.translated
-            }))
-          }))
-        })
-      }
-
-      setStatus('idle')
-      setCurrentSegment(null)
-      startedAtRef.current = null
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-        timerRef.current = null
-      }
-    } finally {
-      stopInProgressRef.current = false
-    }
-  }, [currentSegment, seconds, segments, status])
-
-  const handleTranscript = useCallback((segment: TranscriptSegment) => {
-    if (segment.isFinal) {
-      setSegments((prev) => {
-        if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
-          return [...prev, { ...segment.currentSpeakerSegment, timestamp: Date.now() }]
-        }
-        return prev
-      })
-      setCurrentSegment(null)
-      lastCurrentTextRef.current = ''
-      return
-    }
-
-    const speakerSegments = segment.speakerSegments || []
-    if (speakerSegments.length > 0) {
-      setSegments((prev) => {
-        const newSegments = speakerSegments
-          .slice(prev.length)
-          .filter((item) => item.text.trim())
-          .map((item) => ({ ...item, timestamp: Date.now() }))
-        return [...prev, ...newSegments]
-      })
-    }
-
-    if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
-      const { stable, preview } = splitStablePreview(
-        lastCurrentTextRef.current,
-        segment.currentSpeakerSegment.text
-      )
-      lastCurrentTextRef.current = segment.currentSpeakerSegment.text
-      setCurrentSegment({
-        ...segment.currentSpeakerSegment,
-        stableText: stable,
-        previewText: preview,
-        timestamp: Date.now()
-      })
-    } else {
-      setCurrentSegment(null)
-      lastCurrentTextRef.current = ''
-    }
-  }, [])
-
-  useEffect(() => {
-    window.api.onMeetingTranscript(handleTranscript)
-    window.api.onMeetingStatus((nextStatus: string) => {
-      if (nextStatus === 'idle' && status === 'transcribing') {
-        void stopTranscription()
-      } else if (nextStatus === 'error') {
-        setStatus('error')
-      }
-    })
-
-    return () => {
-      window.api.removeAllListeners?.('meeting-transcript')
-      window.api.removeAllListeners?.('meeting-status')
-    }
-  }, [handleTranscript, status, stopTranscription])
-
-  useEffect(() => {
-    let active = true
-    setIsPreconnecting(true)
-    setPreconnectFailed(false)
-
-    void window.api
-      .preconnectMeetingTranscription()
-      .then((ok) => {
-        if (!ok) {
-          throw new Error('Preconnect unavailable')
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setPreconnectFailed(true)
-        }
-      })
-      .finally(() => {
-        if (active) {
-          setIsPreconnecting(false)
-        }
-      })
-
-    return () => {
-      active = false
-    }
-  }, [])
 
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
     }
-  }, [segments, currentSegment])
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-    }
-  }, [])
-
-  const isTranscribing = status === 'transcribing'
-  const hasContent = segments.length > 0 || currentSegment
+  }, [state.segments, state.currentSegment])
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
@@ -266,13 +94,13 @@ export function MeetingTranscription({
         <div className="flex items-center gap-3">
           <Headphones className="h-5 w-5 text-[#7C3AED]" />
           <h1 className="text-[18px] leading-none font-semibold">Meeting Transcription</h1>
-          {isTranscribing && (
+          {state.status === 'transcribing' && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF2F2] px-2.5 py-1 text-xs font-medium text-red-500">
               <span className="h-2 w-2 rounded-full bg-red-500" />
-              <span>Recording · {formatClock(seconds)}</span>
+              <span>Recording · {formatClock(state.seconds)}</span>
             </span>
           )}
-          {status === 'error' && (
+          {state.status === 'error' && (
             <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-500">
               Connection error
             </span>
@@ -281,15 +109,26 @@ export function MeetingTranscription({
 
         <div className="flex items-center gap-2">
           {!isTranscribing && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1.5 px-4 text-sm font-medium"
-              onClick={onOpenSettings}
-            >
-              <Settings2 className="h-4 w-4" />
-              <span>Settings</span>
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 px-4 text-sm font-medium"
+                onClick={onReturnToWorkspace}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 px-4 text-sm font-medium"
+                onClick={onOpenSettings}
+              >
+                <Settings2 className="h-4 w-4" />
+                <span>Settings</span>
+              </Button>
+            </>
           )}
 
           {isTranscribing ? (
@@ -297,21 +136,22 @@ export function MeetingTranscription({
               type="button"
               size="sm"
               className="h-8 bg-red-500 px-4 text-sm text-white hover:bg-red-600"
-              onClick={stopTranscription}
+              onClick={() => void runAction(onStopAndReturn)}
+              disabled={actionInProgress || state.status === 'starting'}
             >
               <Square className="h-4 w-4" />
-              <span>Stop</span>
+              <span>Stop & Return</span>
             </Button>
           ) : (
             <Button
               type="button"
               size="sm"
               className="h-8 bg-[#171717] px-4 text-sm text-white hover:bg-[#262626]"
-              onClick={startTranscription}
-              disabled={isPreconnecting}
+              onClick={() => void runAction(onStart)}
+              disabled={actionInProgress}
             >
               <Play className="h-4 w-4" />
-              <span>{isPreconnecting ? 'Preparing...' : 'Start Recording'}</span>
+              <span>Start Recording</span>
             </Button>
           )}
         </div>
@@ -329,27 +169,32 @@ export function MeetingTranscription({
                 Click Start Recording to begin capturing audio from your microphone and system
                 audio.
               </p>
-              {preconnectFailed && (
+              {state.isPreconnecting && !state.preconnectFailed && (
+                <p className="text-muted-foreground text-xs">
+                  Warming up in background. You can start now, but the first response may be slower.
+                </p>
+              )}
+              {state.preconnectFailed && (
                 <p className="text-xs text-amber-600">
                   Warm-up failed, first start may take longer.
                 </p>
               )}
-              {lastError && <p className="text-xs text-red-500">{lastError}</p>}
+              {state.lastError && <p className="text-xs text-red-500">{state.lastError}</p>}
             </div>
             <Button
               type="button"
               size="sm"
               className="h-8 bg-[#171717] px-4 text-sm text-white hover:bg-[#262626]"
-              onClick={startTranscription}
-              disabled={isPreconnecting}
+              onClick={() => void runAction(onStart)}
+              disabled={actionInProgress}
             >
               <Play className="h-4 w-4" />
-              <span>{isPreconnecting ? 'Preparing...' : 'Start Recording'}</span>
+              <span>Start Recording</span>
             </Button>
           </div>
         ) : (
           <div className="space-y-5">
-            {segments.map((segment, index) => {
+            {state.segments.map((segment, index) => {
               const speakerColor = speakerColors[segment.speaker % speakerColors.length]
               const pairs =
                 segment.sentencePairs && segment.sentencePairs.length > 0
@@ -381,22 +226,26 @@ export function MeetingTranscription({
               )
             })}
 
-            {currentSegment && (
+            {state.currentSegment && (
               <div className="flex gap-3 text-sm opacity-80">
                 <span className="w-10 shrink-0 pt-0.5 text-xs text-muted-foreground">
-                  {formatSegmentTime(currentSegment.timestamp)}
+                  {formatSegmentTime(state.currentSegment.timestamp)}
                 </span>
                 <div className="min-w-0 flex-1 space-y-1">
                   <p
                     className="text-[13px] font-semibold"
-                    style={{ color: speakerColors[currentSegment.speaker % speakerColors.length] }}
+                    style={{
+                      color: speakerColors[state.currentSegment.speaker % speakerColors.length]
+                    }}
                   >
-                    Speaker {currentSegment.speaker + 1}
+                    Speaker {state.currentSegment.speaker + 1}
                   </p>
                   <p className="text-sm leading-[1.5]">
-                    <span>{currentSegment.stableText}</span>
-                    {currentSegment.previewText && (
-                      <span className="text-muted-foreground">{currentSegment.previewText}</span>
+                    <span>{state.currentSegment.stableText}</span>
+                    {state.currentSegment.previewText && (
+                      <span className="text-muted-foreground">
+                        {state.currentSegment.previewText}
+                      </span>
                     )}
                   </p>
                 </div>

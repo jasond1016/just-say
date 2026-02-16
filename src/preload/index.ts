@@ -33,6 +33,9 @@ const api = {
   ): void => {
     ipcRenderer.on('recording-state', (_event, state) => callback(state))
   },
+  onIndicatorFeedback: (callback: (payload: { message: string }) => void): void => {
+    ipcRenderer.on('indicator-feedback', (_event, payload) => callback(payload))
+  },
 
   removeAllListeners: (channel: string): void => {
     ipcRenderer.removeAllListeners(channel)
@@ -77,6 +80,10 @@ const api = {
 
   getSystemAudioSources: (): Promise<Array<{ id: string; name: string; isDefault?: boolean }>> =>
     ipcRenderer.invoke('get-system-audio-sources'),
+  getMeetingRuntimeState: (): Promise<{ status: string; startedAt: number | null }> =>
+    ipcRenderer.invoke('get-meeting-runtime-state'),
+  getPttRuntimeState: (): Promise<{ recording: boolean; processing: boolean }> =>
+    ipcRenderer.invoke('get-ptt-runtime-state'),
 
   onMeetingTranscript: (
     callback: (segment: { text: string; timestamp: number; isFinal: boolean }) => void

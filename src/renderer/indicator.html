@@ -240,6 +240,7 @@
       let lastCharCount = 0
       let lastState = 'idle'
       let completeTimer = null
+      let feedbackTimer = null
 
       function formatSeconds(total) {
         const minutes = Math.floor(total / 60)
@@ -264,6 +265,10 @@
         if (completeTimer) {
           clearTimeout(completeTimer)
           completeTimer = null
+        }
+        if (feedbackTimer) {
+          clearTimeout(feedbackTimer)
+          feedbackTimer = null
         }
       }
 
@@ -327,6 +332,19 @@
           lastState = 'idle'
           hideIndicator()
         }
+      })
+
+      window.api.onIndicatorFeedback(({ message }) => {
+        clearTimers()
+        lastState = 'feedback'
+        statusText.textContent = message || 'Action blocked'
+        metaText.textContent = 'Please stop the current session first.'
+        setIndicatorState('processing')
+        feedbackTimer = setTimeout(() => {
+          lastState = 'idle'
+          hideIndicator()
+          feedbackTimer = null
+        }, 1800)
       })
     </script>
   </body>

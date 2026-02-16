@@ -445,27 +445,51 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   }
 
   async healthCheck(): Promise<boolean> {
-    if (this.isRemoteMode()) {
-      if (!this.whisperServer) {
-        return false
-      }
+    if (this.config.useHttpServer && this.whisperServer) {
       return this.whisperServer.isHealthy()
     }
 
-    try {
-      const checkScript =
-        this.getEngine() === 'sensevoice'
-          ? "import funasr; print('OK')"
-          : "import faster_whisper; print('OK')"
-      execSync(`${this.pythonPath} -c "${checkScript}"`, {
-        encoding: 'utf8',
-        timeout: 10000,
-        stdio: 'pipe'
-      })
-      return true
-    } catch {
+    if (this.isRemoteMode()) {
       return false
     }
+
+    return this.checkPythonDependency()
+  }
+
+  private async checkPythonDependency(): Promise<boolean> {
+    const checkScript =
+      this.getEngine() === 'sensevoice'
+        ? "import funasr; print('OK')"
+        : "import faster_whisper; print('OK')"
+
+    return new Promise((resolve) => {
+      const proc = spawn(this.pythonPath, ['-c', checkScript], {
+        stdio: ['ignore', 'ignore', 'ignore']
+      })
+      let settled = false
+
+      const finish = (healthy: boolean): void => {
+        if (settled) {
+          return
+        }
+        settled = true
+        clearTimeout(timeout)
+        resolve(healthy)
+      }
+
+      const timeout = setTimeout(() => {
+        proc.kill('SIGTERM')
+        finish(false)
+      }, 3000)
+
+      proc.once('close', (code) => {
+        finish(code === 0)
+      })
+
+      proc.once('error', () => {
+        finish(false)
+      })
+    })
   }
 
   async detectGpu(): Promise<GpuInfo> {

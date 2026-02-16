@@ -36,6 +36,7 @@ interface JustSayAPI {
   onRecordingState: (
     callback: (state: { recording: boolean; processing?: boolean }) => void
   ) => void
+  onIndicatorFeedback: (callback: (payload: { message: string }) => void) => void
   removeAllListeners: (channel: string) => void
 
   // Output popup window
@@ -60,6 +61,8 @@ interface JustSayAPI {
   }) => Promise<void>
   stopMeetingTranscription: () => Promise<void>
   getSystemAudioSources: () => Promise<Array<{ id: string; name: string; isDefault?: boolean }>>
+  getMeetingRuntimeState: () => Promise<{ status: string; startedAt: number | null }>
+  getPttRuntimeState: () => Promise<{ recording: boolean; processing: boolean }>
   onMeetingTranscript: (callback: (segment: MeetingTranscriptSegment) => void) => void
   onMeetingStatus: (callback: (status: string) => void) => void
 

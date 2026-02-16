@@ -1,8 +1,18 @@
-import { app, shell, BrowserWindow, ipcMain, screen, desktopCapturer, clipboard } from 'electron'
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  screen,
+  desktopCapturer,
+  clipboard,
+  dialog,
+  MessageBoxOptions
+} from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
-import { setupTray, updateTrayStatus } from './tray'
+import { setupTray, updateTrayStatus, setTrayTooltip } from './tray'
 import { HotkeyManager } from './hotkey'
 import { initConfig, getConfig, setConfig, AppConfig } from './config'
 import { initSecureStore, getApiKey, setApiKey, deleteApiKey, hasApiKey } from './secureStore'
@@ -23,7 +33,7 @@ import { RecognitionController, DownloadProgress } from './recognition'
 import { WhisperServerClient } from './recognition/whisperServer'
 import { StreamingSonioxRecognizer } from './recognition/streaming-soniox'
 import { InputSimulator } from './input/simulator'
-import { MeetingTranscriptionManager } from './meeting-transcription'
+import { MeetingTranscriptionManager, TranscriptSegment } from './meeting-transcription'
 import { StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingLocalConfig } from './recognition/streaming-local'
@@ -56,6 +66,56 @@ let inputSimulator: InputSimulator | null = null
 let meetingTranscription: MeetingTranscriptionManager | null = null
 let translationService: TranslationService | null = null
 let pttRecordingStartedAt: number | null = null
+let meetingRecordingStartedAt: number | null = null
+let activeMeetingOptions: {
+  includeMicrophone: boolean
+  translationEnabled?: boolean
+  targetLanguage?: string
+} | null = null
+let meetingPersistedByMain = false
+let transientTrayTimer: NodeJS.Timeout | null = null
+let shutdownInProgress = false
+let allowQuit = false
+
+function getMeetingStatus(): string {
+  return meetingTranscription?.getStatus() || 'idle'
+}
+
+function isMeetingBusy(): boolean {
+  return getMeetingStatus() !== 'idle'
+}
+
+function isPttBusy(): boolean {
+  return !!currentRecordingState.recording || !!currentRecordingState.processing
+}
+
+function getBaseTrayStatus(): 'idle' | 'recording' | 'processing' | 'meeting' {
+  if (currentRecordingState.recording) return 'recording'
+  if (currentRecordingState.processing) return 'processing'
+  if (isMeetingBusy()) return 'meeting'
+  return 'idle'
+}
+
+function refreshTrayStatus(): void {
+  updateTrayStatus(getBaseTrayStatus())
+}
+
+function showTransientRuntimeHint(message: string, durationMs = 2200): void {
+  setTrayTooltip(`JustSay - ${message}`)
+  if (transientTrayTimer) {
+    clearTimeout(transientTrayTimer)
+  }
+  transientTrayTimer = setTimeout(() => {
+    refreshTrayStatus()
+    transientTrayTimer = null
+  }, durationMs)
+
+  if (!indicatorWindow || indicatorWindow.isDestroyed() || !isIndicatorEnabled()) {
+    return
+  }
+  indicatorWindow.show()
+  indicatorWindow.webContents.send('indicator-feedback', { message })
+}
 
 function sendMeetingEvent(
   channel: 'meeting-transcript' | 'meeting-status',
@@ -137,6 +197,8 @@ function isSoundFeedbackEnabled(): boolean {
 function setIndicatorState(state: RecordingUiState): void {
   currentRecordingState = state
 
+  refreshTrayStatus()
+
   if (!indicatorWindow) return
   if (!isIndicatorEnabled()) {
     indicatorWindow.hide()
@@ -167,6 +229,69 @@ function syncIndicatorVisibilityFromConfig(): void {
   }
 }
 
+async function confirmCloseToTray(window: BrowserWindow): Promise<boolean> {
+  if (!isMeetingBusy()) {
+    return true
+  }
+
+  const choice = await dialog.showMessageBox(window, {
+    type: 'question',
+    buttons: ['继续后台运行', '停止并保存后最小化', '取消'],
+    defaultId: 0,
+    cancelId: 2,
+    title: 'Meeting 仍在进行',
+    message: '会议转录仍在运行。关闭窗口到托盘时要如何处理？',
+    detail: '继续后台运行可保持实时转录；停止并保存会结束当前会话。'
+  })
+
+  if (choice.response === 2) {
+    return false
+  }
+
+  if (choice.response === 1) {
+    await stopMeetingAndPersist('close-to-tray')
+  }
+
+  return true
+}
+
+async function requestAppQuit(): Promise<void> {
+  if (shutdownInProgress) {
+    return
+  }
+  shutdownInProgress = true
+
+  try {
+    if (isMeetingBusy()) {
+      const promptOptions: MessageBoxOptions = {
+        type: 'question',
+        buttons: ['停止并保存后退出', '直接退出', '取消'],
+        defaultId: 0,
+        cancelId: 2,
+        title: '退出 JustSay',
+        message: '会议转录仍在进行，退出前如何处理？',
+        detail: '建议先停止并保存，避免丢失当前会话内容。'
+      }
+      const choice = mainWindow
+        ? await dialog.showMessageBox(mainWindow, promptOptions)
+        : await dialog.showMessageBox(promptOptions)
+
+      if (choice.response === 2) {
+        return
+      }
+
+      if (choice.response === 0) {
+        await stopMeetingAndPersist('quit-app')
+      }
+    }
+
+    allowQuit = true
+    app.quit()
+  } finally {
+    shutdownInProgress = false
+  }
+}
+
 function createMainWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 800,
@@ -190,11 +315,19 @@ function createMainWindow(): BrowserWindow {
   })
 
   window.on('close', (e) => {
+    if (allowQuit) {
+      return
+    }
+
     const config = getConfig()
     if (config.general?.minimizeToTray !== false) {
       // Minimize to tray instead of closing
       e.preventDefault()
-      window.hide()
+      void confirmCloseToTray(window).then((shouldHide) => {
+        if (shouldHide) {
+          window.hide()
+        }
+      })
     }
     // If minimizeToTray is false, allow the window to close normally
   })
@@ -397,6 +530,101 @@ function persistPttTranscript(
   }
 }
 
+function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array<{
+  speaker: number
+  text: string
+  translated_text?: string
+  sentence_pairs?: { original: string; translated?: string }[]
+}> {
+  const directSpeakerSegments = history.flatMap((item) => item.speakerSegments || [])
+  if (directSpeakerSegments.length > 0) {
+    return directSpeakerSegments
+      .filter((segment) => segment.text.trim())
+      .map((segment) => ({
+        speaker: segment.speaker,
+        text: segment.text,
+        translated_text: segment.translatedText,
+        sentence_pairs: segment.sentencePairs?.map((pair) => ({
+          original: pair.original,
+          translated: pair.translated
+        }))
+      }))
+  }
+
+  const currentSegments = history
+    .map((item) => item.currentSpeakerSegment)
+    .filter((segment): segment is NonNullable<TranscriptSegment['currentSpeakerSegment']> =>
+      Boolean(segment?.text?.trim())
+    )
+  if (currentSegments.length > 0) {
+    return currentSegments.map((segment) => ({
+      speaker: segment.speaker ?? 0,
+      text: segment.text,
+      translated_text: segment.translatedText,
+      sentence_pairs: segment.sentencePairs?.map((pair) => ({
+        original: pair.original,
+        translated: pair.translated
+      }))
+    }))
+  }
+
+  return history
+    .filter((item) => item.text.trim())
+    .map((item) => ({
+      speaker: item.speaker ?? 0,
+      text: item.text,
+      translated_text: item.translatedText
+    }))
+}
+
+function persistMeetingTranscript(history: TranscriptSegment[], reason: string): void {
+  if (meetingPersistedByMain) {
+    return
+  }
+
+  const segments = buildMeetingSegmentsForPersistence(history)
+  if (segments.length === 0) {
+    return
+  }
+
+  const options = activeMeetingOptions || { includeMicrophone: false, translationEnabled: false }
+  const durationSeconds = meetingRecordingStartedAt
+    ? Math.max(1, Math.round((Date.now() - meetingRecordingStartedAt) / 1000))
+    : 0
+
+  try {
+    const transcript = createTranscript({
+      duration_seconds: durationSeconds,
+      translation_enabled: !!options.translationEnabled,
+      target_language: options.translationEnabled ? options.targetLanguage : undefined,
+      include_microphone: options.includeMicrophone,
+      source_mode: 'meeting',
+      segments
+    })
+    meetingPersistedByMain = true
+    console.log(`[Main] Saved meeting transcript (${reason}): ${transcript.id}`)
+  } catch (err) {
+    console.error(`[Main] Failed to save meeting transcript (${reason}):`, err)
+  }
+}
+
+async function stopMeetingAndPersist(reason: string): Promise<void> {
+  if (!meetingTranscription || getMeetingStatus() === 'idle') {
+    return
+  }
+
+  try {
+    const history = await meetingTranscription.stopTranscription()
+    persistMeetingTranscript(history, reason)
+  } catch (err) {
+    console.error(`[Main] Failed to stop meeting transcription (${reason}):`, err)
+  } finally {
+    activeMeetingOptions = null
+    meetingRecordingStartedAt = null
+    refreshTrayStatus()
+  }
+}
+
 /**
  * Create MeetingTranscriptionManager based on global backend setting.
  * Supports Soniox/Groq and local faster-whisper (including remote LAN server mode).
@@ -479,7 +707,10 @@ async function initializeApp(): Promise<void> {
 
   // Setup tray with callbacks
   setupTray({
-    showMainWindow: () => mainWindow?.show()
+    showMainWindow: () => mainWindow?.show(),
+    quitApp: () => {
+      void requestAppQuit()
+    }
   })
 
   // Initialize modules
@@ -508,9 +739,13 @@ async function initializeApp(): Promise<void> {
 
     // Streaming mode: start WebSocket connection and recording together
     hotkeyManager.on('recordStart', async () => {
+      if (isMeetingBusy()) {
+        showTransientRuntimeHint('Meeting进行中，PTT已禁用')
+        return
+      }
+
       console.log('[Main] Recording started (streaming)')
       pttRecordingStartedAt = Date.now()
-      updateTrayStatus('recording')
       setIndicatorState({ recording: true })
       if (isSoundFeedbackEnabled()) shell.beep()
 
@@ -527,15 +762,17 @@ async function initializeApp(): Promise<void> {
         await webStreamingRecorder?.startRecording()
       } catch (error) {
         console.error('[Main] Streaming start error:', error)
-        updateTrayStatus('idle')
         setIndicatorState({ recording: false })
       }
     })
 
     hotkeyManager.on('recordStop', async () => {
+      if (!currentRecordingState.recording) {
+        return
+      }
+
       const stopTime = Date.now()
       console.log('[Main] Recording stopped (streaming)')
-      updateTrayStatus('processing')
       setIndicatorState({ recording: false, processing: true })
       if (isSoundFeedbackEnabled()) shell.beep()
 
@@ -572,7 +809,6 @@ async function initializeApp(): Promise<void> {
         console.error('[Main] Streaming recognition error:', error)
       } finally {
         pttRecordingStartedAt = null
-        updateTrayStatus('idle')
         setIndicatorState({ recording: false })
       }
     })
@@ -584,17 +820,24 @@ async function initializeApp(): Promise<void> {
     })
 
     hotkeyManager.on('recordStart', async () => {
+      if (isMeetingBusy()) {
+        showTransientRuntimeHint('Meeting进行中，PTT已禁用')
+        return
+      }
+
       console.log('[Main] Recording started')
       pttRecordingStartedAt = Date.now()
-      updateTrayStatus('recording')
       setIndicatorState({ recording: true })
       if (isSoundFeedbackEnabled()) shell.beep()
       await audioRecorder?.startRecording()
     })
 
     hotkeyManager.on('recordStop', async () => {
+      if (!currentRecordingState.recording) {
+        return
+      }
+
       console.log('[Main] Recording stopped')
-      updateTrayStatus('processing')
       setIndicatorState({ recording: false, processing: true })
       if (isSoundFeedbackEnabled()) shell.beep()
 
@@ -625,7 +868,6 @@ async function initializeApp(): Promise<void> {
         console.error('[Main] Recognition error:', error)
       } finally {
         pttRecordingStartedAt = null
-        updateTrayStatus('idle')
         setIndicatorState({ recording: false })
       }
     })
@@ -657,7 +899,13 @@ app.on('window-all-closed', () => {
   // Don't quit - we're a tray app
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (e) => {
+  if (!allowQuit) {
+    e.preventDefault()
+    void requestAppQuit()
+    return
+  }
+
   hotkeyManager?.stop()
   // Allow all windows to close on quit
   mainWindow?.removeAllListeners('close')
@@ -682,9 +930,12 @@ ipcMain.handle('set-config', (_event, config) => {
   }
   if (meetingRecognitionChanged && meetingTranscription?.getStatus() === 'idle') {
     meetingTranscription = null
+    activeMeetingOptions = null
+    meetingRecordingStartedAt = null
   }
   prewarmLocalRecognition('config-update')
   syncIndicatorVisibilityFromConfig()
+  refreshTrayStatus()
 })
 
 ipcMain.handle('show-settings', () => {
@@ -692,7 +943,7 @@ ipcMain.handle('show-settings', () => {
 })
 
 ipcMain.handle('quit-app', () => {
-  app.quit()
+  void requestAppQuit()
 })
 
 ipcMain.handle('close-output-window', () => {
@@ -746,6 +997,20 @@ ipcMain.handle('get-system-audio-sources', async () => {
   return meetingTranscription.getSystemAudioSources()
 })
 
+ipcMain.handle('get-meeting-runtime-state', () => {
+  return {
+    status: getMeetingStatus(),
+    startedAt: meetingRecordingStartedAt
+  }
+})
+
+ipcMain.handle('get-ptt-runtime-state', () => {
+  return {
+    recording: !!currentRecordingState.recording,
+    processing: !!currentRecordingState.processing
+  }
+})
+
 ipcMain.handle('preconnect-meeting-transcription', async () => {
   if (meetingTranscription?.getStatus() !== 'transcribing') {
     const config = getConfig()
@@ -768,6 +1033,11 @@ ipcMain.handle('preconnect-meeting-transcription', async () => {
 })
 
 ipcMain.handle('start-meeting-transcription', async (_event, options) => {
+  if (isPttBusy()) {
+    showTransientRuntimeHint('PTT进行中，请先结束后再启动Meeting')
+    throw new Error('PTT is active. Stop push-to-talk before starting meeting transcription.')
+  }
+
   const config = getConfig()
 
   if (!meetingTranscription) {
@@ -782,6 +1052,7 @@ ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   })
 
   meetingTranscription.on('status', (status) => {
+    refreshTrayStatus()
     sendMeetingEvent('meeting-status', status)
   })
 
@@ -791,12 +1062,18 @@ ipcMain.handle('start-meeting-transcription', async (_event, options) => {
   })
 
   await meetingTranscription.startTranscription(options)
+  meetingRecordingStartedAt = Date.now()
+  activeMeetingOptions = {
+    includeMicrophone: !!options?.includeMicrophone,
+    translationEnabled: !!options?.translationEnabled,
+    targetLanguage: options?.targetLanguage
+  }
+  meetingPersistedByMain = false
+  refreshTrayStatus()
 })
 
 ipcMain.handle('stop-meeting-transcription', async () => {
-  if (meetingTranscription) {
-    await meetingTranscription.stopTranscription()
-  }
+  await stopMeetingAndPersist('renderer-stop')
 })
 
 // Desktop capturer IPC handler (for renderer to get screen sources)

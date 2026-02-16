@@ -54,6 +54,8 @@ export type ExternalTranslator = (text: string, targetLanguage: string) => Promi
  * This avoids the need for ffmpeg.
  */
 export class MeetingTranscriptionManager extends EventEmitter {
+  private static readonly PRECONNECT_WAIT_TIMEOUT_MS = 2500
+
   private recognizer:
     | StreamingSonioxRecognizer
     | StreamingGroqRecognizer
@@ -124,26 +126,84 @@ export class MeetingTranscriptionManager extends EventEmitter {
     console.log(`[MeetingTranscription] Pre-connecting to ${this.backend} recognition service...`)
 
     // Create appropriate recognizer based on backend
+    let recognizer: StreamingSonioxRecognizer | StreamingGroqRecognizer | StreamingLocalRecognizer
     if (this.backend === 'groq') {
-      this.recognizer = new StreamingGroqRecognizer(this.groqConfig)
+      recognizer = new StreamingGroqRecognizer(this.groqConfig)
     } else if (this.backend === 'local') {
-      this.recognizer = new StreamingLocalRecognizer(this.localConfig)
+      recognizer = new StreamingLocalRecognizer(this.localConfig)
     } else {
-      this.recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
+      recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
     }
+    this.recognizer = recognizer
 
     // Set up error handler for pre-connection
-    this.recognizer.on('error', (err: Error) => {
+    recognizer.on('error', (err: Error) => {
       console.error('[MeetingTranscription] Pre-connect error:', err)
     })
 
     try {
-      await this.recognizer.preConnect()
-      console.log('[MeetingTranscription] Pre-connected successfully')
+      await recognizer.preConnect()
+      if (this.recognizer === recognizer) {
+        console.log('[MeetingTranscription] Pre-connected successfully')
+      } else {
+        console.log('[MeetingTranscription] Pre-connect finished for stale recognizer')
+      }
     } catch (err) {
       console.error('[MeetingTranscription] Pre-connect failed:', err)
-      this.recognizer = null
+      if (this.recognizer === recognizer) {
+        this.recognizer = null
+      }
       throw err
+    }
+  }
+
+  private async waitForInFlightPreconnect(): Promise<void> {
+    if (!this.preConnectPromise) {
+      return
+    }
+
+    const preConnectPromise = this.preConnectPromise
+    let timedOut = false
+    let failed = false
+    const waitStartAt = Date.now()
+    let timeout: NodeJS.Timeout | null = null
+
+    try {
+      await Promise.race([
+        preConnectPromise,
+        new Promise<void>((resolve) => {
+          timeout = setTimeout(() => {
+            timedOut = true
+            resolve()
+          }, MeetingTranscriptionManager.PRECONNECT_WAIT_TIMEOUT_MS)
+        })
+      ])
+    } catch (err) {
+      failed = true
+      console.warn(
+        '[MeetingTranscription] In-flight pre-connect failed, fallback to cold start:',
+        err
+      )
+    } finally {
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+    }
+
+    const preconnectWaitMs = Date.now() - waitStartAt
+    console.log(
+      '[MeetingTranscription] Pre-connect wait:',
+      JSON.stringify({
+        preconnectWaitMs,
+        preconnectTimedOut: timedOut,
+        continuedWithColdStart: timedOut || failed
+      })
+    )
+
+    if (timedOut) {
+      void preConnectPromise.catch((err) => {
+        console.warn('[MeetingTranscription] Background pre-connect failed after timeout:', err)
+      })
     }
   }
 
@@ -191,18 +251,8 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.lastTranslatedTextLength = 0
 
     try {
-      // If pre-connect is currently in flight, wait for it first.
-      // This avoids racing into a cold start right before prewarm completes.
-      if (this.preConnectPromise) {
-        try {
-          await this.preConnectPromise
-        } catch (err) {
-          console.warn(
-            '[MeetingTranscription] In-flight pre-connect failed, fallback to cold start:',
-            err
-          )
-        }
-      }
+      // If pre-connect is currently in flight, wait briefly then continue with cold start.
+      await this.waitForInFlightPreconnect()
 
       // Start profiling session
       profiler.startSession(this.backend)

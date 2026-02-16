@@ -1,10 +1,11 @@
-import { Tray, Menu, nativeImage, app } from 'electron'
+import { Tray, Menu, nativeImage } from 'electron'
 import { join } from 'path'
 
 let tray: Tray | null = null
 
 export interface TrayCallbacks {
   showMainWindow: () => void
+  quitApp: () => void
 }
 
 export function setupTray(callbacks: TrayCallbacks): Tray {
@@ -35,7 +36,7 @@ export function setupTray(callbacks: TrayCallbacks): Tray {
     {
       label: '退出',
       click: (): void => {
-        app.quit()
+        callbacks.quitApp()
       }
     }
   ])
@@ -55,14 +56,20 @@ export function setupTray(callbacks: TrayCallbacks): Tray {
   return tray
 }
 
-export function updateTrayStatus(status: 'idle' | 'recording' | 'processing'): void {
+export function updateTrayStatus(status: 'idle' | 'recording' | 'processing' | 'meeting'): void {
   if (!tray) return
 
   const statusText: Record<string, string> = {
     idle: 'JustSay - 待机中',
     recording: 'JustSay - 录音中...',
-    processing: 'JustSay - 识别中...'
+    processing: 'JustSay - 识别中...',
+    meeting: 'JustSay - 会议转录中...'
   }
 
   tray.setToolTip(statusText[status] || statusText.idle)
+}
+
+export function setTrayTooltip(text: string): void {
+  if (!tray) return
+  tray.setToolTip(text)
 }
