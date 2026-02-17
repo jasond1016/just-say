@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
@@ -29,10 +29,20 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   const { m, locale } = useI18n()
   const { currentTranscript, loading, error, getTranscript, deleteTranscript, exportTranscript } =
     useTranscripts()
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     void getTranscript(id)
   }, [getTranscript, id])
+
+  useEffect(() => {
+    return () => {
+      if (copyFeedbackTimerRef.current) {
+        clearTimeout(copyFeedbackTimerRef.current)
+      }
+    }
+  }, [])
 
   const fullText = useMemo(() => {
     if (!currentTranscript) return ''
@@ -56,11 +66,23 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
 
   const handleCopy = useCallback(async () => {
     if (!fullText) return
+
+    if (copyFeedbackTimerRef.current) {
+      clearTimeout(copyFeedbackTimerRef.current)
+    }
+
     try {
       await navigator.clipboard.writeText(fullText)
+      setCopyStatus('success')
     } catch (err) {
       console.error('Failed to copy transcript:', err)
+      setCopyStatus('error')
     }
+
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      setCopyStatus('idle')
+      copyFeedbackTimerRef.current = null
+    }, 1600)
   }, [fullText])
 
   const handleDelete = useCallback(async () => {
@@ -122,11 +144,21 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
           <Button
             variant="outline"
             size="sm"
-            className="h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+            className={`h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${
+              copyStatus === 'success'
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700'
+                : copyStatus === 'error'
+                  ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700'
+                  : ''
+            }`}
             onClick={handleCopy}
           >
             <Copy className="h-4 w-4" />
-            {m.detail.copy}
+            {copyStatus === 'success'
+              ? m.detail.copySuccess
+              : copyStatus === 'error'
+                ? m.detail.copyFailed
+                : m.detail.copy}
           </Button>
           <Button
             variant="outline"

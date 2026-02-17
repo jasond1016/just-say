@@ -82,6 +82,8 @@ export const zhCN: typeof enUS = {
     speakerLabel: (index: number): string => `说话人 ${index}`,
     speakerCount: (count: number): string => `${count} 位说话人`,
     copy: '复制',
+    copySuccess: '已复制',
+    copyFailed: '复制失败',
     export: '导出',
     delete: '删除',
     deleteConfirm: '删除此转录？此操作不可撤销。'

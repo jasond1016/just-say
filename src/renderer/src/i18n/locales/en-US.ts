@@ -82,6 +82,8 @@ export const enUS = {
     speakerLabel: (index: number): string => `Speaker ${index}`,
     speakerCount: (count: number): string => `${count} speakers`,
     copy: 'Copy',
+    copySuccess: 'Copied',
+    copyFailed: 'Copy failed',
     export: 'Export',
     delete: 'Delete',
     deleteConfirm: 'Delete this transcript? This action cannot be undone.'
