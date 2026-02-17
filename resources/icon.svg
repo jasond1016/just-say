@@ -1,18 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="micGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#8b5cf6"/>
-      <stop offset="100%" style="stop-color:#ec4899"/>
-    </linearGradient>
-  </defs>
-  <!-- Background circle -->
-  <circle cx="128" cy="128" r="120" fill="url(#micGradient)"/>
-  <!-- Microphone body -->
-  <rect x="96" y="48" width="64" height="100" rx="32" fill="white"/>
-  <!-- Microphone stand arc -->
-  <path d="M72 148 C72 188, 184 188, 184 148" stroke="white" stroke-width="12" fill="none" stroke-linecap="round"/>
-  <!-- Microphone stand -->
-  <rect x="120" y="180" width="16" height="36" fill="white"/>
-  <!-- Microphone base -->
-  <rect x="96" y="212" width="64" height="12" rx="6" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="123" y="123" width="778" height="778" rx="225" fill="#7C3AED" />
+  <polygon
+    fill="#FFFFFF"
+    points="512,266 725,389 725,635 512,758 299,635 299,389"
+  />
+  <polygon
+    fill="#7C3AED"
+    points="512,338 663,425 663,599 512,686 361,599 361,425"
+  />
 </svg>

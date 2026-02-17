@@ -9,9 +9,15 @@ export interface TrayCallbacks {
 }
 
 export function setupTray(callbacks: TrayCallbacks): Tray {
-  // Load icon from resources
-  const iconPath = join(__dirname, '../../resources/tray/tray-32.png')
-  const icon = nativeImage.createFromPath(iconPath)
+  // Use template icon on macOS for automatic system tinting.
+  const primaryIconName = process.platform === 'darwin' ? 'tray-32Template.png' : 'tray-32.png'
+  const fallbackIconName = process.platform === 'darwin' ? 'tray-32.png' : 'tray-32Template.png'
+  const primaryPath = join(__dirname, `../../resources/tray/${primaryIconName}`)
+  const fallbackPath = join(__dirname, `../../resources/tray/${fallbackIconName}`)
+  let icon = nativeImage.createFromPath(primaryPath)
+  if (icon.isEmpty()) {
+    icon = nativeImage.createFromPath(fallbackPath)
+  }
 
   // Resize for tray (16x16 on Windows, 22x22 on some Linux)
   const size = process.platform === 'linux' ? 22 : 16
