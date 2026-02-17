@@ -43,11 +43,17 @@ interface MeetingTranscriptionProps {
 }
 
 const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
+const BOTTOM_FOLLOW_THRESHOLD_PX = 24
 
 function formatClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = totalSeconds % 60
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+function isNearBottom(element: HTMLDivElement, thresholdPx = BOTTOM_FOLLOW_THRESHOLD_PX): boolean {
+  const distanceToBottom = element.scrollHeight - (element.scrollTop + element.clientHeight)
+  return distanceToBottom <= thresholdPx
 }
 
 export function MeetingTranscription({
@@ -59,6 +65,7 @@ export function MeetingTranscription({
 }: MeetingTranscriptionProps): React.JSX.Element {
   const { m } = useI18n()
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const autoFollowRef = useRef(true)
   const [actionInProgress, setActionInProgress] = useState(false)
   const isTranscribing =
     state.status === 'starting' || state.status === 'transcribing' || state.status === 'stopping'
@@ -86,10 +93,22 @@ export function MeetingTranscription({
     }
   }
 
+  const handleTranscriptScroll = (event: React.UIEvent<HTMLDivElement>): void => {
+    autoFollowRef.current = isNearBottom(event.currentTarget)
+  }
+
   useEffect(() => {
-    if (transcriptRef.current) {
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+    if (!hasContent) {
+      autoFollowRef.current = true
     }
+  }, [hasContent])
+
+  useEffect(() => {
+    const container = transcriptRef.current
+    if (!container || !autoFollowRef.current) {
+      return
+    }
+    container.scrollTop = container.scrollHeight
   }, [state.segments, state.currentSegment])
 
   return (
@@ -163,7 +182,11 @@ export function MeetingTranscription({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 py-5" ref={transcriptRef}>
+      <div
+        className="min-h-0 flex-1 overflow-auto px-6 py-5"
+        ref={transcriptRef}
+        onScroll={handleTranscriptScroll}
+      >
         {!hasContent && !isTranscribing ? (
           <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-6 text-center">
             <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[#F3F0FF]">
