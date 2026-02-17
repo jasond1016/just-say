@@ -194,6 +194,22 @@ function isSoundFeedbackEnabled(): boolean {
   return getConfig().ui?.soundFeedback !== false
 }
 
+function applyLaunchAtLogin(enabled: boolean): void {
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    console.info(`[Main] Launch at login is not supported on ${process.platform}; skipping.`)
+    return
+  }
+
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: enabled
+    })
+    console.log(`[Main] Launch at login ${enabled ? 'enabled' : 'disabled'}`)
+  } catch (error) {
+    console.warn('[Main] Failed to apply launch-at-login setting:', error)
+  }
+}
+
 function setIndicatorState(state: RecordingUiState): void {
   currentRecordingState = state
 
@@ -505,6 +521,7 @@ function persistPttTranscript(
   if (!original) return
 
   const config = getConfig()
+  applyLaunchAtLogin(config.general?.autostart === true)
   const pttTranslationEnabled = config.recognition?.translation?.enabledForPtt === true
   const targetLanguage = config.recognition?.translation?.targetLanguage
   const hasTranslation = pttTranslationEnabled && translated.length > 0 && translated !== original
@@ -922,8 +939,12 @@ ipcMain.handle('set-config', (_event, config) => {
   const nextConfig = getConfig()
   const recognitionChanged = shouldRecreateRecognition(prevConfig, nextConfig)
   const meetingRecognitionChanged = shouldRecreateMeeting(prevConfig, nextConfig)
+  const autostartChanged = prevConfig.general?.autostart !== nextConfig.general?.autostart
   if (prevConfig.hotkey?.triggerKey !== nextConfig.hotkey?.triggerKey) {
     hotkeyManager?.setTriggerKey(nextConfig.hotkey?.triggerKey)
+  }
+  if (autostartChanged) {
+    applyLaunchAtLogin(nextConfig.general?.autostart === true)
   }
   if (!recognitionController || recognitionChanged) {
     recognitionController = new RecognitionController(nextConfig)
