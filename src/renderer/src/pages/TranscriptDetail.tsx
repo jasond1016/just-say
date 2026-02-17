@@ -4,6 +4,7 @@ import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react'
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
 import { toSentencePairsFromStored } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useTranscripts } from '../hooks/useTranscripts'
 import { formatDurationShort, formatRelativeDateTime } from '@/i18n'
 import { useI18n } from '@/i18n/useI18n'
@@ -30,6 +31,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   const { currentTranscript, loading, error, getTranscript, deleteTranscript, exportTranscript } =
     useTranscripts()
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -85,16 +87,19 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
     }, 1600)
   }, [fullText])
 
-  const handleDelete = useCallback(async () => {
+  const handleDelete = useCallback(() => {
+    setDeleteDialogOpen(true)
+  }, [])
+
+  const handleDeleteConfirm = useCallback(async () => {
     if (!currentTranscript) return
-    const confirmed = window.confirm(m.detail.deleteConfirm)
-    if (!confirmed) return
 
     const ok = await deleteTranscript(currentTranscript.id)
+    setDeleteDialogOpen(false)
     if (ok) {
       onBack()
     }
-  }, [currentTranscript, deleteTranscript, m, onBack])
+  }, [currentTranscript, deleteTranscript, onBack])
 
   const handleExport = useCallback(async () => {
     await exportTranscript(id)
@@ -211,6 +216,17 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
           ))}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title={m.detail.deleteDialogTitle}
+        description={m.detail.deleteConfirm}
+        confirmLabel={m.detail.delete}
+        cancelLabel={m.common.cancel}
+        closeAriaLabel={m.common.close}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   )
 }

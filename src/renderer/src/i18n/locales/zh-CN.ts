@@ -2,7 +2,9 @@ import { enUS } from './en-US'
 
 export const zhCN: typeof enUS = {
   common: {
-    appName: 'JustSay'
+    appName: 'JustSay',
+    cancel: '取消',
+    close: '关闭'
   },
   header: {
     homeTitle: '首页',
@@ -86,6 +88,7 @@ export const zhCN: typeof enUS = {
     copyFailed: '复制失败',
     export: '导出',
     delete: '删除',
+    deleteDialogTitle: '删除转录',
     deleteConfirm: '删除此转录？此操作不可撤销。'
   },
   settings: {
@@ -152,6 +155,9 @@ export const zhCN: typeof enUS = {
     recordingIndicatorDescription: '录音时显示浮动指示器',
     soundFeedback: '声音反馈',
     soundFeedbackDescription: '录音开始和结束时播放提示音',
+    deleteModelDialogTitle: '删除模型',
+    deleteModelDialogDescription: (model: string): string =>
+      `删除模型“${model}”？此操作将释放磁盘空间。`,
     version: '版本',
     aboutDescription: '按键说话与会议转录助手。',
     saveChanges: '保存更改',

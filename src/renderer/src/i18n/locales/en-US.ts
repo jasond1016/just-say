@@ -1,6 +1,8 @@
 export const enUS = {
   common: {
-    appName: 'JustSay'
+    appName: 'JustSay',
+    cancel: 'Cancel',
+    close: 'Close'
   },
   header: {
     homeTitle: 'Home',
@@ -86,6 +88,7 @@ export const enUS = {
     copyFailed: 'Copy failed',
     export: 'Export',
     delete: 'Delete',
+    deleteDialogTitle: 'Delete Transcript',
     deleteConfirm: 'Delete this transcript? This action cannot be undone.'
   },
   settings: {
@@ -152,6 +155,9 @@ export const enUS = {
     recordingIndicatorDescription: 'Show floating indicator while recording',
     soundFeedback: 'Sound Feedback',
     soundFeedbackDescription: 'Play sound on recording start and stop',
+    deleteModelDialogTitle: 'Delete Model',
+    deleteModelDialogDescription: (model: string): string =>
+      `Delete model "${model}"? This will free up disk space.`,
     version: 'Version',
     aboutDescription: 'Push-to-talk and meeting transcription assistant.',
     saveChanges: 'Save Changes',

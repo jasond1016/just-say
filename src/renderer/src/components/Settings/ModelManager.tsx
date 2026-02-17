@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useI18n } from '@/i18n/useI18n'
 import { cn } from '@/lib/utils'
 
 type LocalEngine = 'faster-whisper' | 'sensevoice'
@@ -35,9 +37,11 @@ export function ModelManager({
   currentModel,
   onModelChange
 }: ModelManagerProps): React.JSX.Element {
+  const { m } = useI18n()
   const [downloadedModels, setDownloadedModels] = useState<string[]>([])
   const [downloading, setDownloading] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [pendingDeleteModel, setPendingDeleteModel] = useState<string | null>(null)
   const [progress, setProgress] = useState<DownloadProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -77,8 +81,6 @@ export function ModelManager({
   }
 
   const handleDelete = async (model: string): Promise<void> => {
-    if (!window.confirm(`Delete model "${model}"? This will free up disk space.`)) return
-
     setDeleting(model)
     setError(null)
     try {
@@ -148,7 +150,7 @@ export function ModelManager({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleDelete(model)}
+                        onClick={() => setPendingDeleteModel(model)}
                         disabled={!!downloading || !!deleting || isCurrent}
                         className="border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
                         title={isCurrent ? 'Cannot delete active model' : 'Delete model'}
@@ -184,6 +186,23 @@ export function ModelManager({
           })
         })()}
       </div>
+
+      <ConfirmDialog
+        open={!!pendingDeleteModel}
+        title={m.settings.deleteModelDialogTitle}
+        description={
+          pendingDeleteModel ? m.settings.deleteModelDialogDescription(pendingDeleteModel) : ''
+        }
+        confirmLabel={m.detail.delete}
+        cancelLabel={m.common.cancel}
+        closeAriaLabel={m.common.close}
+        onClose={() => setPendingDeleteModel(null)}
+        onConfirm={async () => {
+          if (!pendingDeleteModel) return
+          await handleDelete(pendingDeleteModel)
+          setPendingDeleteModel(null)
+        }}
+      />
     </div>
   )
 }
