@@ -3,6 +3,8 @@ import { Mic } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { formatNumber } from '@/i18n'
+import { useI18n } from '@/i18n/useI18n'
 
 interface PttCardProps {
   hotkey: string
@@ -20,19 +22,8 @@ interface PttCardProps {
   updatedAt?: number
 }
 
-function formatCompactNumber(value: number): string {
-  return new Intl.NumberFormat('en-US').format(value)
-}
-
-function formatDelta(value: number, suffix = ''): string {
-  const withSuffix = suffix ? ` ${suffix}` : ''
-  if (value > 0) return `+${formatCompactNumber(value)}${withSuffix} vs yesterday`
-  if (value < 0) return `${formatCompactNumber(value)}${withSuffix} vs yesterday`
-  return `No change${withSuffix} vs yesterday`
-}
-
-function getDayLabel(startMs: number): string {
-  return new Date(startMs).toLocaleDateString('en-US', { weekday: 'short' })
+function getDayLabel(startMs: number, locale: string): string {
+  return new Date(startMs).toLocaleDateString(locale, { weekday: 'short' })
 }
 
 export function PttCard({
@@ -46,9 +37,17 @@ export function PttCard({
   error = null,
   updatedAt = 0
 }: PttCardProps): JSX.Element {
+  const { m, locale } = useI18n()
   const [flash, setFlash] = useState(false)
-  const countLabel = loading ? '--' : formatCompactNumber(todayCount)
-  const charsLabel = loading ? '--' : formatCompactNumber(todayChars)
+  const countLabel = loading ? '--' : formatNumber(todayCount, locale)
+  const charsLabel = loading ? '--' : formatNumber(todayChars, locale)
+  const formatDelta = (value: number, suffix = ''): string => {
+    const withSuffix = suffix ? ` ${suffix}` : ''
+    const formatted = formatNumber(value, locale)
+    if (value > 0) return m.pttCard.deltaPositive(formatted, withSuffix)
+    if (value < 0) return m.pttCard.deltaNegative(formatted, withSuffix)
+    return m.pttCard.deltaNeutral(withSuffix)
+  }
   const bars = useMemo(() => {
     if (dailyStats.length === 0) {
       return Array.from({ length: 7 }, (_, index) => ({
@@ -65,12 +64,12 @@ export function PttCard({
       const heightPercent = Math.max(8, Math.round(ratio * 100))
       return {
         key: String(day.startMs),
-        label: getDayLabel(day.startMs),
+        label: getDayLabel(day.startMs, locale),
         pttCount: day.pttCount,
         heightPercent
       }
     })
-  }, [dailyStats])
+  }, [dailyStats, locale])
 
   useEffect(() => {
     if (!updatedAt) return
@@ -89,13 +88,12 @@ export function PttCard({
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex items-center gap-2">
             <Mic className="h-[18px] w-[18px] text-[#7C3AED]" />
-            <span className="text-base font-semibold text-[#1A1A1A]">Push to Talk</span>
-            <Badge className="bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-500">Ready</Badge>
+            <span className="text-base font-semibold text-[#1A1A1A]">{m.pttCard.title}</span>
+            <Badge className="bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-500">
+              {m.pttCard.ready}
+            </Badge>
           </div>
-          <p className="text-[13px] leading-5 text-[#6B7280]">
-            Hold the hotkey to record and transcribe your voice. Text is automatically inserted at
-            your cursor position.
-          </p>
+          <p className="text-[13px] leading-5 text-[#6B7280]">{m.pttCard.description}</p>
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-1.5">
               <span
@@ -105,7 +103,7 @@ export function PttCard({
               >
                 {countLabel}
               </span>
-              <span className="text-xs text-[#9CA3AF]">today</span>
+              <span className="text-xs text-[#9CA3AF]">{m.pttCard.today}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <span
@@ -115,13 +113,13 @@ export function PttCard({
               >
                 {charsLabel}
               </span>
-              <span className="text-xs text-[#9CA3AF]">chars</span>
+              <span className="text-xs text-[#9CA3AF]">{m.pttCard.chars}</span>
             </div>
           </div>
           {!loading && (
             <div className="flex items-center gap-4 text-[11px] text-[#9CA3AF]">
               <span>{formatDelta(todayCountDelta)}</span>
-              <span>{formatDelta(todayCharsDelta, 'chars')}</span>
+              <span>{formatDelta(todayCharsDelta, m.pttCard.chars)}</span>
             </div>
           )}
           <div className="mt-1 flex items-end gap-1.5">
@@ -131,7 +129,7 @@ export function PttCard({
                 <div key={day.key} className="flex flex-col items-center gap-1">
                   <div className="flex h-10 items-end">
                     <div
-                      title={`${day.label}: ${day.pttCount}`}
+                      title={m.pttCard.barTooltip(day.label, day.pttCount)}
                       className={`w-2.5 rounded-sm transition-all duration-500 ${
                         isToday ? 'bg-[#7C3AED]' : 'bg-[#C4B5FD]'
                       }`}
@@ -143,14 +141,14 @@ export function PttCard({
               )
             })}
           </div>
-          {error && <p className="text-xs text-red-500">Stats unavailable. Try again later.</p>}
+          {error && <p className="text-xs text-red-500">{m.pttCard.statsUnavailable}</p>}
         </div>
 
         <div className="flex shrink-0 flex-col items-center gap-2">
           <div className="flex items-center justify-center rounded-lg border border-[#E5E7EB] bg-white px-5 py-3">
             <span className="text-base font-semibold text-[#374151]">{hotkey}</span>
           </div>
-          <span className="text-[11px] text-[#9CA3AF]">Hold to record</span>
+          <span className="text-[11px] text-[#9CA3AF]">{m.pttCard.holdToRecord}</span>
         </div>
       </CardContent>
     </Card>

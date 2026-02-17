@@ -2,6 +2,7 @@ import type { ComponentType, JSX } from 'react'
 import { Clock3, Headphones, Hexagon, Home } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { useI18n } from '@/i18n/useI18n'
 
 export type DashboardView = 'ptt' | 'meeting' | 'history'
 
@@ -11,21 +12,22 @@ interface DashboardSidebarProps {
   meetingSessionLocked?: boolean
 }
 
-const navItems: Array<{
-  id: DashboardView
-  label: string
-  icon: ComponentType<{ className?: string }>
-}> = [
-  { id: 'ptt', label: 'Home', icon: Home },
-  { id: 'meeting', label: 'Meeting', icon: Headphones },
-  { id: 'history', label: 'History', icon: Clock3 }
-]
-
 export function DashboardSidebar({
   activeView,
   onNavigate,
   meetingSessionLocked = false
 }: DashboardSidebarProps): JSX.Element {
+  const { m } = useI18n()
+  const navItems: Array<{
+    id: DashboardView
+    label: string
+    icon: ComponentType<{ className?: string }>
+  }> = [
+    { id: 'ptt', label: m.sidebar.navHome, icon: Home },
+    { id: 'meeting', label: m.sidebar.navMeeting, icon: Headphones },
+    { id: 'history', label: m.sidebar.navHistory, icon: Clock3 }
+  ]
+
   if (meetingSessionLocked) {
     return (
       <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-2">
@@ -33,20 +35,22 @@ export function DashboardSidebar({
           <div className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#7C3AED] text-white">
             <Hexagon className="h-4 w-4" />
           </div>
-          <span className="text-sidebar-foreground text-sm font-semibold">JustSay</span>
+          <span className="text-sidebar-foreground text-sm font-semibold">{m.common.appName}</span>
         </div>
 
         <div className="mt-4 px-2">
-          <span className="text-muted-foreground text-xs font-medium tracking-wide">SESSION</span>
+          <span className="text-muted-foreground text-xs font-medium tracking-wide">
+            {m.sidebar.sectionSession}
+          </span>
         </div>
 
         <nav className="mt-2 flex flex-col gap-0.5">
           <div className="text-sidebar-foreground bg-sidebar-accent flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium">
             <Headphones className="h-4 w-4" />
-            <span>Meeting In Progress</span>
+            <span>{m.sidebar.meetingInProgress}</span>
           </div>
           <p className="text-muted-foreground px-2 pt-2 text-xs leading-5">
-            Home and History are locked while Meeting transcription is active.
+            {m.sidebar.meetingLockedHint}
           </p>
         </nav>
       </aside>
@@ -59,11 +63,13 @@ export function DashboardSidebar({
         <div className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#7C3AED] text-white">
           <Hexagon className="h-4 w-4" />
         </div>
-        <span className="text-sidebar-foreground text-sm font-semibold">JustSay</span>
+        <span className="text-sidebar-foreground text-sm font-semibold">{m.common.appName}</span>
       </div>
 
       <div className="mt-4 px-2">
-        <span className="text-muted-foreground text-xs font-medium tracking-wide">NAVIGATION</span>
+        <span className="text-muted-foreground text-xs font-medium tracking-wide">
+          {m.sidebar.sectionNavigation}
+        </span>
       </div>
 
       <nav className="mt-2 flex flex-col gap-0.5">

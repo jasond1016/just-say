@@ -12,12 +12,17 @@ import { DashboardSettingsModal } from './components/dashboard/DashboardSettings
 import { DEFAULT_TRIGGER_KEY, getTriggerKeyLabel } from '../../shared/hotkey'
 import { startSystemAudioCapture, stopSystemAudioCapture } from './system-audio-capture'
 import { stopMicrophoneCapture } from './microphone-capture'
+import { I18nProvider } from './i18n/I18nProvider'
+import { AppLocale, resolveLocale } from './i18n'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type AppView = 'workspace' | 'meeting-session'
 type WorkspaceView = 'ptt' | 'history' | 'detail'
 
 interface AppConfig {
+  general?: {
+    language?: AppLocale
+  }
   ui?: {
     theme?: ThemeOption
   }
@@ -109,6 +114,7 @@ function App(): React.JSX.Element {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('ptt')
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null)
   const [theme, setTheme] = useState<ThemeOption>('system')
+  const [appLocale, setAppLocale] = useState<AppLocale>('en-US')
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [dashboardSettingsOpen, setDashboardSettingsOpen] = useState(false)
   const [meetingState, setMeetingState] = useState<MeetingSessionState>(INITIAL_MEETING_STATE)
@@ -123,6 +129,7 @@ function App(): React.JSX.Element {
     try {
       const cfg = (await window.api.getConfig()) as AppConfig
       setConfig(cfg)
+      setAppLocale(resolveLocale(cfg.general?.language))
       if (cfg.ui?.theme) {
         setTheme(cfg.ui.theme)
       }
@@ -442,58 +449,60 @@ function App(): React.JSX.Element {
         : 'ptt'
 
   return (
-    <>
-      <div className="h-full w-full bg-background">
-        <div className="mx-auto h-full w-full max-w-[1200px] overflow-hidden bg-background">
-          <div className="flex h-full w-full">
-            <DashboardSidebar
-              activeView={sidebarActiveView}
-              onNavigate={handleDashboardNavigate}
-              meetingSessionLocked={appView === 'meeting-session'}
-            />
-
-            {appView === 'workspace' && workspaceView === 'ptt' && (
-              <DashboardHome
-                hotkey={dashboardHotkey}
+    <I18nProvider locale={appLocale}>
+      <>
+        <div className="h-full w-full bg-background">
+          <div className="mx-auto h-full w-full max-w-[1200px] overflow-hidden bg-background">
+            <div className="flex h-full w-full">
+              <DashboardSidebar
+                activeView={sidebarActiveView}
                 onNavigate={handleDashboardNavigate}
-                onOpenSettings={() => setDashboardSettingsOpen(true)}
-                onOpenTranscript={handleNavigateToDetail}
+                meetingSessionLocked={appView === 'meeting-session'}
               />
-            )}
 
-            {appView === 'workspace' && workspaceView === 'history' && (
-              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
-            )}
+              {appView === 'workspace' && workspaceView === 'ptt' && (
+                <DashboardHome
+                  hotkey={dashboardHotkey}
+                  onNavigate={handleDashboardNavigate}
+                  onOpenSettings={() => setDashboardSettingsOpen(true)}
+                  onOpenTranscript={handleNavigateToDetail}
+                />
+              )}
 
-            {appView === 'workspace' && workspaceView === 'detail' && selectedTranscriptId && (
-              <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
-            )}
+              {appView === 'workspace' && workspaceView === 'history' && (
+                <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+              )}
 
-            {appView === 'workspace' && workspaceView === 'detail' && !selectedTranscriptId && (
-              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
-            )}
+              {appView === 'workspace' && workspaceView === 'detail' && selectedTranscriptId && (
+                <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
+              )}
 
-            {appView === 'meeting-session' && (
-              <MeetingTranscription
-                state={meetingState}
-                onOpenSettings={() => setDashboardSettingsOpen(true)}
-                onStart={startMeetingSession}
-                onStopAndReturn={stopAndReturnToWorkspace}
-                onReturnToWorkspace={returnToWorkspace}
-              />
-            )}
+              {appView === 'workspace' && workspaceView === 'detail' && !selectedTranscriptId && (
+                <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+              )}
+
+              {appView === 'meeting-session' && (
+                <MeetingTranscription
+                  state={meetingState}
+                  onOpenSettings={() => setDashboardSettingsOpen(true)}
+                  onStart={startMeetingSession}
+                  onStopAndReturn={stopAndReturnToWorkspace}
+                  onReturnToWorkspace={returnToWorkspace}
+                />
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {dashboardSettingsOpen && (
-        <DashboardSettingsModal
-          onClose={() => setDashboardSettingsOpen(false)}
-          onSaved={loadConfig}
-          onThemeChange={handleThemeChange}
-        />
-      )}
-    </>
+        {dashboardSettingsOpen && (
+          <DashboardSettingsModal
+            onClose={() => setDashboardSettingsOpen(false)}
+            onSaved={loadConfig}
+            onThemeChange={handleThemeChange}
+          />
+        )}
+      </>
+    </I18nProvider>
   )
 }
 

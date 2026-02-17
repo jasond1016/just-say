@@ -5,42 +5,17 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useTranscripts, type TranscriptFilterMode } from '../hooks/useTranscripts'
 import { getTranscriptSourceMode } from '@/lib/transcript-source'
+import { formatDurationShort, formatRelativeDateTime } from '@/i18n'
+import { useI18n } from '@/i18n/useI18n'
 
 interface TranscriptHistoryProps {
   onNavigateToDetail: (id: string) => void
 }
 
-function formatDateLabel(isoString: string): string {
-  const date = new Date(isoString)
-  const now = new Date()
-  const isToday = date.toDateString() === now.toDateString()
-  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-
-  if (isToday) {
-    return `Today, ${time}`
-  }
-
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) {
-    return `Yesterday, ${time}`
-  }
-
-  return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time}`
-}
-
-function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-  if (minutes === 0) {
-    return `${remainingSeconds}s`
-  }
-  return `${minutes} min`
-}
-
 export function TranscriptHistory({
   onNavigateToDetail
 }: TranscriptHistoryProps): React.JSX.Element {
+  const { m, locale } = useI18n()
   const { transcripts, loading, error, pagination, listTranscripts, searchTranscripts } =
     useTranscripts()
   const [query, setQuery] = useState('')
@@ -106,9 +81,9 @@ export function TranscriptHistory({
   }, [query])
 
   const filterOptions: Array<{ id: TranscriptFilterMode; label: string }> = [
-    { id: 'all', label: 'All' },
-    { id: 'ptt', label: 'PTT' },
-    { id: 'meeting', label: 'Meeting' }
+    { id: 'all', label: m.history.filterAll },
+    { id: 'ptt', label: m.history.filterPtt },
+    { id: 'meeting', label: m.history.filterMeeting }
   ]
 
   return (
@@ -116,7 +91,7 @@ export function TranscriptHistory({
       <header className="flex h-[53px] items-center justify-between border-b px-6">
         <div className="flex items-center gap-3">
           <Clock3 className="h-5 w-5 text-[#7C3AED]" />
-          <h1 className="text-[18px] leading-none font-semibold">Transcript History</h1>
+          <h1 className="text-[18px] leading-none font-semibold">{m.history.title}</h1>
           <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
             {pagination.total}
           </span>
@@ -147,8 +122,8 @@ export function TranscriptHistory({
             ref={searchInputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search transcripts..."
-            aria-label="Search transcripts"
+            placeholder={m.history.searchPlaceholder}
+            aria-label={m.history.searchAria}
             className="h-8 w-full rounded-md border border-input bg-background pr-3 pl-9 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/35"
           />
         </div>
@@ -157,21 +132,23 @@ export function TranscriptHistory({
       <div className="min-h-0 flex-1 overflow-auto">
         {loading && (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Loading transcripts...
+            {m.history.loading}
           </div>
         )}
 
         {!loading && error && (
-          <div className="px-6 py-4 text-sm text-red-600">Failed to load transcripts: {error}</div>
+          <div className="px-6 py-4 text-sm text-red-600">
+            {m.history.loadFailedPrefix}: {error}
+          </div>
         )}
 
         {!loading && !error && items.length === 0 && (
           <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
             {isSearching
-              ? 'No matching transcripts.'
+              ? m.history.emptySearch
               : isFiltering
-                ? 'No transcripts in this filter.'
-                : 'No transcripts yet.'}
+                ? m.history.emptyFilter
+                : m.history.emptyDefault}
           </div>
         )}
 
@@ -179,7 +156,7 @@ export function TranscriptHistory({
           <div className="py-2">
             {items.map((transcript, index) => {
               const mode = getTranscriptSourceMode(transcript)
-              const kind = mode === 'meeting' ? 'Meeting' : 'PTT'
+              const kind = mode === 'meeting' ? m.history.meetingBadge : m.history.pttBadge
               return (
                 <button
                   key={transcript.id}
@@ -192,19 +169,19 @@ export function TranscriptHistory({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{transcript.title}</p>
                     <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>{formatDateLabel(transcript.created_at)}</span>
-                      <span>· {formatDuration(transcript.duration_seconds)}</span>
+                      <span>{formatRelativeDateTime(transcript.created_at, locale)}</span>
+                      <span>· {formatDurationShort(transcript.duration_seconds, locale)}</span>
                     </div>
                   </div>
 
                   <div className="ml-4 flex items-center gap-3">
-                    {kind === 'Meeting' ? (
+                    {mode === 'meeting' ? (
                       <Badge variant="success" className="px-2 py-[3px] text-[11px]">
-                        Meeting
+                        {kind}
                       </Badge>
                     ) : (
                       <Badge variant="info" className="px-2 py-[3px] text-[11px]">
-                        PTT
+                        {kind}
                       </Badge>
                     )}
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -224,10 +201,10 @@ export function TranscriptHistory({
             disabled={pagination.page <= 1}
             onClick={() => handlePageChange(pagination.page - 1)}
           >
-            Previous
+            {m.history.previous}
           </Button>
           <span className="text-xs text-muted-foreground">
-            Page {pagination.page} / {pagination.totalPages}
+            {m.history.pageLabel(pagination.page, pagination.totalPages)}
           </span>
           <Button
             variant="outline"
@@ -235,7 +212,7 @@ export function TranscriptHistory({
             disabled={pagination.page >= pagination.totalPages}
             onClick={() => handlePageChange(pagination.page + 1)}
           >
-            Next
+            {m.history.next}
           </Button>
         </footer>
       )}

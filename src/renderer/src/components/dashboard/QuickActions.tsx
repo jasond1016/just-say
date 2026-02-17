@@ -1,5 +1,6 @@
 import type { ComponentType, JSX } from 'react'
 import { ArrowRight, Headphones, Settings } from 'lucide-react'
+import { useI18n } from '@/i18n/useI18n'
 
 interface QuickActionsProps {
   onMeetingClick: () => void
@@ -29,10 +30,15 @@ function ActionRow({
 }
 
 export function QuickActions({ onMeetingClick, onSettingsClick }: QuickActionsProps): JSX.Element {
+  const { m } = useI18n()
   return (
     <section className="flex w-full flex-col gap-3">
-      <ActionRow icon={Headphones} label="Start Meeting Transcription" onClick={onMeetingClick} />
-      <ActionRow icon={Settings} label="Change Hotkey" onClick={onSettingsClick} />
+      <ActionRow
+        icon={Headphones}
+        label={m.quickActions.startMeetingTranscription}
+        onClick={onMeetingClick}
+      />
+      <ActionRow icon={Settings} label={m.quickActions.changeHotkey} onClick={onSettingsClick} />
     </section>
   )
 }

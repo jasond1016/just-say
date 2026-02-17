@@ -5,6 +5,8 @@ import { BilingualSegment } from '@/components/transcript/BilingualSegment'
 import { toSentencePairsFromStored } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
 import { useTranscripts } from '../hooks/useTranscripts'
+import { formatDurationShort, formatRelativeDateTime } from '@/i18n'
+import { useI18n } from '@/i18n/useI18n'
 
 interface TranscriptDetailProps {
   id: string
@@ -12,34 +14,6 @@ interface TranscriptDetailProps {
 }
 
 const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
-
-function formatDateLabel(isoString: string): string {
-  const date = new Date(isoString)
-  const now = new Date()
-  const isToday = date.toDateString() === now.toDateString()
-  const time = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-
-  if (isToday) {
-    return `Today, ${time}`
-  }
-
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  if (date.toDateString() === yesterday.toDateString()) {
-    return `Yesterday, ${time}`
-  }
-
-  return `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${time}`
-}
-
-function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60)
-  const remaining = seconds % 60
-  if (minutes === 0) {
-    return `${remaining}s`
-  }
-  return `${minutes} min`
-}
 
 function formatSegmentTime(index: number, total: number, durationSeconds: number): string {
   if (total <= 1 || durationSeconds <= 0) {
@@ -52,6 +26,7 @@ function formatSegmentTime(index: number, total: number, durationSeconds: number
 }
 
 export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.JSX.Element {
+  const { m, locale } = useI18n()
   const { currentTranscript, loading, error, getTranscript, deleteTranscript, exportTranscript } =
     useTranscripts()
 
@@ -69,10 +44,10 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             return `${pair.original}${translated}`
           })
           .join('\n')
-        return `Speaker ${segment.speaker + 1}: ${pairLines}`
+        return `${m.detail.speakerLabel(segment.speaker + 1)}: ${pairLines}`
       })
       .join('\n\n')
-  }, [currentTranscript])
+  }, [currentTranscript, m])
 
   const speakerCount = useMemo(() => {
     if (!currentTranscript) return 0
@@ -90,14 +65,14 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
 
   const handleDelete = useCallback(async () => {
     if (!currentTranscript) return
-    const confirmed = window.confirm('Delete this transcript? This action cannot be undone.')
+    const confirmed = window.confirm(m.detail.deleteConfirm)
     if (!confirmed) return
 
     const ok = await deleteTranscript(currentTranscript.id)
     if (ok) {
       onBack()
     }
-  }, [currentTranscript, deleteTranscript, onBack])
+  }, [currentTranscript, deleteTranscript, m, onBack])
 
   const handleExport = useCallback(async () => {
     await exportTranscript(id)
@@ -106,7 +81,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   if (loading) {
     return (
       <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-        Loading transcript...
+        {m.detail.loading}
       </div>
     )
   }
@@ -114,8 +89,8 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   if (error || !currentTranscript) {
     return (
       <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
-        <p>{error || 'Transcript not found.'}</p>
-        <Button onClick={onBack}>Back</Button>
+        <p>{error || m.detail.notFound}</p>
+        <Button onClick={onBack}>{m.detail.back}</Button>
       </div>
     )
   }
@@ -132,13 +107,14 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
               onClick={onBack}
             >
               <ArrowLeft className="h-4 w-4" />
-              Back
+              {m.detail.back}
             </Button>
             <h1 className="truncate text-base font-semibold">{currentTranscript.title}</h1>
           </div>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {formatDateLabel(currentTranscript.created_at)} ·{' '}
-            {formatDuration(currentTranscript.duration_seconds)} · {speakerCount} speakers
+            {formatRelativeDateTime(currentTranscript.created_at, locale)} ·{' '}
+            {formatDurationShort(currentTranscript.duration_seconds, locale)} ·{' '}
+            {m.detail.speakerCount(speakerCount)}
           </p>
         </div>
 
@@ -150,7 +126,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             onClick={handleCopy}
           >
             <Copy className="h-4 w-4" />
-            Copy
+            {m.detail.copy}
           </Button>
           <Button
             variant="outline"
@@ -161,7 +137,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             }}
           >
             <Download className="h-4 w-4" />
-            Export
+            {m.detail.export}
           </Button>
           <Button
             variant="outline"
@@ -170,7 +146,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             onClick={handleDelete}
           >
             <Trash2 className="h-4 w-4" />
-            Delete
+            {m.detail.delete}
           </Button>
         </div>
       </header>
@@ -191,7 +167,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
                   className="text-[13px] font-semibold"
                   style={{ color: speakerColors[segment.speaker % speakerColors.length] }}
                 >
-                  Speaker {segment.speaker + 1}
+                  {m.detail.speakerLabel(segment.speaker + 1)}
                 </p>
                 <BilingualSegment
                   pairs={toSentencePairsFromStored(segment)}

@@ -4,6 +4,7 @@ import { ArrowLeft, Headphones, Play, Settings2, Square } from 'lucide-react'
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
 import { toSentencePairsFromLive } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/i18n/useI18n'
 
 export interface SentencePair {
   original: string
@@ -56,6 +57,7 @@ export function MeetingTranscription({
   onStopAndReturn,
   onReturnToWorkspace
 }: MeetingTranscriptionProps): React.JSX.Element {
+  const { m } = useI18n()
   const transcriptRef = useRef<HTMLDivElement>(null)
   const [actionInProgress, setActionInProgress] = useState(false)
   const isTranscribing =
@@ -95,16 +97,18 @@ export function MeetingTranscription({
       <header className="flex h-[53px] items-center justify-between border-b px-6">
         <div className="flex items-center gap-3">
           <Headphones className="h-5 w-5 text-[#7C3AED]" />
-          <h1 className="text-[18px] leading-none font-semibold">Meeting Transcription</h1>
+          <h1 className="text-[18px] leading-none font-semibold">{m.meeting.title}</h1>
           {state.status === 'transcribing' && (
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF2F2] px-2.5 py-1 text-xs font-medium text-red-500">
               <span className="h-2 w-2 rounded-full bg-red-500" />
-              <span>Recording · {formatClock(state.seconds)}</span>
+              <span>
+                {m.meeting.recording} · {formatClock(state.seconds)}
+              </span>
             </span>
           )}
           {state.status === 'error' && (
             <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-500">
-              Connection error
+              {m.meeting.connectionError}
             </span>
           )}
         </div>
@@ -119,7 +123,7 @@ export function MeetingTranscription({
                 onClick={onReturnToWorkspace}
               >
                 <ArrowLeft className="h-4 w-4" />
-                <span>Back</span>
+                <span>{m.meeting.back}</span>
               </Button>
               <Button
                 variant="outline"
@@ -128,7 +132,7 @@ export function MeetingTranscription({
                 onClick={onOpenSettings}
               >
                 <Settings2 className="h-4 w-4" />
-                <span>Settings</span>
+                <span>{m.meeting.settings}</span>
               </Button>
             </>
           )}
@@ -142,7 +146,7 @@ export function MeetingTranscription({
               disabled={actionInProgress || state.status === 'starting'}
             >
               <Square className="h-4 w-4" />
-              <span>Stop & Return</span>
+              <span>{m.meeting.stopAndReturn}</span>
             </Button>
           ) : (
             <Button
@@ -153,7 +157,7 @@ export function MeetingTranscription({
               disabled={actionInProgress}
             >
               <Play className="h-4 w-4" />
-              <span>Start Recording</span>
+              <span>{m.meeting.startRecording}</span>
             </Button>
           )}
         </div>
@@ -166,20 +170,13 @@ export function MeetingTranscription({
               <Headphones className="h-7 w-7 text-[#7C3AED]" />
             </div>
             <div className="space-y-1">
-              <p className="text-[20px] leading-[1.2] font-semibold">No active transcription</p>
-              <p className="text-muted-foreground max-w-sm text-sm">
-                Click Start Recording to begin capturing audio from your microphone and system
-                audio.
-              </p>
+              <p className="text-[20px] leading-[1.2] font-semibold">{m.meeting.emptyTitle}</p>
+              <p className="text-muted-foreground max-w-sm text-sm">{m.meeting.emptyDescription}</p>
               {state.isPreconnecting && !state.preconnectFailed && (
-                <p className="text-muted-foreground text-xs">
-                  Warming up in background. You can start now, but the first response may be slower.
-                </p>
+                <p className="text-muted-foreground text-xs">{m.meeting.warmingUp}</p>
               )}
               {state.preconnectFailed && (
-                <p className="text-xs text-amber-600">
-                  Warm-up failed, first start may take longer.
-                </p>
+                <p className="text-xs text-amber-600">{m.meeting.warmupFailed}</p>
               )}
               {state.lastError && <p className="text-xs text-red-500">{state.lastError}</p>}
             </div>
@@ -191,7 +188,7 @@ export function MeetingTranscription({
               disabled={actionInProgress}
             >
               <Play className="h-4 w-4" />
-              <span>Start Recording</span>
+              <span>{m.meeting.startRecording}</span>
             </Button>
           </div>
         ) : (
@@ -206,7 +203,7 @@ export function MeetingTranscription({
                   </span>
                   <div className="min-w-0 flex-1 space-y-1">
                     <p className="text-[13px] font-semibold" style={{ color: speakerColor }}>
-                      Speaker {segment.speaker + 1}
+                      {m.meeting.speakerLabel(segment.speaker + 1)}
                     </p>
                     <BilingualSegment pairs={toSentencePairsFromLive(segment)} />
                   </div>
@@ -226,7 +223,7 @@ export function MeetingTranscription({
                       color: speakerColors[state.currentSegment.speaker % speakerColors.length]
                     }}
                   >
-                    Speaker {state.currentSegment.speaker + 1}
+                    {m.meeting.speakerLabel(state.currentSegment.speaker + 1)}
                   </p>
                   <BilingualSegment pairs={toSentencePairsFromLive(state.currentSegment)} />
                 </div>

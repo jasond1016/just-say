@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Info, Settings, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { AppLocale, resolveLocale } from '@/i18n'
+import { useI18n } from '@/i18n/useI18n'
 import { getMicrophoneDevices } from '../../microphone-capture'
 import type { TriggerKey } from '../../../../shared/hotkey'
 
@@ -16,7 +18,7 @@ type ApiKeyProvider = 'openai' | 'soniox' | 'groq'
 
 interface RendererConfig {
   general?: {
-    language?: string
+    language?: AppLocale
     autostart?: boolean
   }
   hotkey?: {
@@ -114,6 +116,7 @@ export function DashboardSettingsModal({
   onSaved,
   onThemeChange
 }: DashboardSettingsModalProps): React.JSX.Element {
+  const { m, locale } = useI18n()
   const [activeTab, setActiveTab] = useState<ModalTab>('recognition')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -126,12 +129,12 @@ export function DashboardSettingsModal({
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
 
   const [engine, setEngine] = useState<EngineOption>('local-faster-whisper')
-  const [appLanguage, setAppLanguage] = useState('zh-CN')
+  const [appLanguage, setAppLanguage] = useState<AppLocale>(locale)
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
   const [audioDevice, setAudioDevice] = useState('default')
   const [microphoneDevices, setMicrophoneDevices] = useState<MicrophoneDevice[]>([])
   const [microphoneDevicesLoading, setMicrophoneDevicesLoading] = useState(false)
-  const [microphoneDevicesError, setMicrophoneDevicesError] = useState('')
+  const [microphoneDevicesError, setMicrophoneDevicesError] = useState(false)
   const [language, setLanguage] = useState('auto')
   const [modelSize, setModelSize] = useState<ModelType>('large-v3')
   const [apiModel, setApiModel] = useState('whisper-1')
@@ -157,14 +160,14 @@ export function DashboardSettingsModal({
 
   const loadMicrophoneDeviceOptions = useCallback(async (): Promise<void> => {
     setMicrophoneDevicesLoading(true)
-    setMicrophoneDevicesError('')
+    setMicrophoneDevicesError(false)
     try {
       const devices = await getMicrophoneDevices()
       setMicrophoneDevices(devices)
     } catch (error) {
       console.warn('[Settings] Failed to enumerate microphone devices:', error)
       setMicrophoneDevices([])
-      setMicrophoneDevicesError('Failed to load microphone devices. You can still use Default.')
+      setMicrophoneDevicesError(true)
     } finally {
       setMicrophoneDevicesLoading(false)
     }
@@ -190,7 +193,7 @@ export function DashboardSettingsModal({
               : 'local-faster-whisper'
 
         setEngine(engineValue)
-        setAppLanguage(cfg.general?.language || 'zh-CN')
+        setAppLanguage(resolveLocale(cfg.general?.language))
         setLaunchAtLogin(cfg.general?.autostart === true)
         setAudioDevice(cfg.audio?.device || 'default')
         setLanguage(cfg.recognition?.language || 'auto')
@@ -488,20 +491,20 @@ export function DashboardSettingsModal({
         className="animate-[fadeInUp_180ms_var(--ease-out-expo)] relative z-10 flex h-[560px] w-[760px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border bg-background shadow-lg"
       >
         <p id="settings-modal-description" className="sr-only">
-          Configure recognition, appearance, and application behavior.
+          {m.settings.modalDescription}
         </p>
         <header className="flex items-center justify-between border-b px-6 py-4">
           <div className="flex items-center gap-2.5">
             <Settings className="h-[18px] w-[18px] text-[#7C3AED]" />
             <h2 id="settings-modal-title" className="text-base font-semibold">
-              Settings
+              {m.settings.title}
             </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
             className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[4px] text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/40"
-            aria-label="Close settings"
+            aria-label={m.settings.closeAria}
           >
             <X className="h-[18px] w-[18px]" />
           </button>
@@ -510,14 +513,14 @@ export function DashboardSettingsModal({
         <div className="min-h-0 flex flex-1 overflow-hidden">
           {loading ? (
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              Loading settings...
+              {m.settings.loading}
             </div>
           ) : (
             <>
               <aside className="w-44 shrink-0 border-r border-border/70 px-3 py-4">
                 <div
                   role="tablist"
-                  aria-label="Settings sections"
+                  aria-label={m.settings.sectionsAria}
                   aria-orientation="vertical"
                   className="flex flex-col gap-1"
                 >
@@ -537,7 +540,7 @@ export function DashboardSettingsModal({
                         : 'text-muted-foreground hover:bg-muted/60'
                     }`}
                   >
-                    Recognition
+                    {m.settings.tabRecognition}
                   </button>
                   <button
                     ref={setTabRef('appearance')}
@@ -555,7 +558,7 @@ export function DashboardSettingsModal({
                         : 'text-muted-foreground hover:bg-muted/60'
                     }`}
                   >
-                    Appearance
+                    {m.settings.tabAppearance}
                   </button>
                   <button
                     ref={setTabRef('about')}
@@ -573,7 +576,7 @@ export function DashboardSettingsModal({
                         : 'text-muted-foreground hover:bg-muted/60'
                     }`}
                   >
-                    About
+                    {m.settings.tabAbout}
                   </button>
                 </div>
               </aside>
@@ -587,34 +590,38 @@ export function DashboardSettingsModal({
                   >
                     <div className="grid grid-cols-2 gap-4">
                       <label className="space-y-1.5" htmlFor="settings-recognition-engine">
-                        <span className="text-sm font-medium">Recognition Engine</span>
+                        <span className="text-sm font-medium">{m.settings.recognitionEngine}</span>
                         <select
                           id="settings-recognition-engine"
                           className={fullFieldClassName}
                           value={engine}
                           onChange={(event) => setEngine(event.target.value as EngineOption)}
                         >
-                          <option value="local-faster-whisper">Faster Whisper (Local)</option>
-                          <option value="local-sensevoice">SenseVoice (Local)</option>
-                          <option value="soniox">Soniox</option>
-                          <option value="api">OpenAI API</option>
-                          <option value="groq">Groq</option>
+                          <option value="local-faster-whisper">
+                            {m.settings.engineFasterWhisperLocal}
+                          </option>
+                          <option value="local-sensevoice">
+                            {m.settings.engineSenseVoiceLocal}
+                          </option>
+                          <option value="soniox">{m.settings.engineSoniox}</option>
+                          <option value="api">{m.settings.engineOpenAiApi}</option>
+                          <option value="groq">{m.settings.engineGroq}</option>
                         </select>
                       </label>
 
                       <label className="space-y-1.5" htmlFor="settings-language">
-                        <span className="text-sm font-medium">Language</span>
+                        <span className="text-sm font-medium">{m.settings.language}</span>
                         <select
                           id="settings-language"
                           className={fullFieldClassName}
                           value={language}
                           onChange={(event) => setLanguage(event.target.value)}
                         >
-                          <option value="auto">Auto Detect</option>
-                          <option value="zh">Chinese</option>
-                          <option value="en">English</option>
-                          <option value="ja">Japanese</option>
-                          <option value="ko">Korean</option>
+                          <option value="auto">{m.settings.autoDetect}</option>
+                          <option value="zh">{m.settings.chinese}</option>
+                          <option value="en">{m.settings.english}</option>
+                          <option value="ja">{m.settings.japanese}</option>
+                          <option value="ko">{m.settings.korean}</option>
                         </select>
                       </label>
                     </div>
@@ -622,7 +629,7 @@ export function DashboardSettingsModal({
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between gap-3">
                         <label className="text-sm font-medium" htmlFor="settings-audio-device">
-                          Microphone Device
+                          {m.settings.microphoneDevice}
                         </label>
                         <Button
                           type="button"
@@ -634,7 +641,7 @@ export function DashboardSettingsModal({
                           }}
                           disabled={microphoneDevicesLoading || saving}
                         >
-                          {microphoneDevicesLoading ? 'Refreshing...' : 'Refresh'}
+                          {microphoneDevicesLoading ? m.settings.refreshing : m.settings.refresh}
                         </Button>
                       </div>
                       <select
@@ -644,9 +651,9 @@ export function DashboardSettingsModal({
                         onChange={(event) => setAudioDevice(event.target.value)}
                         disabled={microphoneDevicesLoading}
                       >
-                        <option value="default">Default</option>
+                        <option value="default">{m.settings.defaultDevice}</option>
                         {selectedAudioDeviceUnavailable ? (
-                          <option value={audioDevice}>Saved device (unavailable)</option>
+                          <option value={audioDevice}>{m.settings.savedDeviceUnavailable}</option>
                         ) : null}
                         {microphoneDevices
                           .filter((device) => device.id && device.id !== 'default')
@@ -657,7 +664,9 @@ export function DashboardSettingsModal({
                           ))}
                       </select>
                       {microphoneDevicesError ? (
-                        <p className="text-xs text-muted-foreground">{microphoneDevicesError}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {m.settings.microphoneLoadFailed}
+                        </p>
                       ) : null}
                     </div>
 
@@ -668,7 +677,7 @@ export function DashboardSettingsModal({
                     >
                       {isLocalEngine && !isSenseVoiceEngine ? (
                         <label className="space-y-1.5" htmlFor="settings-model-size">
-                          <span className="text-sm font-medium">Model Size</span>
+                          <span className="text-sm font-medium">{m.settings.modelSize}</span>
                           <select
                             id="settings-model-size"
                             className={fullFieldClassName}
@@ -685,15 +694,15 @@ export function DashboardSettingsModal({
                       ) : null}
 
                       <label className="space-y-1.5" htmlFor="settings-hotkey">
-                        <span className="text-sm font-medium">Hotkey</span>
+                        <span className="text-sm font-medium">{m.settings.hotkey}</span>
                         <select
                           id="settings-hotkey"
                           className={fullFieldClassName}
                           value={hotkey}
                           onChange={(event) => setHotkey(event.target.value as TriggerKey)}
                         >
-                          <option value="RCtrl">Right Ctrl</option>
-                          <option value="RAlt">Right Alt</option>
+                          <option value="RCtrl">{m.settings.rightCtrl}</option>
+                          <option value="RAlt">{m.settings.rightAlt}</option>
                           <option value="F13">F13</option>
                           <option value="F14">F14</option>
                         </select>
@@ -704,7 +713,9 @@ export function DashboardSettingsModal({
                       <>
                         <div className="grid grid-cols-2 gap-4">
                           <label className="space-y-1.5" htmlFor="settings-recognition-api-key">
-                            <span className="text-sm font-medium">Recognition API Key</span>
+                            <span className="text-sm font-medium">
+                              {m.settings.recognitionApiKey}
+                            </span>
                             <input
                               id="settings-recognition-api-key"
                               type="password"
@@ -713,14 +724,14 @@ export function DashboardSettingsModal({
                               onChange={(event) => setOnlineApiKeyInput(event.target.value)}
                               placeholder={
                                 onlineApiKeyConfigured
-                                  ? 'Stored key is configured (enter to replace)'
-                                  : 'Enter API key'
+                                  ? m.settings.storedKeyPlaceholder
+                                  : m.settings.enterApiKey
                               }
                             />
                           </label>
 
                           <label className="space-y-1.5" htmlFor="settings-recognition-model-type">
-                            <span className="text-sm font-medium">Model Type</span>
+                            <span className="text-sm font-medium">{m.settings.modelType}</span>
                             {engine === 'groq' ? (
                               <select
                                 id="settings-recognition-model-type"
@@ -756,9 +767,11 @@ export function DashboardSettingsModal({
 
                         <div className="flex items-center justify-between rounded-md border border-border/70 bg-muted/20 px-3 py-2">
                           <p className="text-xs text-muted-foreground">
-                            API Key status:{' '}
+                            {m.settings.apiKeyStatus}{' '}
                             <span className="font-medium text-foreground">
-                              {onlineApiKeyConfigured ? 'Configured' : 'Not configured'}
+                              {onlineApiKeyConfigured
+                                ? m.settings.configured
+                                : m.settings.notConfigured}
                             </span>
                           </p>
                           <Button
@@ -771,7 +784,7 @@ export function DashboardSettingsModal({
                             }}
                             disabled={!onlineApiKeyConfigured || updatingOnlineApiKey || saving}
                           >
-                            Remove Stored Key
+                            {m.settings.removeStoredKey}
                           </Button>
                         </div>
                       </>
@@ -780,10 +793,10 @@ export function DashboardSettingsModal({
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p id="settings-translation-ptt-label" className="text-sm font-medium">
-                          Enable Translation for PTT
+                          {m.settings.enableTranslationForPtt}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Translate push-to-talk transcription to target language
+                          {m.settings.translationPttDescription}
                         </p>
                       </div>
                       <Toggle
@@ -796,10 +809,10 @@ export function DashboardSettingsModal({
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p id="settings-translation-meeting-label" className="text-sm font-medium">
-                          Enable Translation for Meeting
+                          {m.settings.enableTranslationForMeeting}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Translate meeting transcription in real time
+                          {m.settings.translationMeetingDescription}
                         </p>
                       </div>
                       <Toggle
@@ -811,7 +824,7 @@ export function DashboardSettingsModal({
 
                     <div className="grid grid-cols-2 gap-4">
                       <label className="space-y-1.5" htmlFor="settings-target-language">
-                        <span className="text-sm font-medium">Target Language</span>
+                        <span className="text-sm font-medium">{m.settings.targetLanguage}</span>
                         <select
                           id="settings-target-language"
                           className={`${fullFieldClassName} disabled:opacity-50`}
@@ -819,10 +832,10 @@ export function DashboardSettingsModal({
                           onChange={(event) => setTargetLanguage(event.target.value)}
                           disabled={!anyTranslationEnabled}
                         >
-                          <option value="zh">Chinese (Simplified)</option>
-                          <option value="en">English</option>
-                          <option value="ja">Japanese</option>
-                          <option value="ko">Korean</option>
+                          <option value="zh">{m.settings.chineseSimplified}</option>
+                          <option value="en">{m.settings.english}</option>
+                          <option value="ja">{m.settings.japanese}</option>
+                          <option value="ko">{m.settings.korean}</option>
                         </select>
                       </label>
                       <div />
@@ -832,7 +845,9 @@ export function DashboardSettingsModal({
                       <>
                         <div className="grid grid-cols-2 gap-4">
                           <label className="space-y-1.5" htmlFor="settings-translation-provider">
-                            <span className="text-sm font-medium">Translation Provider</span>
+                            <span className="text-sm font-medium">
+                              {m.settings.translationProvider}
+                            </span>
                             <select
                               id="settings-translation-provider"
                               className={fullFieldClassName}
@@ -841,12 +856,16 @@ export function DashboardSettingsModal({
                                 setTranslationProvider(event.target.value as TranslationProvider)
                               }
                             >
-                              <option value="openai-compatible">OpenAI-Compatible</option>
+                              <option value="openai-compatible">
+                                {m.settings.openaiCompatible}
+                              </option>
                             </select>
                           </label>
 
                           <label className="space-y-1.5" htmlFor="settings-translation-model">
-                            <span className="text-sm font-medium">Translation Model</span>
+                            <span className="text-sm font-medium">
+                              {m.settings.translationModel}
+                            </span>
                             <input
                               id="settings-translation-model"
                               type="text"
@@ -860,7 +879,9 @@ export function DashboardSettingsModal({
 
                         <div className="grid grid-cols-2 gap-4">
                           <label className="space-y-1.5" htmlFor="settings-translation-endpoint">
-                            <span className="text-sm font-medium">Translation Endpoint</span>
+                            <span className="text-sm font-medium">
+                              {m.settings.translationEndpoint}
+                            </span>
                             <input
                               id="settings-translation-endpoint"
                               type="text"
@@ -871,7 +892,9 @@ export function DashboardSettingsModal({
                             />
                           </label>
                           <label className="space-y-1.5" htmlFor="settings-translation-api-key">
-                            <span className="text-sm font-medium">Translation API Key</span>
+                            <span className="text-sm font-medium">
+                              {m.settings.translationApiKey}
+                            </span>
                             <input
                               id="settings-translation-api-key"
                               type="password"
@@ -880,8 +903,8 @@ export function DashboardSettingsModal({
                               onChange={(event) => setTranslationApiKeyInput(event.target.value)}
                               placeholder={
                                 translationApiKeyConfigured
-                                  ? 'Stored key is configured (enter to replace)'
-                                  : 'sk-...'
+                                  ? m.settings.storedKeyPlaceholder
+                                  : m.settings.translationApiKeyPlaceholder
                               }
                             />
                           </label>
@@ -889,9 +912,11 @@ export function DashboardSettingsModal({
 
                         <div className="flex items-center justify-between rounded-md border border-border/70 bg-muted/20 px-3 py-2">
                           <p className="text-xs text-muted-foreground">
-                            API Key status:{' '}
+                            {m.settings.apiKeyStatus}{' '}
                             <span className="font-medium text-foreground">
-                              {translationApiKeyConfigured ? 'Configured' : 'Not configured'}
+                              {translationApiKeyConfigured
+                                ? m.settings.configured
+                                : m.settings.notConfigured}
                             </span>
                           </p>
                           <Button
@@ -906,7 +931,7 @@ export function DashboardSettingsModal({
                               !translationApiKeyConfigured || updatingTranslationApiKey || saving
                             }
                           >
-                            Remove Stored Key
+                            {m.settings.removeStoredKey}
                           </Button>
                         </div>
                       </>
@@ -923,42 +948,42 @@ export function DashboardSettingsModal({
                   >
                     <div className="flex items-center justify-between gap-4">
                       <label className="text-sm font-medium" htmlFor="settings-theme">
-                        Theme
+                        {m.settings.theme}
                       </label>
                       <select
                         id="settings-theme"
-                        className={compactFieldClassName}
+                        className={`${compactFieldClassName} ml-auto`}
                         value={theme}
                         onChange={(event) => setTheme(event.target.value as ThemeOption)}
                       >
-                        <option value="system">System</option>
-                        <option value="light">Light</option>
-                        <option value="dark">Dark</option>
+                        <option value="system">{m.settings.system}</option>
+                        <option value="light">{m.settings.light}</option>
+                        <option value="dark">{m.settings.dark}</option>
                       </select>
                     </div>
 
                     <div className="flex items-center justify-between gap-4">
                       <label className="text-sm font-medium" htmlFor="settings-app-language">
-                        Interface Language
+                        {m.settings.interfaceLanguage}
                       </label>
                       <select
                         id="settings-app-language"
-                        className={compactFieldClassName}
+                        className={`${compactFieldClassName} ml-auto`}
                         value={appLanguage}
-                        onChange={(event) => setAppLanguage(event.target.value)}
+                        onChange={(event) => setAppLanguage(resolveLocale(event.target.value))}
                       >
-                        <option value="zh-CN">简体中文</option>
-                        <option value="en-US">English</option>
+                        <option value="zh-CN">{m.settings.languageOptionZhCn}</option>
+                        <option value="en-US">{m.settings.languageOptionEnUs}</option>
                       </select>
                     </div>
 
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p id="settings-launch-login-label" className="text-sm font-medium">
-                          Launch at Login
+                          {m.settings.launchAtLogin}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Start JustSay automatically when you sign in
+                          {m.settings.launchAtLoginDescription}
                         </p>
                       </div>
                       <Toggle
@@ -971,10 +996,10 @@ export function DashboardSettingsModal({
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p id="settings-indicator-label" className="text-sm font-medium">
-                          Recording Indicator
+                          {m.settings.recordingIndicator}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Show floating indicator while recording
+                          {m.settings.recordingIndicatorDescription}
                         </p>
                       </div>
                       <Toggle
@@ -987,10 +1012,10 @@ export function DashboardSettingsModal({
                     <div className="flex items-center justify-between gap-4">
                       <div>
                         <p id="settings-sound-label" className="text-sm font-medium">
-                          Sound Feedback
+                          {m.settings.soundFeedback}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Play sound on recording start and stop
+                          {m.settings.soundFeedbackDescription}
                         </p>
                       </div>
                       <Toggle
@@ -1012,10 +1037,10 @@ export function DashboardSettingsModal({
                     <div className="flex items-start gap-2.5 rounded-lg border bg-muted/30 p-4">
                       <Info className="mt-0.5 h-4 w-4 text-[#7C3AED]" />
                       <div className="space-y-1">
-                        <p className="text-sm font-medium">JustSay</p>
-                        <p className="text-xs text-muted-foreground">Version 1.0.0</p>
+                        <p className="text-sm font-medium">{m.common.appName}</p>
+                        <p className="text-xs text-muted-foreground">{m.settings.version} 1.0.0</p>
                         <p className="text-xs text-muted-foreground">
-                          Push-to-talk and meeting transcription assistant.
+                          {m.settings.aboutDescription}
                         </p>
                       </div>
                     </div>
@@ -1036,7 +1061,7 @@ export function DashboardSettingsModal({
             }}
             disabled={loading || saving}
           >
-            {saving ? 'Saving...' : 'Save Changes'}
+            {saving ? m.settings.saving : m.settings.saveChanges}
           </Button>
         </footer>
       </section>
