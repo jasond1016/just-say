@@ -74,7 +74,8 @@ export class TranslationService {
     try {
       const translator = this.getTranslator()
       const translated = await translator.translate(sourceText, targetLanguage, {
-        sourceLanguage: options.sourceLanguage
+        sourceLanguage: options.sourceLanguage,
+        context: options.context
       })
       return {
         text: translated,

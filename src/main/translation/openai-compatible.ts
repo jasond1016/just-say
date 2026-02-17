@@ -7,6 +7,7 @@ export interface OpenAICompatibleTranslatorConfig {
 
 export interface OpenAICompatibleTranslateOptions {
   sourceLanguage?: string
+  context?: 'ptt' | 'meeting'
 }
 
 interface ChatCompletionResponse {
@@ -55,12 +56,16 @@ export class OpenAICompatibleTranslator {
           messages: [
             {
               role: 'system',
-              content:
-                'You are a professional translator. Translate faithfully and naturally. Output only the translated text.'
+              content: this.buildSystemPrompt()
             },
             {
               role: 'user',
-              content: this.buildTranslatePrompt(text, targetLanguage, options?.sourceLanguage)
+              content: this.buildTranslatePrompt(
+                text,
+                targetLanguage,
+                options?.sourceLanguage,
+                options?.context
+              )
             }
           ],
           temperature: 0.2
@@ -87,15 +92,36 @@ export class OpenAICompatibleTranslator {
   private buildTranslatePrompt(
     text: string,
     targetLanguage: string,
-    sourceLanguage?: string
+    sourceLanguage?: string,
+    context: 'ptt' | 'meeting' = 'ptt'
   ): string {
     const sourceInfo = sourceLanguage ? ` from ${sourceLanguage}` : ''
+    const contextInfo =
+      context === 'meeting' ? 'Context: real-time meeting transcript.' : 'Context: push-to-talk.'
+
     return [
-      `Translate the following text${sourceInfo} into ${targetLanguage}.`,
-      'Preserve meaning, tone, and terminology.',
-      'Output only the translated result.',
+      `Task: Translate the following spoken text${sourceInfo} into ${targetLanguage}.`,
+      contextInfo,
+      '',
+      'Apply light cleanup while translating:',
+      '- Remove obvious filler words and discourse markers (for example: "um", "uh", "you know", "like", "那个", "就是").',
+      '- Remove immediate repetitions and abandoned false starts that add no meaning.',
+      '- Keep all meaningful content, intent, facts, numbers, negations, terminology, and proper nouns.',
+      '- If unsure whether a phrase carries meaning, keep it.',
+      '',
+      'Output only the translated result. Do not include explanations.',
       '',
       text
     ].join('\n')
+  }
+
+  private buildSystemPrompt(): string {
+    return [
+      'You are a professional translator and careful spoken-text editor.',
+      'Translate faithfully and naturally.',
+      'Perform only light cleanup of meaningless spoken disfluencies.',
+      'Do not add information or change speaker intent.',
+      'Output only the translated text.'
+    ].join(' ')
   }
 }
