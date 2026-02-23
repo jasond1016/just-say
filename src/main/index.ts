@@ -38,6 +38,7 @@ import { StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingLocalConfig } from './recognition/streaming-local'
 import { TranslationService } from './translation/service'
+import { processPttRecognitionResult } from './ptt/postProcess'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -140,11 +141,7 @@ function getRecognitionSignature(config: AppConfig): string {
   })
 }
 
-function shouldRecreateRecognition(prev: AppConfig, next: AppConfig): boolean {
-  return getRecognitionSignature(prev) !== getRecognitionSignature(next)
-}
-
-function shouldRecreateMeeting(prev: AppConfig, next: AppConfig): boolean {
+function hasRecognitionConfigChanged(prev: AppConfig, next: AppConfig): boolean {
   return getRecognitionSignature(prev) !== getRecognitionSignature(next)
 }
 
@@ -741,6 +738,27 @@ async function initializeApp(): Promise<void> {
   const useStreamingSoniox =
     config.recognition?.backend === 'soniox' && config.recognition?.soniox?.apiKey
 
+  const handleRecognizedPttText = async (sourceText: string): Promise<void> => {
+    await processPttRecognitionResult({
+      sourceText,
+      startedAt: pttRecordingStartedAt,
+      outputConfig: getConfig().output,
+      deps: {
+        translate: maybeTranslatePttText,
+        typeText: async (text, options) => {
+          if (!inputSimulator) {
+            return undefined
+          }
+          return inputSimulator.typeText(text, options)
+        },
+        trackUsage: trackPttUsage,
+        persistTranscript: persistPttTranscript,
+        notifyIndicatorOutputText,
+        showOutputWindow
+      }
+    })
+  }
+
   if (useStreamingSoniox) {
     console.log('[Main] Using streaming Soniox mode with Web Audio')
     webStreamingRecorder = new WebStreamingAudioRecorder()
@@ -805,22 +823,7 @@ async function initializeApp(): Promise<void> {
         )
 
         if (result?.text) {
-          const config = getConfig()
-          const translatedText = await maybeTranslatePttText(result.text)
-          const method = config.output?.method || 'simulate_input'
-          const finalText = await inputSimulator?.typeText(translatedText, {
-            method,
-            autoSpace: config.output?.autoSpace,
-            capitalize: config.output?.capitalize
-          })
-          trackPttUsage(finalText || translatedText || result.text, pttRecordingStartedAt)
-          persistPttTranscript(result.text, translatedText, pttRecordingStartedAt)
-          if (finalText) {
-            notifyIndicatorOutputText(finalText)
-          }
-          if (method === 'popup' && finalText) {
-            showOutputWindow(finalText)
-          }
+          await handleRecognizedPttText(result.text)
         }
       } catch (error) {
         console.error('[Main] Streaming recognition error:', error)
@@ -863,22 +866,7 @@ async function initializeApp(): Promise<void> {
         if (audioBuffer && audioBuffer.length > 0) {
           const result = await recognitionController?.recognize(audioBuffer)
           if (result?.text) {
-            const config = getConfig()
-            const translatedText = await maybeTranslatePttText(result.text)
-            const method = config.output?.method || 'simulate_input'
-            const finalText = await inputSimulator?.typeText(translatedText, {
-              method,
-              autoSpace: config.output?.autoSpace,
-              capitalize: config.output?.capitalize
-            })
-            trackPttUsage(finalText || translatedText || result.text, pttRecordingStartedAt)
-            persistPttTranscript(result.text, translatedText, pttRecordingStartedAt)
-            if (finalText) {
-              notifyIndicatorOutputText(finalText)
-            }
-            if (method === 'popup' && finalText) {
-              showOutputWindow(finalText)
-            }
+            await handleRecognizedPttText(result.text)
           }
         }
       } catch (error) {
@@ -937,8 +925,7 @@ ipcMain.handle('set-config', (_event, config) => {
   const prevConfig = getConfig()
   setConfig(config)
   const nextConfig = getConfig()
-  const recognitionChanged = shouldRecreateRecognition(prevConfig, nextConfig)
-  const meetingRecognitionChanged = shouldRecreateMeeting(prevConfig, nextConfig)
+  const recognitionChanged = hasRecognitionConfigChanged(prevConfig, nextConfig)
   const autostartChanged = prevConfig.general?.autostart !== nextConfig.general?.autostart
   if (prevConfig.hotkey?.triggerKey !== nextConfig.hotkey?.triggerKey) {
     hotkeyManager?.setTriggerKey(nextConfig.hotkey?.triggerKey)
@@ -949,7 +936,7 @@ ipcMain.handle('set-config', (_event, config) => {
   if (!recognitionController || recognitionChanged) {
     recognitionController = new RecognitionController(nextConfig)
   }
-  if (meetingRecognitionChanged && meetingTranscription?.getStatus() === 'idle') {
+  if (recognitionChanged && meetingTranscription?.getStatus() === 'idle') {
     meetingTranscription = null
     activeMeetingOptions = null
     meetingRecordingStartedAt = null
