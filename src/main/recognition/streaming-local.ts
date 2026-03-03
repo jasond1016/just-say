@@ -58,11 +58,35 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private completedSegments: SpeakerSegment[] = []
   private sentencePairs: SentencePair[] = []
   private translationQueue: Promise<void> = Promise.resolve()
+  private pendingSentenceOriginal = ''
+  private previewText = ''
+  private pendingHypothesis = ''
+  private lastHypothesisUpdateAt = 0
 
-  private readonly SILENCE_THRESHOLD_MS = 350
-  private readonly MIN_CHUNK_DURATION_MS = 600
-  private readonly MAX_CHUNK_DURATION_MS = 4500
-  private readonly OVERLAP_AUDIO_MS = 200
+  private readonly SILENCE_THRESHOLD_MS = 700
+  private readonly MIN_CHUNK_DURATION_MS = 1200
+  private readonly MAX_CHUNK_DURATION_MS = 6000
+  private readonly OVERLAP_AUDIO_MS = 360
+  private readonly SENTENCE_MIN_FLUSH_CHARS = 14
+  private readonly SENTENCE_SOFT_FLUSH_CHARS = 28
+  private readonly SENTENCE_FORCE_FLUSH_CHARS = 48
+  private readonly STABILITY_FORCE_COMMIT_CHARS = 20
+  private readonly STABILITY_MIN_BOUNDARY_CHARS = 6
+  private readonly STABILITY_REPLACE_COMMIT_MIN_COMMON_CHARS = 2
+  private readonly STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
+  private readonly HYPOTHESIS_FINALIZE_SILENCE_MS = 1200
+  private readonly HYPOTHESIS_FINALIZE_IDLE_MS = 220
+  private readonly JAPANESE_CONTINUATION_PARTICLES = new Set([
+    'は',
+    'が',
+    'を',
+    'に',
+    'で',
+    'と',
+    'へ',
+    'も',
+    'の'
+  ])
 
   constructor(config?: StreamingLocalConfig) {
     super()
@@ -156,6 +180,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.confirmedTranslation = ''
     this.completedSegments = []
     this.sentencePairs = []
+    this.pendingSentenceOriginal = ''
+    this.previewText = ''
+    this.pendingHypothesis = ''
+    this.lastHypothesisUpdateAt = 0
     this.translationQueue = Promise.resolve()
     this.vadState.reset()
 
@@ -201,11 +229,21 @@ export class StreamingLocalRecognizer extends EventEmitter {
     if (this.pendingAudioBytes > 0) {
       await this.maybeProcessFinal(true)
     }
+    const forcedPairIndex = this.commitPendingHypothesis(true)
+    if (forcedPairIndex !== null) {
+      this.translatePairAsync(forcedPairIndex)
+    }
+    const finalPairIndex = this.flushPendingSentencePair()
+    if (finalPairIndex !== null) {
+      this.translatePairAsync(finalPairIndex)
+    }
     await this.translationQueue
 
     this.isActive = false
 
-    const text = this.confirmedText.trim()
+    const text = this.normalizeJapaneseSpacing(
+      mergeText(this.confirmedText, this.previewText)
+    ).trim()
     const translatedText = this.confirmedTranslation.trim()
     const finalSegment: SpeakerSegment | null = text
       ? {
@@ -243,6 +281,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.confirmedText = ''
     this.confirmedTranslation = ''
     this.sentencePairs = []
+    this.pendingSentenceOriginal = ''
+    this.previewText = ''
+    this.pendingHypothesis = ''
+    this.lastHypothesisUpdateAt = 0
     this.translationQueue = Promise.resolve()
   }
 
@@ -263,17 +305,36 @@ export class StreamingLocalRecognizer extends EventEmitter {
   }
 
   private async maybeProcessFinal(force = false): Promise<void> {
-    if (!this.isActive || this.processingChunk || this.pendingAudioBytes === 0) return
-    if (!force && this.pendingNewAudioBytes === 0) return
+    if (!this.isActive || this.processingChunk) return
+
+    if (this.pendingAudioBytes === 0) {
+      const pairIndex = this.commitPendingHypothesis(force)
+      if (pairIndex !== null) {
+        this.emitPartialResult()
+        this.translatePairAsync(pairIndex)
+      }
+      return
+    }
+
+    if (!force && this.pendingNewAudioBytes === 0) {
+      const pairIndex = this.commitPendingHypothesis(false)
+      if (pairIndex !== null) {
+        this.emitPartialResult()
+        this.translatePairAsync(pairIndex)
+      }
+      return
+    }
     if (!force && this.bufferStartTime === 0) return
 
     const pendingDurationMs = this.getDurationMsFromBytes(this.pendingNewAudioBytes)
     const silenceDurationMs = Date.now() - this.lastSpeechTime
+    const inSilence = this.vadState.isInSilence()
 
     const shouldProcess =
       force ||
       pendingDurationMs >= this.MAX_CHUNK_DURATION_MS ||
       (pendingDurationMs >= this.MIN_CHUNK_DURATION_MS &&
+        inSilence &&
         silenceDurationMs >= this.SILENCE_THRESHOLD_MS)
 
     if (!shouldProcess) return
@@ -293,14 +354,29 @@ export class StreamingLocalRecognizer extends EventEmitter {
       const result = await this.recognizer.recognize(pcmBuffer)
       this.retainOverlap(pcmBuffer)
       const chunkText = result.text?.trim()
+      let pairIndex: number | null = null
       if (chunkText) {
-        const appended = this.appendConfirmedText(chunkText)
-        if (!appended) {
-          return
+        const hypothesisTail = this.buildHypothesisTail(chunkText)
+        const committedText = this.updateHypothesis(hypothesisTail, force)
+        if (committedText) {
+          pairIndex = this.commitRecognizedText(committedText)
         }
-        const pairIndex = this.sentencePairs.push({ original: appended }) - 1
+      } else if (force) {
+        pairIndex = this.commitPendingHypothesis(true)
+      } else {
+        pairIndex = this.commitPendingHypothesis(false)
+      }
+
+      if (!chunkText && force && pairIndex === null) {
+        this.previewText = ''
+        this.pendingHypothesis = ''
+      }
+
+      if (chunkText || pairIndex !== null) {
         this.emitPartialResult()
-        this.translateChunkAsync(appended, pairIndex)
+        if (pairIndex !== null) {
+          this.translatePairAsync(pairIndex)
+        }
       }
     } catch (error) {
       // Requeue audio when ASR fails, so we don't drop speech content.
@@ -316,23 +392,341 @@ export class StreamingLocalRecognizer extends EventEmitter {
     }
   }
 
-  private appendConfirmedText(nextText: string): string {
-    if (!this.confirmedText) {
-      this.confirmedText = nextText
-      return nextText
+  private buildHypothesisTail(nextText: string): string {
+    const normalizedInput = this.normalizeJapaneseSpacing(nextText).trim()
+    if (!normalizedInput) {
+      return ''
     }
 
-    const overlap = findTextOverlap(this.confirmedText, nextText, 160)
-    const deduped = overlap > 0 ? nextText.slice(overlap) : nextText
-    const normalized = deduped.trimStart()
-    if (!normalized) return ''
+    if (!this.confirmedText) {
+      return normalizedInput
+    }
 
-    this.confirmedText = mergeText(this.confirmedText, normalized)
-    return normalized
+    const overlap = findTextOverlap(this.confirmedText, normalizedInput, 160)
+    let deduped = overlap > 0 ? normalizedInput.slice(overlap) : normalizedInput
+    if (overlap === 0) {
+      deduped = this.trimLoosePrefixDuplicate(this.confirmedText, deduped)
+    }
+
+    let normalized = deduped.trimStart()
+    normalized = this.dropLeadingPunctuationAfterBoundary(this.confirmedText, normalized)
+    return this.normalizeJapaneseSpacing(normalized)
   }
 
-  private translateChunkAsync(chunkText: string, pairIndex: number): void {
+  private updateHypothesis(nextHypothesis: string, forceCommit = false): string {
+    const normalizedNext = this.normalizeJapaneseSpacing(nextHypothesis).trimStart()
+    this.lastHypothesisUpdateAt = Date.now()
+
+    if (forceCommit) {
+      const forced = normalizedNext || this.pendingHypothesis
+      this.pendingHypothesis = ''
+      this.previewText = ''
+      return forced
+    }
+
+    if (!normalizedNext) {
+      return ''
+    }
+
+    if (!this.pendingHypothesis) {
+      this.pendingHypothesis = normalizedNext
+      this.previewText = normalizedNext
+      return ''
+    }
+
+    const stablePrefix = this.getCommonPrefix(this.pendingHypothesis, normalizedNext)
+    const commitCandidate = this.trimToStableCommitBoundary(stablePrefix)
+    if (!commitCandidate) {
+      const stableCommonChars = this.getMeaningfulCharCount(stablePrefix)
+      if (stableCommonChars < this.STABILITY_REPLACE_COMMIT_MIN_COMMON_CHARS) {
+        const commitBeforeReplace =
+          this.trimToStableCommitBoundary(this.pendingHypothesis) || this.pendingHypothesis
+        this.pendingHypothesis = normalizedNext
+        this.previewText = normalizedNext
+        return commitBeforeReplace
+      }
+      this.pendingHypothesis = normalizedNext
+      this.previewText = normalizedNext
+      return ''
+    }
+
+    const committedChars = this.getCharLength(commitCandidate)
+    this.pendingHypothesis = this.normalizeJapaneseSpacing(
+      this.dropByCharCount(normalizedNext, committedChars).trimStart()
+    )
+    this.previewText = this.pendingHypothesis
+    return commitCandidate
+  }
+
+  private commitPendingHypothesis(forceCommit: boolean): number | null {
+    if (!this.pendingHypothesis.trim()) {
+      return null
+    }
+
+    if (!forceCommit) {
+      const silenceDurationMs = Date.now() - this.lastSpeechTime
+      const idleDurationMs = Date.now() - this.lastHypothesisUpdateAt
+      if (
+        silenceDurationMs < this.HYPOTHESIS_FINALIZE_SILENCE_MS ||
+        idleDurationMs < this.HYPOTHESIS_FINALIZE_IDLE_MS
+      ) {
+        return null
+      }
+    }
+
+    const pending = this.pendingHypothesis
+    this.pendingHypothesis = ''
+    this.previewText = ''
+    return this.commitRecognizedText(pending)
+  }
+
+  private commitRecognizedText(text: string): number | null {
+    const appended = this.appendCommittedText(text)
+    if (!appended) {
+      return null
+    }
+
+    this.pendingSentenceOriginal = this.normalizeJapaneseSpacing(
+      mergeText(this.pendingSentenceOriginal, appended)
+    )
+    if (this.shouldFlushSentence(this.pendingSentenceOriginal)) {
+      return this.flushPendingSentencePair()
+    }
+    return null
+  }
+
+  private appendCommittedText(nextText: string): string {
+    const normalizedInput = this.normalizeJapaneseSpacing(nextText).trim()
+    if (!normalizedInput) {
+      return ''
+    }
+
+    if (!this.confirmedText) {
+      const first = normalizedInput
+      this.confirmedText = first
+      return first
+    }
+
+    let normalized = normalizedInput.trimStart()
+    normalized = this.dropLeadingPunctuationAfterBoundary(this.confirmedText, normalized)
+    if (!normalized) {
+      return ''
+    }
+
+    const overlap = findTextOverlap(this.confirmedText, normalized, 160)
+    let deduped = overlap > 0 ? normalized.slice(overlap) : normalized
+    if (overlap === 0) {
+      deduped = this.trimLoosePrefixDuplicate(this.confirmedText, deduped)
+    }
+    const committed = this.normalizeJapaneseSpacing(deduped)
+    if (!committed) return ''
+
+    this.confirmedText = this.normalizeJapaneseSpacing(mergeText(this.confirmedText, committed))
+    return committed
+  }
+
+  private getCommonPrefix(left: string, right: string): string {
+    if (!left || !right) {
+      return ''
+    }
+
+    const leftChars = Array.from(left)
+    const rightChars = Array.from(right)
+    const limit = Math.min(leftChars.length, rightChars.length)
+    let index = 0
+    while (index < limit && leftChars[index] === rightChars[index]) {
+      index += 1
+    }
+    if (index <= 0) {
+      return ''
+    }
+    return leftChars.slice(0, index).join('')
+  }
+
+  private trimToStableCommitBoundary(text: string): string {
+    const normalized = this.normalizeJapaneseSpacing(text).trimEnd()
+    if (!normalized) {
+      return ''
+    }
+
+    const meaningfulChars = this.getMeaningfulCharCount(normalized)
+    if (meaningfulChars === 0) {
+      return ''
+    }
+
+    if (/[。！？!?]$/.test(normalized) && meaningfulChars >= 2) {
+      return normalized
+    }
+
+    const boundaryChars = this.findLastBoundaryCharCount(normalized)
+    if (boundaryChars > 0) {
+      const boundaryCommitted = this.takeByCharCount(normalized, boundaryChars).trimEnd()
+      if (this.getMeaningfulCharCount(boundaryCommitted) >= this.STABILITY_MIN_BOUNDARY_CHARS) {
+        return boundaryCommitted
+      }
+    }
+
+    if (meaningfulChars >= this.STABILITY_FORCE_COMMIT_CHARS) {
+      return normalized
+    }
+
+    return ''
+  }
+
+  private findLastBoundaryCharCount(text: string): number {
+    let lastBoundary = 0
+    const chars = Array.from(text)
+    for (let i = 0; i < chars.length; i += 1) {
+      if (/[\s,，、。！？!?;；:：]/u.test(chars[i])) {
+        lastBoundary = i + 1
+      }
+    }
+    return lastBoundary
+  }
+
+  private getCharLength(text: string): number {
+    return Array.from(text).length
+  }
+
+  private takeByCharCount(text: string, count: number): string {
+    if (count <= 0) {
+      return ''
+    }
+    const chars = Array.from(text)
+    if (count >= chars.length) {
+      return text
+    }
+    return chars.slice(0, count).join('')
+  }
+
+  private dropByCharCount(text: string, count: number): string {
+    if (count <= 0) {
+      return text
+    }
+    const chars = Array.from(text)
+    if (count >= chars.length) {
+      return ''
+    }
+    return chars.slice(count).join('')
+  }
+
+  private normalizeJapaneseSpacing(text: string): string {
+    if (!text) {
+      return text
+    }
+
+    return text
+      .replace(
+        /([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[ \t\u3000]+([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])/gu,
+        '$1$2'
+      )
+      .replace(
+        /([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[ \t\u3000]+([。、「」『』（）！？、])/gu,
+        '$1$2'
+      )
+      .replace(
+        /([。、「」『』（）！？、])[ \t\u3000]+([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])/gu,
+        '$1$2'
+      )
+  }
+
+  private trimLoosePrefixDuplicate(left: string, right: string): string {
+    if (!left || !right) {
+      return right
+    }
+
+    const maxMeaningfulChars = Math.min(
+      20,
+      this.getMeaningfulCharCount(left),
+      this.getMeaningfulCharCount(right)
+    )
+    for (let size = maxMeaningfulChars; size >= 2; size--) {
+      const tail = this.getMeaningfulTail(left, size)
+      if (tail.length !== size) {
+        continue
+      }
+      const prefix = this.getMeaningfulPrefix(right, size)
+      if (!prefix || prefix.value !== tail) {
+        continue
+      }
+      return right.slice(prefix.endIndex)
+    }
+
+    return right
+  }
+
+  private getMeaningfulTail(text: string, size: number): string {
+    if (!text || size <= 0) {
+      return ''
+    }
+
+    const chars = Array.from(text)
+    const matched: string[] = []
+    for (let i = chars.length - 1; i >= 0; i--) {
+      const ch = chars[i]
+      if (!this.isMeaningfulChar(ch)) {
+        continue
+      }
+      matched.push(ch)
+      if (matched.length >= size) {
+        break
+      }
+    }
+
+    return matched.reverse().join('')
+  }
+
+  private getMeaningfulPrefix(
+    text: string,
+    size: number
+  ): {
+    value: string
+    endIndex: number
+  } | null {
+    if (!text || size <= 0) {
+      return null
+    }
+
+    let index = 0
+    let value = ''
+    while (index < text.length && value.length < size) {
+      const codePoint = text.codePointAt(index)
+      if (codePoint === undefined) {
+        break
+      }
+      const ch = String.fromCodePoint(codePoint)
+      index += ch.length
+      if (this.isMeaningfulChar(ch)) {
+        value += ch
+      }
+    }
+
+    if (value.length < size) {
+      return null
+    }
+    return {
+      value,
+      endIndex: index
+    }
+  }
+
+  private dropLeadingPunctuationAfterBoundary(left: string, right: string): string {
+    if (!left || !right) {
+      return right
+    }
+    if (!/[\p{P}\p{S}]$/u.test(left)) {
+      return right
+    }
+    return right.replace(/^[\p{P}\p{S}\s]+/u, '')
+  }
+
+  private translatePairAsync(pairIndex: number): void {
     if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
+      return
+    }
+
+    const originalText = this.sentencePairs[pairIndex]?.original?.trim()
+    if (!originalText || !this.shouldTranslateText(originalText)) {
       return
     }
 
@@ -344,12 +738,12 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.translationQueue = this.translationQueue
       .then(async () => {
         const translated = (
-          await translator(chunkText, this.config.translation!.targetLanguage)
+          await translator(originalText, this.config.translation!.targetLanguage)
         )?.trim()
         if (!this.isActive || !translated) {
           return
         }
-        if (this.sentencePairs[pairIndex]?.original !== chunkText) {
+        if (this.sentencePairs[pairIndex]?.original !== originalText) {
           return
         }
         this.sentencePairs[pairIndex] = {
@@ -366,6 +760,168 @@ export class StreamingLocalRecognizer extends EventEmitter {
       })
   }
 
+  private shouldFlushSentence(sentence: string): boolean {
+    const normalized = sentence.trim()
+    if (!normalized) {
+      return false
+    }
+
+    const meaningfulChars = this.getMeaningfulCharCount(normalized)
+    if (meaningfulChars >= this.SENTENCE_FORCE_FLUSH_CHARS) {
+      return true
+    }
+
+    const endsWithStrongPunctuation = /[。！？!?]$/.test(normalized)
+    if (
+      endsWithStrongPunctuation &&
+      meaningfulChars >= this.SENTENCE_MIN_FLUSH_CHARS &&
+      this.hasEnoughTailForStrongPunctuationCommit(normalized)
+    ) {
+      return true
+    }
+
+    const hasSoftBoundary = /[，、,;；:：]$/.test(normalized)
+    if (hasSoftBoundary && meaningfulChars >= this.SENTENCE_SOFT_FLUSH_CHARS) {
+      return true
+    }
+
+    return false
+  }
+
+  private flushPendingSentencePair(): number | null {
+    const finalized = this.normalizeJapaneseSpacing(this.pendingSentenceOriginal).trim()
+    this.pendingSentenceOriginal = ''
+    if (!finalized) {
+      return null
+    }
+
+    const mergedPairIndex = this.mergeSuspiciousBoundaryWithPreviousPair(finalized)
+    if (mergedPairIndex !== null) {
+      return mergedPairIndex
+    }
+
+    return this.sentencePairs.push({ original: finalized }) - 1
+  }
+
+  private shouldTranslateText(text: string): boolean {
+    const normalized = text.trim()
+    if (!normalized) {
+      return false
+    }
+
+    // Skip chunks that are just punctuation/symbols to avoid noisy translations.
+    return Array.from(normalized).some((ch) => this.isMeaningfulChar(ch))
+  }
+
+  private getMeaningfulCharCount(text: string): number {
+    let count = 0
+    for (const ch of Array.from(text)) {
+      if (this.isMeaningfulChar(ch)) {
+        count += 1
+      }
+    }
+    return count
+  }
+
+  private isMeaningfulChar(ch: string): boolean {
+    return /[\p{L}\p{N}\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff]/u.test(ch)
+  }
+
+  private isHanChar(ch: string): boolean {
+    return /\p{Script=Han}/u.test(ch)
+  }
+
+  private hasEnoughTailForStrongPunctuationCommit(text: string): boolean {
+    const trailingRemoved = text.replace(/[。！？!?]+$/u, '')
+    if (!trailingRemoved) {
+      return false
+    }
+    const tail = this.getTailAfterLastBoundary(trailingRemoved)
+    return this.getMeaningfulCharCount(tail) >= this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
+  }
+
+  private getTailAfterLastBoundary(text: string): string {
+    const chars = Array.from(text)
+    for (let i = chars.length - 1; i >= 0; i -= 1) {
+      if (/[\s,，、。！？!?;；:：]/u.test(chars[i])) {
+        return chars.slice(i + 1).join('')
+      }
+    }
+    return text
+  }
+
+  private getLeadingMeaningfulChar(text: string): string | null {
+    for (const ch of Array.from(text.trimStart())) {
+      if (this.isMeaningfulChar(ch)) {
+        return ch
+      }
+    }
+    return null
+  }
+
+  private getTrailingMeaningfulChar(text: string): string | null {
+    const chars = Array.from(text.trimEnd())
+    for (let i = chars.length - 1; i >= 0; i -= 1) {
+      if (this.isMeaningfulChar(chars[i])) {
+        return chars[i]
+      }
+    }
+    return null
+  }
+
+  private removeTrailingStrongPunctuation(text: string): string {
+    return text.replace(/[。！？!?]+$/u, '').trimEnd()
+  }
+
+  private mergeSuspiciousBoundaryWithPreviousPair(nextOriginal: string): number | null {
+    if (this.sentencePairs.length === 0) {
+      return null
+    }
+
+    const prevIndex = this.sentencePairs.length - 1
+    const prevPair = this.sentencePairs[prevIndex]
+    const prevOriginal = prevPair.original.trim()
+    const nextTrimmed = nextOriginal.trim()
+    if (!prevOriginal || !nextTrimmed || !/[。！？!?]$/u.test(prevOriginal)) {
+      return null
+    }
+
+    const prevWithoutPunctuation = this.removeTrailingStrongPunctuation(prevOriginal)
+    if (!prevWithoutPunctuation) {
+      return null
+    }
+
+    const prevTail = this.getTailAfterLastBoundary(prevWithoutPunctuation)
+    const prevTailMeaningful = this.getMeaningfulCharCount(prevTail)
+    const prevLastMeaningful = this.getTrailingMeaningfulChar(prevWithoutPunctuation)
+    const nextFirstMeaningful = this.getLeadingMeaningfulChar(nextTrimmed)
+    if (!prevLastMeaningful || !nextFirstMeaningful) {
+      return null
+    }
+
+    const looksLikeHanCompoundBreak =
+      prevTailMeaningful <= 2 && this.isHanChar(prevLastMeaningful) && this.isHanChar(nextFirstMeaningful)
+    const looksLikeParticleContinuation = this.JAPANESE_CONTINUATION_PARTICLES.has(nextFirstMeaningful)
+    if (!looksLikeHanCompoundBreak && !looksLikeParticleContinuation) {
+      return null
+    }
+
+    const mergedOriginal = this.normalizeJapaneseSpacing(
+      mergeText(prevWithoutPunctuation, nextTrimmed)
+    ).trim()
+    if (!mergedOriginal) {
+      return null
+    }
+
+    this.sentencePairs[prevIndex] = {
+      ...prevPair,
+      original: mergedOriginal,
+      translated: undefined
+    }
+    this.rebuildConfirmedTranslation()
+    return prevIndex
+  }
+
   private rebuildConfirmedTranslation(): void {
     let merged = ''
     for (const pair of this.sentencePairs) {
@@ -376,7 +932,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
   }
 
   private emitPartialResult(): void {
-    const combined = this.confirmedText.trim()
+    const combined = this.normalizeJapaneseSpacing(
+      mergeText(this.confirmedText, this.previewText)
+    ).trim()
     const translated = this.confirmedTranslation.trim()
     const currentSegment: SpeakerSegment | null = combined
       ? {

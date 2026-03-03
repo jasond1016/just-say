@@ -80,8 +80,11 @@
       "esbuild": "^0.25.0"
     },
     "onlyBuiltDependencies": [
+      "better-sqlite3",
       "electron",
-      "esbuild"
+      "electron-winstaller",
+      "esbuild",
+      "uiohook-napi"
     ]
   }
 }

@@ -41,6 +41,9 @@ interface RendererConfig {
     local?: {
       engine?: LocalEngine
       modelType?: ModelType
+      serverMode?: 'local' | 'remote'
+      serverHost?: string
+      serverPort?: number
     }
     api?: {
       model?: string
@@ -143,6 +146,11 @@ export function DashboardSettingsModal({
   const [onlineApiKeyInput, setOnlineApiKeyInput] = useState('')
   const [onlineApiKeyConfigured, setOnlineApiKeyConfigured] = useState(false)
   const [updatingOnlineApiKey, setUpdatingOnlineApiKey] = useState(false)
+  const [localServerMode, setLocalServerMode] = useState<'local' | 'remote'>('local')
+  const [localServerHost, setLocalServerHost] = useState('127.0.0.1')
+  const [localServerPortInput, setLocalServerPortInput] = useState('8765')
+  const [testingLocalServer, setTestingLocalServer] = useState(false)
+  const [localServerTestResult, setLocalServerTestResult] = useState<boolean | null>(null)
   const [hotkey, setHotkey] = useState<TriggerKey>('RCtrl')
   const [translationEnabled, setTranslationEnabled] = useState(false)
   const [meetingTranslationEnabled, setMeetingTranslationEnabled] = useState(false)
@@ -199,6 +207,9 @@ export function DashboardSettingsModal({
         setLanguage(cfg.recognition?.language || 'auto')
         const nextModelSize = (cfg.recognition?.local?.modelType || 'large-v3') as ModelType
         setModelSize(engineValue === 'local-sensevoice' ? 'small' : nextModelSize)
+        setLocalServerMode(cfg.recognition?.local?.serverMode || 'local')
+        setLocalServerHost(cfg.recognition?.local?.serverHost || '127.0.0.1')
+        setLocalServerPortInput(String(cfg.recognition?.local?.serverPort || 8765))
         setApiModel(cfg.recognition?.api?.model || 'whisper-1')
         setSonioxModel(cfg.recognition?.soniox?.model || 'stt-rt-v3')
         setGroqModel(cfg.recognition?.groq?.model || 'whisper-large-v3-turbo')
@@ -245,6 +256,7 @@ export function DashboardSettingsModal({
   )
   const isSenseVoiceEngine = engine === 'local-sensevoice'
   const isOnlineEngine = engine === 'api' || engine === 'soniox' || engine === 'groq'
+  const isRemoteLocalServer = isLocalEngine && localServerMode === 'remote'
   const onlineApiKeyProvider = useMemo(() => getApiKeyProvider(engine), [engine])
   const anyTranslationEnabled = translationEnabled || meetingTranslationEnabled
   const baseFieldClassName =
@@ -262,6 +274,10 @@ export function DashboardSettingsModal({
       setModelSize('small')
     }
   }, [isSenseVoiceEngine])
+
+  useEffect(() => {
+    setLocalServerTestResult(null)
+  }, [localServerMode, localServerHost, localServerPortInput, engine])
 
   useEffect(() => {
     setOnlineApiKeyInput('')
@@ -309,6 +325,31 @@ export function DashboardSettingsModal({
       setOnlineApiKeyInput('')
     } finally {
       setUpdatingOnlineApiKey(false)
+    }
+  }
+
+  const resolveLocalServerPort = useCallback((): number => {
+    const parsedPort = Number.parseInt(localServerPortInput, 10)
+    if (Number.isNaN(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+      return 8765
+    }
+    return parsedPort
+  }, [localServerPortInput])
+
+  const testRemoteLocalServer = async (): Promise<void> => {
+    if (testingLocalServer) return
+    setTestingLocalServer(true)
+    setLocalServerTestResult(null)
+    try {
+      const healthy = await window.api.testWhisperServer(
+        localServerHost.trim() || '127.0.0.1',
+        resolveLocalServerPort()
+      )
+      setLocalServerTestResult(healthy)
+    } catch {
+      setLocalServerTestResult(false)
+    } finally {
+      setTestingLocalServer(false)
     }
   }
 
@@ -433,7 +474,10 @@ export function DashboardSettingsModal({
           },
           local: {
             engine: localEngine,
-            modelType: localEngine === 'sensevoice' ? 'small' : modelSize
+            modelType: localEngine === 'sensevoice' ? 'small' : modelSize,
+            serverMode: localServerMode,
+            serverHost: localServerHost.trim() || '127.0.0.1',
+            serverPort: resolveLocalServerPort()
           },
           api: {
             model: apiModel.trim() || 'whisper-1'
@@ -708,6 +752,87 @@ export function DashboardSettingsModal({
                         </select>
                       </label>
                     </div>
+
+                    {isLocalEngine && (
+                      <>
+                        <div className="grid grid-cols-2 gap-4">
+                          <label className="space-y-1.5" htmlFor="settings-local-server-mode">
+                            <span className="text-sm font-medium">{m.settings.localServerMode}</span>
+                            <select
+                              id="settings-local-server-mode"
+                              className={fullFieldClassName}
+                              value={localServerMode}
+                              onChange={(event) =>
+                                setLocalServerMode(event.target.value as 'local' | 'remote')
+                              }
+                            >
+                              <option value="local">{m.settings.localServerModeLocal}</option>
+                              <option value="remote">{m.settings.localServerModeRemote}</option>
+                            </select>
+                          </label>
+                          <div />
+                        </div>
+
+                        {isRemoteLocalServer && (
+                          <>
+                            <div className="grid grid-cols-2 gap-4">
+                              <label className="space-y-1.5" htmlFor="settings-local-server-host">
+                                <span className="text-sm font-medium">
+                                  {m.settings.localServerHost}
+                                </span>
+                                <input
+                                  id="settings-local-server-host"
+                                  type="text"
+                                  className={fullFieldClassName}
+                                  value={localServerHost}
+                                  onChange={(event) => setLocalServerHost(event.target.value)}
+                                  placeholder="127.0.0.1"
+                                />
+                              </label>
+                              <label className="space-y-1.5" htmlFor="settings-local-server-port">
+                                <span className="text-sm font-medium">
+                                  {m.settings.localServerPort}
+                                </span>
+                                <input
+                                  id="settings-local-server-port"
+                                  type="number"
+                                  min={1}
+                                  max={65535}
+                                  className={fullFieldClassName}
+                                  value={localServerPortInput}
+                                  onChange={(event) => setLocalServerPortInput(event.target.value)}
+                                  placeholder="8765"
+                                />
+                              </label>
+                            </div>
+
+                            <div className="flex items-center justify-between rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                              <p className="text-xs text-muted-foreground">
+                                {localServerTestResult === null
+                                  ? m.settings.localServerTestIdle
+                                  : localServerTestResult
+                                    ? m.settings.localServerTestSuccess
+                                    : m.settings.localServerTestFailed}
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-3 text-xs"
+                                onClick={() => {
+                                  void testRemoteLocalServer()
+                                }}
+                                disabled={testingLocalServer || saving}
+                              >
+                                {testingLocalServer
+                                  ? m.settings.localServerTesting
+                                  : m.settings.testLocalServer}
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
 
                     {isOnlineEngine && (
                       <>
