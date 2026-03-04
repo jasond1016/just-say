@@ -7,6 +7,11 @@ import {
 } from './recognition/streaming-soniox'
 import { StreamingGroqRecognizer, StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingLocalRecognizer, StreamingLocalConfig } from './recognition/streaming-local'
+import {
+  StreamingLocalWsRecognizer,
+  StreamingLocalWsConfig
+} from './recognition/streaming-local-ws'
+import type { MeetingTranslationMetricsSnapshot } from './translation/service'
 import { profiler } from './utils/profiler'
 
 export type MeetingBackend = 'local' | 'soniox' | 'groq'
@@ -44,6 +49,15 @@ export interface TranscriptSegment {
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
 
 export type ExternalTranslator = (text: string, targetLanguage: string) => Promise<string>
+export type ExternalBatchTranslator = (texts: string[], targetLanguage: string) => Promise<string[]>
+export type ExternalTranslationMetricsProvider = (options?: {
+  reset?: boolean
+}) => MeetingTranslationMetricsSnapshot | null
+
+interface LocalTranslationBatchConfig {
+  batchWindowMs?: number
+  maxBatchItems?: number
+}
 
 /**
  * Manages meeting transcription by receiving system audio from renderer process
@@ -60,18 +74,24 @@ export class MeetingTranscriptionManager extends EventEmitter {
     | StreamingSonioxRecognizer
     | StreamingGroqRecognizer
     | StreamingLocalRecognizer
+    | StreamingLocalWsRecognizer
     | null = null
   private backend: MeetingBackend
   private sonioxConfig?: StreamingSonioxConfig
   private groqConfig?: StreamingGroqConfig
   private localConfig?: StreamingLocalConfig
   private externalTranslator?: ExternalTranslator
+  private externalBatchTranslator?: ExternalBatchTranslator
+  private localTranslationBatchConfig?: LocalTranslationBatchConfig
+  private translationMetricsProvider?: ExternalTranslationMetricsProvider
 
   private status: MeetingStatus = 'idle'
   private preConnectPromise: Promise<void> | null = null
   private transcriptHistory: TranscriptSegment[] = []
   private lastTextLength = 0
   private lastTranslatedTextLength = 0
+  private maxSentencePairsSeen = 0
+  private maxTranslatedSentencePairsSeen = 0
 
   // For mixing audio streams
   private mixBuffer: Buffer[] = []
@@ -88,7 +108,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
     sonioxConfig?: StreamingSonioxConfig,
     groqConfig?: StreamingGroqConfig,
     localConfig?: StreamingLocalConfig,
-    externalTranslator?: ExternalTranslator
+    externalTranslator?: ExternalTranslator,
+    externalBatchTranslator?: ExternalBatchTranslator,
+    localTranslationBatchConfig?: LocalTranslationBatchConfig,
+    translationMetricsProvider?: ExternalTranslationMetricsProvider
   ) {
     super()
     this.backend = backend
@@ -96,6 +119,9 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.groqConfig = groqConfig
     this.localConfig = localConfig
     this.externalTranslator = externalTranslator
+    this.externalBatchTranslator = externalBatchTranslator
+    this.localTranslationBatchConfig = localTranslationBatchConfig
+    this.translationMetricsProvider = translationMetricsProvider
   }
 
   /**
@@ -126,11 +152,34 @@ export class MeetingTranscriptionManager extends EventEmitter {
     console.log(`[MeetingTranscription] Pre-connecting to ${this.backend} recognition service...`)
 
     // Create appropriate recognizer based on backend
-    let recognizer: StreamingSonioxRecognizer | StreamingGroqRecognizer | StreamingLocalRecognizer
+    let recognizer:
+      | StreamingSonioxRecognizer
+      | StreamingGroqRecognizer
+      | StreamingLocalRecognizer
+      | StreamingLocalWsRecognizer
     if (this.backend === 'groq') {
       recognizer = new StreamingGroqRecognizer(this.groqConfig)
     } else if (this.backend === 'local') {
-      recognizer = new StreamingLocalRecognizer(this.localConfig)
+      const mode = this.localConfig?.mode || 'http_chunk'
+      const wsConfig: StreamingLocalWsConfig = { ...this.localConfig }
+      if (mode !== 'http_chunk') {
+        const wsRecognizer = new StreamingLocalWsRecognizer(wsConfig)
+        try {
+          await wsRecognizer.preConnect()
+          recognizer = wsRecognizer
+        } catch (error) {
+          if (mode === 'streaming') {
+            throw error
+          }
+          console.warn(
+            '[MeetingTranscription] WS pre-connect unavailable, fallback to HTTP chunk mode:',
+            error
+          )
+          recognizer = new StreamingLocalRecognizer(this.localConfig)
+        }
+      } else {
+        recognizer = new StreamingLocalRecognizer(this.localConfig)
+      }
     } else {
       recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
     }
@@ -249,6 +298,9 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.transcriptHistory = []
     this.lastTextLength = 0
     this.lastTranslatedTextLength = 0
+    this.maxSentencePairsSeen = 0
+    this.maxTranslatedSentencePairsSeen = 0
+    this.translationMetricsProvider?.({ reset: true })
 
     try {
       // If pre-connect is currently in flight, wait briefly then continue with cold start.
@@ -292,11 +344,46 @@ export class MeetingTranscriptionManager extends EventEmitter {
             ? {
                 enabled: true,
                 targetLanguage: options.targetLanguage!,
-                translator: useExternalTranslation ? this.externalTranslator : undefined
+                translator: useExternalTranslation ? this.externalTranslator : undefined,
+                batchTranslator: useExternalTranslation ? this.externalBatchTranslator : undefined,
+                batchWindowMs: this.localTranslationBatchConfig?.batchWindowMs,
+                maxBatchItems: this.localTranslationBatchConfig?.maxBatchItems
               }
             : undefined
         }
-        if (
+        const localMode = recognizerConfig.mode || 'http_chunk'
+        const wsConfig: StreamingLocalWsConfig = {
+          ...recognizerConfig,
+          translation: recognizerConfig.translation
+        }
+        if (localMode !== 'http_chunk') {
+          let wsRecognizer: StreamingLocalWsRecognizer | null = null
+          if (
+            this.recognizer instanceof StreamingLocalWsRecognizer &&
+            this.recognizer.isPreConnected()
+          ) {
+            this.recognizer.updateConfig(wsConfig)
+            wsRecognizer = this.recognizer
+          } else {
+            const candidate = new StreamingLocalWsRecognizer(wsConfig)
+            try {
+              await candidate.preConnect()
+              wsRecognizer = candidate
+            } catch (error) {
+              if (localMode === 'streaming') {
+                throw error
+              }
+              console.warn(
+                '[MeetingTranscription] WS mode unavailable, fallback to HTTP chunk mode:',
+                error
+              )
+              this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
+            }
+          }
+          if (wsRecognizer) {
+            this.recognizer = wsRecognizer
+          }
+        } else if (
           this.recognizer instanceof StreamingLocalRecognizer &&
           this.recognizer.isPreConnected()
         ) {
@@ -322,11 +409,16 @@ export class MeetingTranscriptionManager extends EventEmitter {
         }
       }
 
-      // Set up recognizer events (clear any from pre-connect first)
-      this.recognizer.removeAllListeners('partial')
-      this.recognizer.removeAllListeners('error')
+      const recognizer = this.recognizer
+      if (!recognizer) {
+        throw new Error('Recognizer initialization failed')
+      }
 
-      this.recognizer.on('partial', (result: PartialResult) => {
+      // Set up recognizer events (clear any from pre-connect first)
+      recognizer.removeAllListeners('partial')
+      recognizer.removeAllListeners('error')
+
+      recognizer.on('partial', (result: PartialResult) => {
         // Track response for profiling (use combined length for latency tracking)
         const translatedLength = result.currentSegment?.translatedText?.length || 0
         const responseType =
@@ -338,6 +430,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
         profiler.markResponseReceived(result.combined.length, this.lastTextLength, responseType)
         this.lastTextLength = result.combined.length
         this.lastTranslatedTextLength = translatedLength
+        const sentencePairs = result.currentSegment?.sentencePairs || []
+        if (sentencePairs.length > this.maxSentencePairsSeen) {
+          this.maxSentencePairsSeen = sentencePairs.length
+        }
+        const translatedSentencePairs = sentencePairs.filter((pair) => !!pair.translated).length
+        if (translatedSentencePairs > this.maxTranslatedSentencePairsSeen) {
+          this.maxTranslatedSentencePairsSeen = translatedSentencePairs
+        }
 
         const segment: TranscriptSegment = {
           text: result.combined, // Legacy: combined text for backward compatibility
@@ -353,14 +453,14 @@ export class MeetingTranscriptionManager extends EventEmitter {
         this.emit('transcript', segment)
       })
 
-      this.recognizer.on('error', (err: Error) => {
+      recognizer.on('error', (err: Error) => {
         console.error('[MeetingTranscription] Recognizer error:', err)
         this.emit('error', err)
       })
 
       // Start WebSocket connection (instant if pre-connected)
       profiler.markConnectionStart()
-      await this.recognizer.startSession()
+      await recognizer.startSession()
       profiler.markConnectionEstablished()
       console.log('[MeetingTranscription] Recognizer session started')
 
@@ -428,10 +528,20 @@ export class MeetingTranscriptionManager extends EventEmitter {
         }
         const keepWarmRecognizer =
           this.recognizer instanceof StreamingLocalRecognizer ||
+          this.recognizer instanceof StreamingLocalWsRecognizer ||
           this.recognizer instanceof StreamingGroqRecognizer
         if (!keepWarmRecognizer) {
           this.recognizer = null
         }
+      }
+
+      profiler.markSentencePairMetrics({
+        sentencePairs: this.maxSentencePairsSeen,
+        translatedSentencePairs: this.maxTranslatedSentencePairsSeen
+      })
+      const translationMetrics = this.translationMetricsProvider?.({ reset: true })
+      if (translationMetrics) {
+        profiler.markMeetingTranslationMetrics(translationMetrics)
       }
 
       // Print profiling report

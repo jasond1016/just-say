@@ -8,9 +8,12 @@ JustSay - Local ASR HTTP Server
 """
 
 import argparse
+import base64
 import glob
 import json
+import logging
 import os
+import struct
 import sys
 import tempfile
 import threading
@@ -18,6 +21,8 @@ import time
 import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
+from websockets.exceptions import ConnectionClosed, InvalidUpgrade
+from websockets.sync.server import serve
 
 DEFAULT_SENSEVOICE_MODEL_ID = "FunAudioLLM/SenseVoiceSmall"
 
@@ -74,7 +79,28 @@ _runtime_policy = {
     "sensevoice_use_itn": True,
     "device": "cpu",
     "compute_type": "int8",
+    "ws_port": 8766,
 }
+_ws_server = None
+
+
+class _SuppressWsInvalidUpgradeFilter(logging.Filter):
+    """Suppress noisy traceback logs when plain HTTP hits WS port."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info and len(record.exc_info) >= 2:
+            exc = record.exc_info[1]
+            if isinstance(exc, InvalidUpgrade):
+                return False
+        return True
+
+
+def configure_ws_logger() -> logging.Logger:
+    logger = logging.getLogger("websockets.server")
+    has_filter = any(isinstance(f, _SuppressWsInvalidUpgradeFilter) for f in logger.filters)
+    if not has_filter:
+        logger.addFilter(_SuppressWsInvalidUpgradeFilter())
+    return logger
 
 
 def parse_bool(value, default=False):
@@ -365,6 +391,366 @@ def transcribe_with_sensevoice(model, temp_path: str, language: str | None, sens
     return {"text": text, "language": detected_language or final_language, "language_probability": None, "duration": None}
 
 
+def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
+    start_time = time.time()
+
+    default_engine = _model_info["engine"] or _runtime_policy["engine"] or "faster-whisper"
+    default_model_type = _model_info["model_type"] or _runtime_policy["default_model_type"] or "tiny"
+    default_sensevoice_model_id = _model_info["sensevoice_model_id"] or _runtime_policy["sensevoice_model_id"]
+    default_device = _model_info["device"] or _runtime_policy["device"] or "cpu"
+    default_compute_type = _model_info["compute_type"] or _runtime_policy["compute_type"] or "int8"
+    default_language = _runtime_policy["default_language"]
+    default_sensevoice_use_itn = _runtime_policy["sensevoice_use_itn"]
+
+    requested_engine = params.get("engine", [default_engine])[0]
+    requested_model_type = params.get("model", [default_model_type])[0]
+    requested_sensevoice_model_id = params.get("sensevoice_model_id", [default_sensevoice_model_id])[0]
+    requested_sensevoice_use_itn = parse_bool(
+        params.get("sensevoice_use_itn", [default_sensevoice_use_itn])[0],
+        default_sensevoice_use_itn,
+    )
+    requested_device = params.get("device", [default_device])[0]
+    requested_compute_type = params.get("compute_type", [default_compute_type])[0]
+    requested_language = params.get("language", [default_language])[0]
+    download_root = params.get("download_root", [None])[0]
+
+    if _runtime_policy["lock_model"]:
+        engine = default_engine
+        model_type = default_model_type if default_engine == "faster-whisper" else None
+        sensevoice_model_id = default_sensevoice_model_id
+        sensevoice_use_itn = default_sensevoice_use_itn
+    else:
+        engine = requested_engine
+        model_type = requested_model_type if engine == "faster-whisper" else None
+        sensevoice_model_id = requested_sensevoice_model_id
+        sensevoice_use_itn = requested_sensevoice_use_itn
+
+    if _runtime_policy["lock_language"]:
+        language = default_language
+    else:
+        language = requested_language
+
+    if _runtime_policy["lock_device_compute"]:
+        requested_device = _runtime_policy["device"]
+        compute_type = _runtime_policy["compute_type"]
+    else:
+        compute_type = requested_compute_type
+
+    if engine == "sensevoice":
+        resolved_sensevoice_device = resolve_sensevoice_device(requested_device)
+        device = "cuda" if resolved_sensevoice_device.startswith("cuda") else "cpu"
+    else:
+        device = requested_device
+
+    ensure_download_env(download_root)
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+        tmp_file.write(audio_data)
+        temp_path = tmp_file.name
+
+    try:
+        model, model_reused, reload_reason = get_model(
+            engine=engine,
+            model_type=model_type,
+            sensevoice_model_id=sensevoice_model_id,
+            device=device,
+            compute_type=compute_type,
+            download_root=download_root,
+        )
+
+        if engine == "sensevoice":
+            payload = transcribe_with_sensevoice(model, temp_path, language, sensevoice_use_itn)
+        else:
+            payload = transcribe_with_faster_whisper(model, temp_path, language)
+
+        return {
+            "success": True,
+            "text": payload["text"],
+            "language": payload.get("language"),
+            "language_probability": payload.get("language_probability"),
+            "duration": payload.get("duration"),
+            "processing_time": time.time() - start_time,
+            "engine": engine,
+            "model": model_type if engine == "faster-whisper" else sensevoice_model_id,
+            "device": device,
+            "compute_type": compute_type,
+            "model_reused": model_reused,
+            "reload_reason": reload_reason,
+        }
+    except Exception as exc:
+        model_name = model_type if engine == "faster-whisper" else sensevoice_model_id
+        print(
+            f"[Server] Transcribe failed: engine={engine}, model={model_name}, device={device}, "
+            f"compute_type={compute_type}, error={exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        return {
+            "success": False,
+            "text": "",
+            "error": str(exc),
+            "processing_time": time.time() - start_time,
+            "engine": engine,
+            "model": model_name,
+            "device": device,
+            "compute_type": compute_type,
+            "language": language,
+            "model_reused": False,
+            "reload_reason": "transcribe_failed",
+        }
+    finally:
+        try:
+            os.unlink(temp_path)
+        except Exception:
+            pass
+
+
+def build_wav_from_pcm(pcm_data: bytes, sample_rate: int) -> bytes:
+    num_channels = 1
+    bits_per_sample = 16
+    byte_rate = sample_rate * num_channels * bits_per_sample // 8
+    block_align = num_channels * bits_per_sample // 8
+    data_size = len(pcm_data)
+    header_size = 44
+    file_size = header_size + data_size - 8
+
+    header = bytearray(header_size)
+    header[0:4] = b"RIFF"
+    struct.pack_into("<I", header, 4, file_size)
+    header[8:12] = b"WAVE"
+    header[12:16] = b"fmt "
+    struct.pack_into("<I", header, 16, 16)
+    struct.pack_into("<H", header, 20, 1)
+    struct.pack_into("<H", header, 22, num_channels)
+    struct.pack_into("<I", header, 24, sample_rate)
+    struct.pack_into("<I", header, 28, byte_rate)
+    struct.pack_into("<H", header, 32, block_align)
+    struct.pack_into("<H", header, 34, bits_per_sample)
+    header[36:40] = b"data"
+    struct.pack_into("<I", header, 40, data_size)
+    return bytes(header) + pcm_data
+
+
+def parse_positive_int(raw_value, fallback: int, minimum: int = 1) -> int:
+    try:
+        value = int(raw_value)
+        if value < minimum:
+            return fallback
+        return value
+    except Exception:
+        return fallback
+
+
+def find_text_overlap(left: str, right: str, max_overlap: int = 200) -> int:
+    if not left or not right:
+        return 0
+    limit = min(max_overlap, len(left), len(right))
+    for size in range(limit, 0, -1):
+        if left[-size:] == right[:size]:
+            return size
+    return 0
+
+
+def merge_text(left: str, right: str) -> str:
+    if not left:
+        return right
+    if not right:
+        return left
+    if left[-1].isspace() or right[0].isspace():
+        return left + right
+    return left + right
+
+
+class WebSocketStreamingSession:
+    """WS streaming session for local ASR (based on websockets library)."""
+
+    def __init__(self, websocket, params: dict):
+        self.websocket = websocket
+        self.params = params
+        self.sample_rate = parse_positive_int(params.get("sample_rate", ["16000"])[0], 16000)
+        self.preview_interval_ms = parse_positive_int(params.get("preview_interval_ms", ["450"])[0], 450)
+        self.preview_min_audio_ms = parse_positive_int(params.get("preview_min_audio_ms", ["350"])[0], 350)
+        self.preview_min_new_audio_ms = parse_positive_int(params.get("preview_min_new_audio_ms", ["220"])[0], 220)
+        self.preview_window_ms = parse_positive_int(params.get("preview_window_ms", ["2600"])[0], 2600)
+        self.min_chunk_ms = parse_positive_int(params.get("min_chunk_ms", ["1000"])[0], 1000)
+        self.silence_threshold_ms = parse_positive_int(params.get("silence_ms", ["700"])[0], 700)
+        self.max_chunk_ms = parse_positive_int(params.get("max_chunk_ms", ["5000"])[0], 5000)
+        self.overlap_ms = parse_positive_int(params.get("overlap_ms", ["320"])[0], 320)
+
+        self.pending_pcm = bytearray()
+        self.pending_new_bytes = 0
+        self.final_text = ""
+        self.last_preview_at = 0.0
+        self.last_preview_audio_bytes = 0
+        self.buffer_start_at = 0.0
+        self.last_audio_at = time.time()
+        self.closed = False
+
+    def bytes_for_ms(self, ms: int) -> int:
+        if ms <= 0:
+            return 0
+        return int((self.sample_rate * 2 * ms) / 1000)
+
+    def duration_ms_from_bytes(self, size: int) -> float:
+        if size <= 0:
+            return 0.0
+        return (size / 2) / self.sample_rate * 1000.0
+
+    def get_preview_pcm(self) -> bytes:
+        if not self.pending_pcm:
+            return b""
+        max_bytes = self.bytes_for_ms(self.preview_window_ms)
+        if max_bytes <= 0 or len(self.pending_pcm) <= max_bytes:
+            return bytes(self.pending_pcm)
+        return bytes(self.pending_pcm[-max_bytes:])
+
+    def retain_overlap(self):
+        if not self.pending_pcm:
+            return
+        overlap_bytes = self.bytes_for_ms(self.overlap_ms)
+        if overlap_bytes <= 0:
+            self.pending_pcm = bytearray()
+            return
+        if len(self.pending_pcm) > overlap_bytes:
+            self.pending_pcm = bytearray(self.pending_pcm[-overlap_bytes:])
+
+    def emit_json(self, payload: dict):
+        self.websocket.send(json.dumps(payload, ensure_ascii=False))
+
+    def transcribe_pcm(self, pcm_data: bytes) -> dict:
+        wav_data = build_wav_from_pcm(pcm_data, self.sample_rate)
+        return transcribe_audio_payload(wav_data, self.params)
+
+    def emit_preview(self):
+        if self.closed:
+            return
+        now = time.time()
+        if (now - self.last_preview_at) * 1000 < self.preview_interval_ms:
+            return
+        if self.duration_ms_from_bytes(len(self.pending_pcm)) < self.preview_min_audio_ms:
+            return
+        new_audio_ms = self.duration_ms_from_bytes(len(self.pending_pcm) - self.last_preview_audio_bytes)
+        if new_audio_ms < self.preview_min_new_audio_ms:
+            return
+
+        result = self.transcribe_pcm(self.get_preview_pcm())
+        self.last_preview_at = now
+        self.last_preview_audio_bytes = len(self.pending_pcm)
+        if not result.get("success"):
+            self.emit_json({"type": "error", "message": result.get("error", "stream_preview_failed")})
+            return
+
+        preview_text = (result.get("text") or "").strip()
+        if not preview_text:
+            return
+        overlap = find_text_overlap(self.final_text, preview_text)
+        deduped = preview_text[overlap:] if overlap > 0 else preview_text
+        self.emit_json({"type": "interim", "text": deduped, "ts": int(time.time() * 1000)})
+
+    def emit_final(self, reason: str):
+        if self.closed or self.pending_new_bytes <= 0:
+            return
+        result = self.transcribe_pcm(bytes(self.pending_pcm))
+        if not result.get("success"):
+            self.emit_json({"type": "error", "message": result.get("error", "stream_final_failed")})
+            return
+
+        final_chunk = (result.get("text") or "").strip()
+        if not final_chunk:
+            self.pending_new_bytes = 0
+            self.retain_overlap()
+            return
+
+        overlap = find_text_overlap(self.final_text, final_chunk)
+        deduped = final_chunk[overlap:] if overlap > 0 else final_chunk
+        if deduped.strip():
+            self.final_text = merge_text(self.final_text, deduped)
+            self.emit_json({"type": "final_chunk", "text": deduped, "ts": int(time.time() * 1000)})
+            self.emit_json({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
+
+        self.pending_new_bytes = 0
+        self.retain_overlap()
+        self.buffer_start_at = 0.0
+        self.last_preview_audio_bytes = len(self.pending_pcm)
+
+    def maybe_emit_final_by_timing(self):
+        if self.pending_new_bytes <= 0 or self.buffer_start_at <= 0:
+            return
+        now = time.time()
+        pending_ms = self.duration_ms_from_bytes(self.pending_new_bytes)
+        silence_ms = (now - self.last_audio_at) * 1000
+        if pending_ms >= self.max_chunk_ms:
+            self.emit_final("max_chunk")
+            return
+        if pending_ms >= self.min_chunk_ms and silence_ms >= self.silence_threshold_ms:
+            self.emit_final("silence")
+
+    def run(self):
+        self.emit_json({"type": "ready", "streaming": True, "ts": int(time.time() * 1000)})
+        while not self.closed:
+            try:
+                message = self.websocket.recv(timeout=0.2)
+                if isinstance(message, str):
+                    message = message.strip()
+                    if not message:
+                        continue
+                    data = json.loads(message)
+                    msg_type = data.get("type")
+                    if msg_type == "flush":
+                        self.emit_final("flush")
+                        self.emit_json({"type": "final", "text": self.final_text, "ts": int(time.time() * 1000)})
+                    elif msg_type == "close":
+                        self.emit_final("close")
+                        self.closed = True
+                        break
+                    elif msg_type == "ping":
+                        self.emit_json({"type": "pong", "ts": int(time.time() * 1000)})
+                    continue
+                if isinstance(message, bytes):  # binary audio chunk (PCM16LE mono)
+                    if message:
+                        self.pending_pcm.extend(message)
+                        self.pending_new_bytes += len(message)
+                        self.last_audio_at = time.time()
+                        if self.buffer_start_at <= 0:
+                            self.buffer_start_at = self.last_audio_at
+            except TimeoutError:
+                pass
+            except ConnectionClosed:
+                self.closed = True
+                break
+            except json.JSONDecodeError:
+                self.emit_json({"type": "error", "message": "invalid_json"})
+            except Exception as exc:
+                self.emit_json({"type": "error", "message": str(exc)})
+                self.closed = True
+                break
+
+            try:
+                self.emit_preview()
+                self.maybe_emit_final_by_timing()
+            except Exception as exc:
+                self.emit_json({"type": "error", "message": str(exc)})
+                self.closed = True
+                break
+
+
+def handle_websocket_connection(websocket):
+    try:
+        raw_path = websocket.request.path
+    except Exception:
+        raw_path = "/stream"
+
+    parsed = urlparse(raw_path)
+    if parsed.path != "/stream":
+        websocket.send(json.dumps({"type": "error", "message": "invalid_stream_path"}))
+        websocket.close()
+        return
+
+    params = parse_qs(parsed.query)
+    session = WebSocketStreamingSession(websocket, params)
+    session.run()
+
+
 class WhisperHandler(BaseHTTPRequestHandler):
     """HTTP request handler."""
 
@@ -399,6 +785,18 @@ class WhisperHandler(BaseHTTPRequestHandler):
                         "device": _runtime_policy["device"],
                         "compute_type": _runtime_policy["compute_type"],
                     },
+                }
+            )
+        elif parsed.path == "/capabilities":
+            self.send_json(
+                {
+                    "streaming_asr": True,
+                    "transport": ["http", "websocket"],
+                    "events": ["interim", "final_chunk", "endpoint", "final", "error"],
+                    "audio_format": "pcm_s16le",
+                    "sample_rate": 16000,
+                    "ws_path": "/stream",
+                    "ws_port": _runtime_policy["ws_port"],
                 }
             )
         elif parsed.path == "/gpu":
@@ -443,121 +841,9 @@ class WhisperHandler(BaseHTTPRequestHandler):
             self.send_json({"success": False, "error": str(exc), "text": ""}, 500)
 
     def transcribe_audio(self, audio_data: bytes, params: dict) -> dict:
-        start_time = time.time()
-
-        default_engine = _model_info["engine"] or _runtime_policy["engine"] or "faster-whisper"
-        default_model_type = _model_info["model_type"] or _runtime_policy["default_model_type"] or "tiny"
-        default_sensevoice_model_id = _model_info["sensevoice_model_id"] or _runtime_policy["sensevoice_model_id"]
-        default_device = _model_info["device"] or _runtime_policy["device"] or "cpu"
-        default_compute_type = _model_info["compute_type"] or _runtime_policy["compute_type"] or "int8"
-        default_language = _runtime_policy["default_language"]
-        default_sensevoice_use_itn = _runtime_policy["sensevoice_use_itn"]
-
-        requested_engine = params.get("engine", [default_engine])[0]
-        requested_model_type = params.get("model", [default_model_type])[0]
-        requested_sensevoice_model_id = params.get("sensevoice_model_id", [default_sensevoice_model_id])[0]
-        requested_sensevoice_use_itn = parse_bool(
-            params.get("sensevoice_use_itn", [default_sensevoice_use_itn])[0],
-            default_sensevoice_use_itn,
-        )
-        requested_device = params.get("device", [default_device])[0]
-        requested_compute_type = params.get("compute_type", [default_compute_type])[0]
-        requested_language = params.get("language", [default_language])[0]
-        download_root = params.get("download_root", [None])[0]
-
-        if _runtime_policy["lock_model"]:
-            engine = default_engine
-            model_type = default_model_type if default_engine == "faster-whisper" else None
-            sensevoice_model_id = default_sensevoice_model_id
-            sensevoice_use_itn = default_sensevoice_use_itn
-        else:
-            engine = requested_engine
-            model_type = requested_model_type if engine == "faster-whisper" else None
-            sensevoice_model_id = requested_sensevoice_model_id
-            sensevoice_use_itn = requested_sensevoice_use_itn
-
-        if _runtime_policy["lock_language"]:
-            language = default_language
-        else:
-            language = requested_language
-
-        if _runtime_policy["lock_device_compute"]:
-            requested_device = _runtime_policy["device"]
-            compute_type = _runtime_policy["compute_type"]
-        else:
-            compute_type = requested_compute_type
-
-        if engine == "sensevoice":
-            resolved_sensevoice_device = resolve_sensevoice_device(requested_device)
-            device = "cuda" if resolved_sensevoice_device.startswith("cuda") else "cpu"
-        else:
-            device = requested_device
-
-        ensure_download_env(download_root)
-
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-            tmp_file.write(audio_data)
-            temp_path = tmp_file.name
-
-        try:
-            model, model_reused, reload_reason = get_model(
-                engine=engine,
-                model_type=model_type,
-                sensevoice_model_id=sensevoice_model_id,
-                device=device,
-                compute_type=compute_type,
-                download_root=download_root,
-            )
-
-            if engine == "sensevoice":
-                payload = transcribe_with_sensevoice(model, temp_path, language, sensevoice_use_itn)
-            else:
-                payload = transcribe_with_faster_whisper(model, temp_path, language)
-
-            return {
-                "success": True,
-                "text": payload["text"],
-                "language": payload.get("language"),
-                "language_probability": payload.get("language_probability"),
-                "duration": payload.get("duration"),
-                "processing_time": time.time() - start_time,
-                "engine": engine,
-                "model": model_type if engine == "faster-whisper" else sensevoice_model_id,
-                "device": device,
-                "compute_type": compute_type,
-                "model_reused": model_reused,
-                "reload_reason": reload_reason,
-            }
-        except Exception as exc:
-            model_name = model_type if engine == "faster-whisper" else sensevoice_model_id
-            print(
-                f"[Server] Transcribe failed: engine={engine}, model={model_name}, device={device}, "
-                f"compute_type={compute_type}, error={exc}",
-                flush=True,
-            )
-            traceback.print_exc()
-            return {
-                "success": False,
-                "text": "",
-                "error": str(exc),
-                "processing_time": time.time() - start_time,
-                "engine": engine,
-                "model": model_name,
-                "device": device,
-                "compute_type": compute_type,
-                "language": language,
-                "model_reused": False,
-                "reload_reason": "transcribe_failed",
-            }
-        finally:
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
+        return transcribe_audio_payload(audio_data, params)
 
     def transcribe_from_json(self, data: dict) -> dict:
-        import base64
-
         audio_b64 = data.get("audio")
         if not audio_b64:
             return {"success": False, "error": "Missing audio field", "text": ""}
@@ -690,12 +976,49 @@ class ThreadedHTTPServer(HTTPServer):
             self.shutdown_request(request)
 
 
+def start_ws_server(host: str, ws_port: int):
+    global _ws_server
+    if ws_port <= 0:
+        raise ValueError("ws_port must be positive")
+
+    if _ws_server is not None:
+        return
+
+    def _run():
+        global _ws_server
+        with serve(
+            handle_websocket_connection,
+            host,
+            ws_port,
+            max_size=None,
+            logger=configure_ws_logger(),
+        ) as ws_server:
+            _ws_server = ws_server
+            print(f"[Server] WebSocket streaming server running on ws://{host}:{ws_port}/stream", flush=True)
+            ws_server.serve_forever()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+
+def stop_ws_server():
+    global _ws_server
+    if _ws_server is None:
+        return
+    try:
+        _ws_server.shutdown()
+    except Exception:
+        pass
+    _ws_server = None
+
+
 def main():
     global _runtime_policy
 
     parser = argparse.ArgumentParser(description="Local ASR HTTP Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on")
+    parser.add_argument("--ws-port", type=int, default=8766, help="WebSocket streaming port")
     parser.add_argument("--engine", default="faster-whisper", choices=["faster-whisper", "sensevoice"])
     parser.add_argument("--preload-model", help="Pre-load faster-whisper model on startup")
     parser.add_argument(
@@ -746,6 +1069,7 @@ def main():
     _runtime_policy["sensevoice_use_itn"] = parse_bool(args.sensevoice_use_itn, True)
     _runtime_policy["device"] = args.device
     _runtime_policy["compute_type"] = args.compute_type
+    _runtime_policy["ws_port"] = args.ws_port
 
     ensure_download_env(args.download_root)
     print(f"[Server] Python executable: {sys.executable}", flush=True)
@@ -774,12 +1098,18 @@ def main():
         except Exception as exc:
             print(f"[Server] Failed to pre-load model: {exc}", flush=True)
 
+    if args.ws_port == args.port:
+        raise ValueError("--ws-port must be different from --port")
+
     server = ThreadedHTTPServer((args.host, args.port), WhisperHandler)
+    start_ws_server(args.host, args.ws_port)
     print(f"[Server] Local ASR HTTP server running on http://{args.host}:{args.port}", flush=True)
     print("[Server] Endpoints:", flush=True)
     print("  GET  /health       - Health check", flush=True)
+    print("  GET  /capabilities - Server capabilities", flush=True)
     print("  GET  /gpu          - Detect GPU", flush=True)
     print("  GET  /model/info   - Current model info", flush=True)
+    print(f"  WS   /stream       - WebSocket streaming ASR (port: {args.ws_port})", flush=True)
     print("  POST /transcribe   - Transcribe audio", flush=True)
     print("  POST /model/load   - Pre-load model", flush=True)
     print("  POST /model/unload - Unload model", flush=True)
@@ -797,6 +1127,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[Server] Shutting down...", flush=True)
         server.shutdown()
+        stop_ws_server()
 
 
 if __name__ == "__main__":

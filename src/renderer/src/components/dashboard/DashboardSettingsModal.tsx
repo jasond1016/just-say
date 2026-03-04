@@ -11,6 +11,7 @@ type ThemeOption = 'system' | 'light' | 'dark'
 type ModalTab = 'recognition' | 'appearance' | 'about'
 type Backend = 'local' | 'api' | 'network' | 'soniox' | 'groq'
 type LocalEngine = 'faster-whisper' | 'sensevoice'
+type LocalRecognitionMode = 'auto' | 'streaming' | 'http_chunk'
 type ModelType = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
 type GroqModelType = 'whisper-large-v3-turbo' | 'whisper-large-v3'
 type TranslationProvider = 'openai-compatible'
@@ -40,10 +41,14 @@ interface RendererConfig {
     }
     local?: {
       engine?: LocalEngine
+      mode?: LocalRecognitionMode
       modelType?: ModelType
       serverMode?: 'local' | 'remote'
       serverHost?: string
       serverPort?: number
+      segmentation?: {
+        holdMs?: number
+      }
     }
     api?: {
       model?: string
@@ -149,6 +154,8 @@ export function DashboardSettingsModal({
   const [localServerMode, setLocalServerMode] = useState<'local' | 'remote'>('local')
   const [localServerHost, setLocalServerHost] = useState('127.0.0.1')
   const [localServerPortInput, setLocalServerPortInput] = useState('8765')
+  const [localRecognitionMode, setLocalRecognitionMode] = useState<LocalRecognitionMode>('auto')
+  const [localHoldMsInput, setLocalHoldMsInput] = useState('260')
   const [testingLocalServer, setTestingLocalServer] = useState(false)
   const [localServerTestResult, setLocalServerTestResult] = useState<boolean | null>(null)
   const [hotkey, setHotkey] = useState<TriggerKey>('RCtrl')
@@ -207,6 +214,22 @@ export function DashboardSettingsModal({
         setLanguage(cfg.recognition?.language || 'auto')
         const nextModelSize = (cfg.recognition?.local?.modelType || 'large-v3') as ModelType
         setModelSize(engineValue === 'local-sensevoice' ? 'small' : nextModelSize)
+        const configuredLocalMode = cfg.recognition?.local?.mode
+        setLocalRecognitionMode(
+          configuredLocalMode === 'auto' ||
+            configuredLocalMode === 'streaming' ||
+            configuredLocalMode === 'http_chunk'
+            ? configuredLocalMode
+            : 'auto'
+        )
+        const configuredHoldMs = cfg.recognition?.local?.segmentation?.holdMs
+        setLocalHoldMsInput(
+          typeof configuredHoldMs === 'number' &&
+            Number.isFinite(configuredHoldMs) &&
+            configuredHoldMs >= 50
+            ? String(Math.floor(configuredHoldMs))
+            : '260'
+        )
         setLocalServerMode(cfg.recognition?.local?.serverMode || 'local')
         setLocalServerHost(cfg.recognition?.local?.serverHost || '127.0.0.1')
         setLocalServerPortInput(String(cfg.recognition?.local?.serverPort || 8765))
@@ -257,6 +280,7 @@ export function DashboardSettingsModal({
   const isSenseVoiceEngine = engine === 'local-sensevoice'
   const isOnlineEngine = engine === 'api' || engine === 'soniox' || engine === 'groq'
   const isRemoteLocalServer = isLocalEngine && localServerMode === 'remote'
+  const isStreamingModeEnabled = isLocalEngine && localRecognitionMode !== 'http_chunk'
   const onlineApiKeyProvider = useMemo(() => getApiKeyProvider(engine), [engine])
   const anyTranslationEnabled = translationEnabled || meetingTranslationEnabled
   const baseFieldClassName =
@@ -335,6 +359,20 @@ export function DashboardSettingsModal({
     }
     return parsedPort
   }, [localServerPortInput])
+
+  const resolveLocalHoldMs = useCallback((): number => {
+    const parsedHoldMs = Number.parseInt(localHoldMsInput, 10)
+    if (Number.isNaN(parsedHoldMs)) {
+      return 260
+    }
+    if (parsedHoldMs < 50) {
+      return 50
+    }
+    if (parsedHoldMs > 5000) {
+      return 5000
+    }
+    return parsedHoldMs
+  }, [localHoldMsInput])
 
   const testRemoteLocalServer = async (): Promise<void> => {
     if (testingLocalServer) return
@@ -474,10 +512,14 @@ export function DashboardSettingsModal({
           },
           local: {
             engine: localEngine,
+            mode: localRecognitionMode,
             modelType: localEngine === 'sensevoice' ? 'small' : modelSize,
             serverMode: localServerMode,
             serverHost: localServerHost.trim() || '127.0.0.1',
-            serverPort: resolveLocalServerPort()
+            serverPort: resolveLocalServerPort(),
+            segmentation: {
+              holdMs: resolveLocalHoldMs()
+            }
           },
           api: {
             model: apiModel.trim() || 'whisper-1'
@@ -756,8 +798,52 @@ export function DashboardSettingsModal({
                     {isLocalEngine && (
                       <>
                         <div className="grid grid-cols-2 gap-4">
+                          <label className="space-y-1.5" htmlFor="settings-local-recognition-mode">
+                            <span className="text-sm font-medium">
+                              {m.settings.localRecognitionMode}
+                            </span>
+                            <select
+                              id="settings-local-recognition-mode"
+                              className={fullFieldClassName}
+                              value={localRecognitionMode}
+                              onChange={(event) =>
+                                setLocalRecognitionMode(event.target.value as LocalRecognitionMode)
+                              }
+                            >
+                              <option value="auto">{m.settings.localRecognitionModeAuto}</option>
+                              <option value="streaming">
+                                {m.settings.localRecognitionModeStreaming}
+                              </option>
+                              <option value="http_chunk">
+                                {m.settings.localRecognitionModeHttpChunk}
+                              </option>
+                            </select>
+                          </label>
+                          <label className="space-y-1.5" htmlFor="settings-local-hold-ms">
+                            <span className="text-sm font-medium">{m.settings.localHoldMs}</span>
+                            <input
+                              id="settings-local-hold-ms"
+                              type="number"
+                              min={50}
+                              max={5000}
+                              className={`${fullFieldClassName} disabled:opacity-50`}
+                              value={localHoldMsInput}
+                              onChange={(event) => setLocalHoldMsInput(event.target.value)}
+                              onBlur={() => setLocalHoldMsInput(String(resolveLocalHoldMs()))}
+                              placeholder="260"
+                              disabled={!isStreamingModeEnabled}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              {m.settings.localHoldMsDescription}
+                            </p>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
                           <label className="space-y-1.5" htmlFor="settings-local-server-mode">
-                            <span className="text-sm font-medium">{m.settings.localServerMode}</span>
+                            <span className="text-sm font-medium">
+                              {m.settings.localServerMode}
+                            </span>
                             <select
                               id="settings-local-server-mode"
                               className={fullFieldClassName}

@@ -653,6 +653,18 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
         return translated.text
       }
     : undefined
+  const externalBatchTranslator = service
+    ? async (texts: string[], targetLanguage: string): Promise<string[]> => {
+        return service.translateBatchForMeeting(texts, targetLanguage)
+      }
+    : undefined
+  const localTranslationBatchConfig = {
+    batchWindowMs: config.recognition?.translation?.rateControl?.batchWindowMs,
+    maxBatchItems: config.recognition?.translation?.rateControl?.maxBatchItems
+  }
+  const translationMetricsProvider = service
+    ? (options?: { reset?: boolean }) => service.getMeetingTranslationMetricsSnapshot(options)
+    : undefined
 
   if (backend === 'groq') {
     // Groq backend: transcription by Groq Whisper, translation delegated to external translator.
@@ -671,7 +683,10 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
       undefined,
       groqConfig,
       undefined,
-      externalTranslator
+      externalTranslator,
+      externalBatchTranslator,
+      undefined,
+      translationMetricsProvider
     )
   } else if (backend === 'local' || !backend || backend === 'network' || backend === 'api') {
     const localConfig: StreamingLocalConfig = {
@@ -689,7 +704,10 @@ function createMeetingTranscriptionManager(config: AppConfig): MeetingTranscript
       undefined,
       undefined,
       localConfig,
-      externalTranslator
+      externalTranslator,
+      externalBatchTranslator,
+      localTranslationBatchConfig,
+      translationMetricsProvider
     )
   } else {
     // Soniox backend (streaming WebSocket)

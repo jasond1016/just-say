@@ -8,9 +8,13 @@ interface LocalTranslationConfig {
   enabled: boolean
   targetLanguage: string
   translator?: (text: string, targetLanguage: string) => Promise<string>
+  batchTranslator?: (texts: string[], targetLanguage: string) => Promise<string[]>
+  batchWindowMs?: number
+  maxBatchItems?: number
 }
 
 export interface StreamingLocalConfig {
+  mode?: 'auto' | 'streaming' | 'http_chunk'
   engine?: 'faster-whisper' | 'sensevoice'
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
   sensevoice?: {
@@ -24,6 +28,17 @@ export interface StreamingLocalConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  segmentation?: {
+    previewIntervalMs?: number
+    previewMinAudioMs?: number
+    previewMinNewAudioMs?: number
+    previewWindowMs?: number
+    minChunkMs?: number
+    silenceMs?: number
+    maxChunkMs?: number
+    overlapMs?: number
+    holdMs?: number
+  }
   translation?: LocalTranslationConfig
 }
 
@@ -58,6 +73,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private completedSegments: SpeakerSegment[] = []
   private sentencePairs: SentencePair[] = []
   private translationQueue: Promise<void> = Promise.resolve()
+  private pendingTranslationPairIndices: number[] = []
+  private translationBatchTimer: NodeJS.Timeout | null = null
   private pendingSentenceOriginal = ''
   private previewText = ''
   private pendingHypothesis = ''
@@ -76,6 +93,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private readonly STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
   private readonly HYPOTHESIS_FINALIZE_SILENCE_MS = 1200
   private readonly HYPOTHESIS_FINALIZE_IDLE_MS = 220
+  private readonly DEFAULT_TRANSLATION_BATCH_WINDOW_MS = 450
+  private readonly DEFAULT_TRANSLATION_MAX_BATCH_ITEMS = 6
   private readonly JAPANESE_CONTINUATION_PARTICLES = new Set([
     'は',
     'が',
@@ -91,6 +110,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
   constructor(config?: StreamingLocalConfig) {
     super()
     this.config = {
+      mode: 'auto',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
@@ -104,6 +124,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
       serverHost: '127.0.0.1',
       serverPort: 8765,
       sampleRate: 16000,
+      segmentation: {},
       ...config
     }
 
@@ -119,6 +140,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
       sensevoice: {
         ...this.config.sensevoice,
         ...(config.sensevoice || {})
+      },
+      segmentation: {
+        ...(this.config.segmentation || {}),
+        ...(config.segmentation || {})
       }
     }
 
@@ -141,6 +166,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
       this.recognizer = this.createLocalRecognizer()
       this.preConnected = false
     }
+    this.pendingTranslationPairIndices = []
+    this.clearTranslationBatchTimer()
   }
 
   async preConnect(): Promise<void> {
@@ -185,6 +212,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.pendingHypothesis = ''
     this.lastHypothesisUpdateAt = 0
     this.translationQueue = Promise.resolve()
+    this.pendingTranslationPairIndices = []
+    this.clearTranslationBatchTimer()
     this.vadState.reset()
 
     if (this.silenceCheckInterval) {
@@ -237,6 +266,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     if (finalPairIndex !== null) {
       this.translatePairAsync(finalPairIndex)
     }
+    this.flushPendingTranslationBatch()
     await this.translationQueue
 
     this.isActive = false
@@ -285,6 +315,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.previewText = ''
     this.pendingHypothesis = ''
     this.lastHypothesisUpdateAt = 0
+    this.pendingTranslationPairIndices = []
+    this.clearTranslationBatchTimer()
     this.translationQueue = Promise.resolve()
   }
 
@@ -730,6 +762,16 @@ export class StreamingLocalRecognizer extends EventEmitter {
       return
     }
 
+    if (this.config.translation.batchTranslator) {
+      this.pendingTranslationPairIndices.push(pairIndex)
+      if (this.pendingTranslationPairIndices.length >= this.getTranslationMaxBatchItems()) {
+        this.flushPendingTranslationBatch()
+      } else {
+        this.scheduleTranslationBatchFlush()
+      }
+      return
+    }
+
     const translator = this.config.translation.translator
     if (!translator) {
       return
@@ -756,6 +798,98 @@ export class StreamingLocalRecognizer extends EventEmitter {
       .catch((error) => {
         const err = error instanceof Error ? error : new Error(String(error))
         console.warn('[StreamingLocal] Chunk translation failed:', err.message)
+        this.emit('translationError', err)
+      })
+  }
+
+  private getTranslationBatchWindowMs(): number {
+    const configured = this.config.translation?.batchWindowMs
+    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+      return Math.floor(configured)
+    }
+    return this.DEFAULT_TRANSLATION_BATCH_WINDOW_MS
+  }
+
+  private getTranslationMaxBatchItems(): number {
+    const configured = this.config.translation?.maxBatchItems
+    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+      return Math.floor(configured)
+    }
+    return this.DEFAULT_TRANSLATION_MAX_BATCH_ITEMS
+  }
+
+  private scheduleTranslationBatchFlush(): void {
+    if (this.translationBatchTimer || this.pendingTranslationPairIndices.length === 0) {
+      return
+    }
+    this.translationBatchTimer = setTimeout(() => {
+      this.translationBatchTimer = null
+      this.flushPendingTranslationBatch()
+    }, this.getTranslationBatchWindowMs())
+  }
+
+  private clearTranslationBatchTimer(): void {
+    if (this.translationBatchTimer) {
+      clearTimeout(this.translationBatchTimer)
+      this.translationBatchTimer = null
+    }
+  }
+
+  private flushPendingTranslationBatch(): void {
+    this.clearTranslationBatchTimer()
+    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
+      this.pendingTranslationPairIndices = []
+      return
+    }
+    const batchTranslator = this.config.translation.batchTranslator
+    if (!batchTranslator || this.pendingTranslationPairIndices.length === 0) {
+      return
+    }
+
+    const indices = [...this.pendingTranslationPairIndices]
+    this.pendingTranslationPairIndices = []
+    const items = indices
+      .map((index) => ({
+        index,
+        original: this.sentencePairs[index]?.original?.trim() || ''
+      }))
+      .filter((item) => item.original && this.shouldTranslateText(item.original))
+
+    if (items.length === 0) {
+      return
+    }
+
+    this.translationQueue = this.translationQueue
+      .then(async () => {
+        const translatedBatch = await batchTranslator(
+          items.map((item) => item.original),
+          this.config.translation!.targetLanguage
+        )
+        if (!this.isActive || translatedBatch.length === 0) {
+          return
+        }
+        let changed = false
+        for (let i = 0; i < items.length; i += 1) {
+          const translated = (translatedBatch[i] || '').trim()
+          if (!translated) continue
+          const item = items[i]
+          if (this.sentencePairs[item.index]?.original !== item.original) {
+            continue
+          }
+          this.sentencePairs[item.index] = {
+            ...this.sentencePairs[item.index],
+            translated
+          }
+          changed = true
+        }
+        if (changed) {
+          this.rebuildConfirmedTranslation()
+          this.emitPartialResult()
+        }
+      })
+      .catch((error) => {
+        const err = error instanceof Error ? error : new Error(String(error))
+        console.warn('[StreamingLocal] Batch translation failed:', err.message)
         this.emit('translationError', err)
       })
   }
@@ -900,8 +1034,11 @@ export class StreamingLocalRecognizer extends EventEmitter {
     }
 
     const looksLikeHanCompoundBreak =
-      prevTailMeaningful <= 2 && this.isHanChar(prevLastMeaningful) && this.isHanChar(nextFirstMeaningful)
-    const looksLikeParticleContinuation = this.JAPANESE_CONTINUATION_PARTICLES.has(nextFirstMeaningful)
+      prevTailMeaningful <= 2 &&
+      this.isHanChar(prevLastMeaningful) &&
+      this.isHanChar(nextFirstMeaningful)
+    const looksLikeParticleContinuation =
+      this.JAPANESE_CONTINUATION_PARTICLES.has(nextFirstMeaningful)
     if (!looksLikeHanCompoundBreak && !looksLikeParticleContinuation) {
       return null
     }

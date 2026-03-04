@@ -48,6 +48,16 @@ export interface GpuInfo {
   recommended_compute_type: string
 }
 
+export interface WhisperServerCapabilities {
+  streaming_asr: boolean
+  transport?: string[]
+  events?: string[]
+  audio_format?: string
+  sample_rate?: number
+  ws_path?: string
+  ws_port?: number
+}
+
 type WhisperServerRuntimeConfig = {
   host: string
   port: number
@@ -118,6 +128,10 @@ class WhisperServerClient {
     return `http://${this.config.host}:${this.config.port}`
   }
 
+  get wsBaseUrl(): string {
+    return `ws://${this.config.host}:${this.config.port}`
+  }
+
   private get modelsPath(): string | undefined {
     if (this.config.mode !== 'local') {
       return undefined
@@ -175,6 +189,8 @@ class WhisperServerClient {
       this.config.host,
       '--port',
       this.config.port.toString(),
+      '--ws-port',
+      String(this.config.port + 1),
       '--engine',
       this.config.engine,
       '--device',
@@ -284,6 +300,74 @@ class WhisperServerClient {
     } catch {
       return false
     }
+  }
+
+  /**
+   * Read server capabilities.
+   */
+  async getCapabilities(): Promise<WhisperServerCapabilities> {
+    await this.ensureRunning()
+    try {
+      return await this.httpGet<WhisperServerCapabilities>('/capabilities')
+    } catch {
+      return { streaming_asr: false }
+    }
+  }
+
+  /**
+   * Build websocket URL for streaming ASR.
+   */
+  getStreamWsUrl(options?: {
+    wsPort?: number
+    sampleRate?: number
+    language?: string
+    previewIntervalMs?: number
+    previewMinAudioMs?: number
+    previewMinNewAudioMs?: number
+    previewWindowMs?: number
+    minChunkMs?: number
+    silenceMs?: number
+    maxChunkMs?: number
+    overlapMs?: number
+  }): string {
+    const params = new URLSearchParams()
+    params.set('engine', this.config.engine)
+    if (this.config.engine === 'faster-whisper') {
+      params.set('model', this.config.modelType)
+    } else {
+      params.set('sensevoice_model_id', this.config.sensevoiceModelId)
+      params.set('sensevoice_use_itn', this.config.sensevoiceUseItn ? 'true' : 'false')
+    }
+    params.set('device', this.config.device)
+    params.set('compute_type', this.config.computeType)
+    if (typeof options?.sampleRate === 'number' && Number.isFinite(options.sampleRate)) {
+      params.set('sample_rate', String(Math.floor(options.sampleRate)))
+    }
+    if (options?.language && options.language !== 'auto') {
+      params.set('language', options.language)
+    }
+
+    const maybeSetMs = (key: string, value: number | undefined): void => {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        params.set(key, String(Math.floor(value)))
+      }
+    }
+    maybeSetMs('preview_interval_ms', options?.previewIntervalMs)
+    maybeSetMs('preview_min_audio_ms', options?.previewMinAudioMs)
+    maybeSetMs('preview_min_new_audio_ms', options?.previewMinNewAudioMs)
+    maybeSetMs('preview_window_ms', options?.previewWindowMs)
+    maybeSetMs('min_chunk_ms', options?.minChunkMs)
+    maybeSetMs('silence_ms', options?.silenceMs)
+    maybeSetMs('max_chunk_ms', options?.maxChunkMs)
+    maybeSetMs('overlap_ms', options?.overlapMs)
+
+    const query = params.toString()
+    const wsPort =
+      typeof options?.wsPort === 'number' && Number.isFinite(options.wsPort)
+        ? Math.floor(options.wsPort)
+        : this.config.port
+    const wsBaseUrl = `ws://${this.config.host}:${wsPort}`
+    return `${wsBaseUrl}/stream${query ? `?${query}` : ''}`
   }
 
   /**

@@ -2,6 +2,7 @@
  * Profiler for measuring real user-perceived latency in meeting transcription.
  * Uses time-window based approach since Soniox returns batched responses.
  */
+import type { MeetingTranslationMetricsSnapshot } from '../translation/service'
 
 export interface AudioWindow {
   startTime: number // When audio capture started for this window
@@ -52,6 +53,9 @@ class TranscriptionProfiler {
   private connectionStartTime: number | null = null
   private connectionEstablishedTime: number | null = null
   private sessionBackend: string | null = null
+  private sentencePairMetrics: { sentencePairs: number; translatedSentencePairs: number } | null =
+    null
+  private meetingTranslationMetrics: MeetingTranslationMetricsSnapshot | null = null
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled
@@ -73,6 +77,8 @@ class TranscriptionProfiler {
     this.connectionStartTime = null
     this.connectionEstablishedTime = null
     this.sessionBackend = backend || null
+    this.sentencePairMetrics = null
+    this.meetingTranslationMetrics = null
     console.log('[Profiler] Session started')
   }
 
@@ -98,6 +104,22 @@ class TranscriptionProfiler {
   markConnectionEstablished(): void {
     if (!this.enabled) return
     this.connectionEstablishedTime = performance.now()
+  }
+
+  markSentencePairMetrics(metrics: {
+    sentencePairs: number
+    translatedSentencePairs: number
+  }): void {
+    if (!this.enabled) return
+    this.sentencePairMetrics = {
+      sentencePairs: Math.max(0, Math.floor(metrics.sentencePairs)),
+      translatedSentencePairs: Math.max(0, Math.floor(metrics.translatedSentencePairs))
+    }
+  }
+
+  markMeetingTranslationMetrics(metrics: MeetingTranslationMetricsSnapshot): void {
+    if (!this.enabled) return
+    this.meetingTranslationMetrics = metrics
   }
 
   /**
@@ -244,6 +266,8 @@ class TranscriptionProfiler {
    */
   printReport(): void {
     console.log('\n========== TRANSCRIPTION LATENCY REPORT ==========\n')
+    const now = performance.now()
+    const sessionDurationMs = this.sessionStartTime ? Math.max(0, now - this.sessionStartTime) : 0
     if (this.sessionBackend) {
       console.log(`[*] Backend: ${this.sessionBackend}`)
     }
@@ -286,6 +310,42 @@ class TranscriptionProfiler {
       console.log(`   P95: ${interResp.p95Ms}ms`)
     }
 
+    if (this.sentencePairMetrics?.sentencePairs) {
+      const sentencePairs = this.sentencePairMetrics.sentencePairs
+      const translatedPairs = Math.min(
+        sentencePairs,
+        Math.max(0, this.sentencePairMetrics.translatedSentencePairs)
+      )
+      const coverage = sentencePairs > 0 ? (translatedPairs / sentencePairs) * 100 : 0
+      console.log(`\n[Segmentation & Coverage]`)
+      console.log(`   Sentence pairs committed: ${sentencePairs}`)
+      console.log(`   Sentence pairs translated: ${translatedPairs} (${coverage.toFixed(1)}%)`)
+    }
+
+    if (this.meetingTranslationMetrics) {
+      const limiter = this.meetingTranslationMetrics.limiter
+      const droppedTotal = limiter.totalDroppedOverflow + limiter.totalDroppedTimeout
+      const dropRate = limiter.totalEnqueued > 0 ? (droppedTotal / limiter.totalEnqueued) * 100 : 0
+      const avgWaitMs =
+        limiter.totalWaitEvents > 0 ? Math.round(limiter.totalWaitMs / limiter.totalWaitEvents) : 0
+      const sessionMinutes = sessionDurationMs > 0 ? sessionDurationMs / 60_000 : 1
+      const estimatedTpm = Math.round(limiter.totalEstimatedTokens / sessionMinutes)
+
+      console.log(`\n[Translation Queue & Rate Limit]`)
+      console.log(`   Enqueued: ${limiter.totalEnqueued} | Executed: ${limiter.totalExecuted}`)
+      console.log(`   Max queue length: ${limiter.maxQueueLength}`)
+      console.log(
+        `   Dropped: ${droppedTotal} (overflow=${limiter.totalDroppedOverflow}, timeout=${limiter.totalDroppedTimeout}, rate=${dropRate.toFixed(1)}%)`
+      )
+      console.log(
+        `   Rate-limited waits: ${limiter.totalWaitEvents} (avg=${avgWaitMs}ms, total=${limiter.totalWaitMs}ms)`
+      )
+      console.log(
+        `   Wait reasons: interval=${limiter.intervalWaitEvents}, rpm=${limiter.rpmWaitEvents}, tpm=${limiter.tpmWaitEvents}`
+      )
+      console.log(`   Estimated token throughput: ${estimatedTpm} TPM`)
+    }
+
     // Summary
     const asrNewResponses = this.responseEvents.filter(
       (event) => event.type === 'asr' && event.isNew
@@ -314,6 +374,8 @@ class TranscriptionProfiler {
     this.audioEvents = []
     this.responseEvents = []
     this.responseLatencies = []
+    this.sentencePairMetrics = null
+    this.meetingTranslationMetrics = null
   }
 }
 

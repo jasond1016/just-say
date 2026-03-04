@@ -28,8 +28,21 @@ export interface AppConfig {
       endpoint?: string
       model?: string
       timeoutMs?: number
+      rateControl?: {
+        preset?: 'low-latency' | 'balanced' | 'throughput'
+        enabled?: boolean
+        maxRequestsPerMinute?: number
+        maxTokensPerMinute?: number
+        minRequestIntervalMs?: number
+        maxQueueSize?: number
+        maxQueueWaitMs?: number
+        dropPolicy?: 'drop_oldest' | 'drop_newest'
+        batchWindowMs?: number
+        maxBatchItems?: number
+      }
     }
     local?: {
+      mode?: 'auto' | 'streaming' | 'http_chunk'
       modelPath?: string
       engine?: 'faster-whisper' | 'sensevoice'
       modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
@@ -43,6 +56,17 @@ export interface AppConfig {
       serverMode?: 'local' | 'remote'
       serverHost?: string
       serverPort?: number
+      segmentation?: {
+        previewIntervalMs?: number
+        previewMinAudioMs?: number
+        previewMinNewAudioMs?: number
+        previewWindowMs?: number
+        minChunkMs?: number
+        silenceMs?: number
+        maxChunkMs?: number
+        overlapMs?: number
+        holdMs?: number
+      }
     }
     api?: {
       provider?: string
@@ -114,9 +138,22 @@ const defaultConfig: AppConfig = {
       targetLanguage: 'en',
       endpoint: 'https://api.openai.com/v1',
       model: 'gpt-4o-mini',
-      timeoutMs: 15000
+      timeoutMs: 15000,
+      rateControl: {
+        "preset": "balanced",
+        "enabled": true,
+        "maxTokensPerMinute": 8500,
+        "maxRequestsPerMinute": 40,
+        "minRequestIntervalMs": 1200,
+        "maxQueueSize": 64,
+        "maxQueueWaitMs": 45000,
+        "dropPolicy": "drop_oldest",
+        "batchWindowMs": 600,
+        "maxBatchItems": 8
+      }
     },
     local: {
+      mode: 'auto',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
