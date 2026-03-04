@@ -15,6 +15,7 @@
   },
   "scripts": {
     "test": "vitest",
+    "meeting:bench": "node tools/meeting-bench.mjs",
     "format": "prettier --write .",
     "lint": "eslint --cache .",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",

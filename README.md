@@ -15,15 +15,20 @@ JustSay 是一个桌面语音转录工具，提供：
 ## Quick Start
 
 1. 安装 Node 依赖：
+
 ```bash
 pnpm install
 ```
+
 2. 安装 Python 依赖（本地识别/LAN 模式）：
+
 ```bash
 cd python
 uv sync --frozen --python 3.12
 ```
+
 3. 启动开发环境：
+
 ```bash
 pnpm dev
 ```
@@ -43,10 +48,21 @@ pnpm build:mac
 pnpm build:linux
 ```
 
+## Meeting Benchmark
+
+可用固定音频反复测试会议流式转录质量与延迟：
+
+```bash
+pnpm meeting:bench -- --audio ./fixtures/case01.wav --ref ./fixtures/case01.ref.json --runs 5
+```
+
+详细说明见 `docs/meeting-benchmark.md`，参考模板见 `tools/meeting-bench.ref.example.json`。
+
 ## Security Notes
 
 1. API Key 在运行时通过 `electron-store + safeStorage` 存储，不应提交到仓库。
 2. 提交前建议运行：
+
 ```bash
 gitleaks git
 ```

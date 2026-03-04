@@ -1,0 +1,27 @@
+{
+  "id": "ja_news_case_01",
+  "expectedText": "は、おそらくより多くの死者が出ることもわかっていたとのもと。",
+  "expectedSentences": ["は、おそらくより多くの死者が出ることもわかっていたとのもと。"],
+  "cerThreshold": 0.15,
+  "normalization": {
+    "unicodeForm": "NFKC",
+    "toLower": false,
+    "removeWhitespace": true
+  },
+  "wsParams": {
+    "engine": "sensevoice",
+    "sensevoice_model_id": "FunAudioLLM/SenseVoiceSmall",
+    "sensevoice_use_itn": "true",
+    "device": "cuda",
+    "compute_type": "float16",
+    "language": "ja",
+    "preview_interval_ms": 450,
+    "preview_min_audio_ms": 350,
+    "preview_min_new_audio_ms": 220,
+    "preview_window_ms": 2600,
+    "min_chunk_ms": 1000,
+    "silence_ms": 550,
+    "max_chunk_ms": 3800,
+    "overlap_ms": 450
+  }
+}
