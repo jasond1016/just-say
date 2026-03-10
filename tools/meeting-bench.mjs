@@ -128,6 +128,34 @@ function normalizeBoolString(value) {
   return value
 }
 
+function applyNormalizationReplacements(text, replacements) {
+  if (!Array.isArray(replacements) || replacements.length === 0) {
+    return text
+  }
+
+  let value = text
+  for (const rule of replacements) {
+    if (!rule || typeof rule.from !== 'string' || rule.from.length === 0) {
+      continue
+    }
+
+    const replacement = typeof rule.to === 'string' ? rule.to : ''
+    if (rule.regex === true) {
+      const flags = typeof rule.flags === 'string' && rule.flags ? rule.flags : 'gu'
+      try {
+        value = value.replace(new RegExp(rule.from, flags), replacement)
+      } catch {
+        // Ignore invalid replacement rules so one bad case config does not break bench.
+      }
+      continue
+    }
+
+    value = value.split(rule.from).join(replacement)
+  }
+
+  return value
+}
+
 async function loadJson(filePath) {
   const raw = await fs.readFile(filePath, 'utf-8')
   return JSON.parse(raw)
@@ -254,10 +282,29 @@ function normalizeForComparison(text, normalization = {}) {
   if (normalization.toLower === true) {
     value = value.toLowerCase()
   }
+  value = applyNormalizationReplacements(value, normalization.replacements)
+  if (normalization.removePunctuation === true) {
+    value = value.replace(/\p{P}+/gu, '')
+  }
+  if (normalization.removeSymbols === true) {
+    value = value.replace(/\p{S}+/gu, '')
+  }
   if (normalization.removeWhitespace !== false) {
     value = value.replace(/\s+/gu, '')
   }
   return value.trim()
+}
+
+function getBaselineNormalization(normalization = {}) {
+  return {
+    unicodeForm: normalization.unicodeForm,
+    toLower: normalization.toLower,
+    removeWhitespace: normalization.removeWhitespace
+  }
+}
+
+function usesAdvancedNormalization(normalization = {}) {
+  return normalization.removePunctuation === true || normalization.removeSymbols === true
 }
 
 function levenshteinDistanceByChars(left, right) {
@@ -419,12 +466,30 @@ async function runSingleCase({
 }
 
 function buildRunSummary(runResult, reference) {
-  const normalizedExpected = normalizeForComparison(reference.expectedText, reference.normalization)
-  const normalizedFinal = normalizeForComparison(runResult.finalText, reference.normalization)
+  const comparisonNormalization = reference.normalization || {}
+  const normalizedExpected = normalizeForComparison(reference.expectedText, comparisonNormalization)
+  const normalizedFinal = normalizeForComparison(runResult.finalText, comparisonNormalization)
   const charDistance = levenshteinDistanceByChars(normalizedExpected, normalizedFinal)
   const expectedChars = Array.from(normalizedExpected).length
   const cer =
     expectedChars > 0 ? charDistance / expectedChars : normalizedFinal.length === 0 ? 0 : 1
+  const baselineNormalization = getBaselineNormalization(comparisonNormalization)
+  const baselineNormalizedExpected = normalizeForComparison(
+    reference.expectedText,
+    baselineNormalization
+  )
+  const baselineNormalizedFinal = normalizeForComparison(runResult.finalText, baselineNormalization)
+  const baselineCharDistance = levenshteinDistanceByChars(
+    baselineNormalizedExpected,
+    baselineNormalizedFinal
+  )
+  const baselineExpectedChars = Array.from(baselineNormalizedExpected).length
+  const baselineCer =
+    baselineExpectedChars > 0
+      ? baselineCharDistance / baselineExpectedChars
+      : baselineNormalizedFinal.length === 0
+        ? 0
+        : 1
 
   const expectedSentences = Array.isArray(reference.expectedSentences)
     ? reference.expectedSentences
@@ -445,11 +510,19 @@ function buildRunSummary(runResult, reference) {
 
   return {
     ...runResult,
+    comparisonNormalization,
     normalizedExpected,
     normalizedFinal,
     charDistance,
     expectedChars,
     cer,
+    baselineNormalization,
+    baselineNormalizedExpected,
+    baselineNormalizedFinal,
+    baselineCharDistance,
+    baselineExpectedChars,
+    baselineCer,
+    usesAdvancedNormalization: usesAdvancedNormalization(comparisonNormalization),
     exactMatch: normalizedExpected === normalizedFinal,
     cerThreshold,
     passedByCer,
@@ -459,6 +532,7 @@ function buildRunSummary(runResult, reference) {
 
 function buildAggregateReport(runSummaries) {
   const cerList = runSummaries.map((run) => run.cer)
+  const baselineCerList = runSummaries.map((run) => run.baselineCer)
   const firstVisibleList = runSummaries
     .map((run) => run.firstVisibleMs)
     .filter((value) => typeof value === 'number')
@@ -484,6 +558,13 @@ function buildAggregateReport(runSummaries) {
       p50: percentile(cerList, 0.5),
       p95: percentile(cerList, 0.95),
       avg: cerList.reduce((sum, v) => sum + v, 0) / cerList.length
+    },
+    baselineCer: {
+      min: Math.min(...baselineCerList),
+      max: Math.max(...baselineCerList),
+      p50: percentile(baselineCerList, 0.5),
+      p95: percentile(baselineCerList, 0.95),
+      avg: baselineCerList.reduce((sum, v) => sum + v, 0) / baselineCerList.length
     },
     firstVisibleMs:
       firstVisibleList.length > 0
@@ -511,6 +592,7 @@ function buildMarkdownReport({
   referencePath,
   wsUrl,
   outputDir,
+  warnings,
   runSummaries,
   aggregate
 }) {
@@ -522,12 +604,23 @@ function buildMarkdownReport({
   lines.push(`- WS URL: \`${wsUrl}\``)
   lines.push(`- Runs: ${runSummaries.length}`)
   lines.push(`- Output: \`${outputDir}\``)
+  if (Array.isArray(warnings) && warnings.length > 0) {
+    lines.push(`- Warnings: ${warnings.join(' | ')}`)
+  }
   lines.push('')
   lines.push('## Aggregate')
   lines.push('')
   lines.push(
     `- CER avg/p50/p95: ${(aggregate.cer.avg * 100).toFixed(2)}% / ${(aggregate.cer.p50 * 100).toFixed(2)}% / ${(aggregate.cer.p95 * 100).toFixed(2)}%`
   )
+  if (
+    runSummaries.some((run) => run.usesAdvancedNormalization) &&
+    aggregate.baselineCer?.avg !== aggregate.cer.avg
+  ) {
+    lines.push(
+      `- Baseline CER avg/p50/p95: ${(aggregate.baselineCer.avg * 100).toFixed(2)}% / ${(aggregate.baselineCer.p50 * 100).toFixed(2)}% / ${(aggregate.baselineCer.p95 * 100).toFixed(2)}%`
+    )
+  }
   if (typeof aggregate.cerThreshold === 'number') {
     lines.push(
       `- CER pass rate (<= ${(aggregate.cerThreshold * 100).toFixed(2)}%): ${aggregate.passCount}/${aggregate.runCount} (${(aggregate.passRate * 100).toFixed(1)}%)`
@@ -594,6 +687,21 @@ async function main() {
     reference.id ||
     path.basename(audioPath, path.extname(audioPath)) ||
     `case-${toTimestampLabel()}`
+  const warnings = []
+  const audioBaseName = path.basename(audioPath, path.extname(audioPath))
+  const referenceBaseName = path
+    .basename(referencePath, path.extname(referencePath))
+    .replace(/\.ref$/i, '')
+  if (
+    typeof reference.id === 'string' &&
+    reference.id &&
+    !reference.id.startsWith(audioBaseName) &&
+    !reference.id.startsWith(referenceBaseName)
+  ) {
+    warnings.push(
+      `reference.id (${reference.id}) does not align with audio/ref basename (${audioBaseName}/${referenceBaseName}); output directory may be misleading`
+    )
+  }
   const outputDir =
     rawArgs['out-dir'] ||
     path.join(projectRoot, 'out', 'meeting-bench', `${caseId}-${toTimestampLabel()}`)
@@ -694,6 +802,7 @@ async function main() {
     audioPath,
     referencePath,
     outputDir,
+    warnings,
     wsUrl,
     config: {
       runs,
@@ -725,6 +834,7 @@ async function main() {
       referencePath,
       wsUrl,
       outputDir,
+      warnings,
       runSummaries,
       aggregate
     })}\n`,
@@ -732,9 +842,19 @@ async function main() {
   )
 
   console.log(`[Bench] Report written to: ${outputDir}`)
+  if (warnings.length > 0) {
+    for (const warning of warnings) {
+      console.warn(`[Bench] Warning: ${warning}`)
+    }
+  }
   console.log(
     `[Bench] Aggregate CER avg/p50/p95 = ${(aggregate.cer.avg * 100).toFixed(2)}% / ${(aggregate.cer.p50 * 100).toFixed(2)}% / ${(aggregate.cer.p95 * 100).toFixed(2)}%`
   )
+  if (runSummaries.some((run) => run.usesAdvancedNormalization)) {
+    console.log(
+      `[Bench] Baseline CER avg/p50/p95 = ${(aggregate.baselineCer.avg * 100).toFixed(2)}% / ${(aggregate.baselineCer.p50 * 100).toFixed(2)}% / ${(aggregate.baselineCer.p95 * 100).toFixed(2)}%`
+    )
+  }
   console.log(
     `[Bench] Exact match rate (normalized) = ${aggregate.exactMatchCount}/${aggregate.runCount} (${(aggregate.exactMatchRate * 100).toFixed(1)}%)`
   )

@@ -6,7 +6,15 @@
   "normalization": {
     "unicodeForm": "NFKC",
     "toLower": false,
-    "removeWhitespace": true
+    "replacements": [
+      {
+        "from": "1つ",
+        "to": "一つ"
+      }
+    ],
+    "removeWhitespace": true,
+    "removePunctuation": true,
+    "removeSymbols": true
   },
   "wsParams": {
     "engine": "sensevoice",

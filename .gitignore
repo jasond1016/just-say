@@ -27,3 +27,6 @@ models/
 
 # Security scan artifacts
 gitleaks-report.json
+
+# Local benchmark fixtures
+fixtures/
