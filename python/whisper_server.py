@@ -13,6 +13,7 @@ import glob
 import json
 import logging
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -615,6 +616,42 @@ def merge_streaming_chunk_text(left: str, right: str) -> str:
     return merge_text(left, right)
 
 
+def normalize_japanese_spacing(text: str) -> str:
+    if not text:
+        return text
+
+    normalized = text
+    while True:
+        next_text = re.sub(
+            r"([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[ \t\u3000]+([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])",
+            r"\1\2",
+            normalized,
+        )
+        next_text = re.sub(
+            r"([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[ \t\u3000]+([。、「」『』（）！？、])",
+            r"\1\2",
+            next_text,
+        )
+        next_text = re.sub(
+            r"([。、「」『』（）！？、])[ \t\u3000]+([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])",
+            r"\1\2",
+            next_text,
+        )
+        if next_text == normalized:
+            return next_text
+        normalized = next_text
+
+
+def cleanup_japanese_asr_text(text: str) -> str:
+    if not text:
+        return text
+
+    cleaned = normalize_japanese_spacing(text)
+    cleaned = re.sub(r"^[\s\u3000🎼♪♫♬♩♭♯]+", "", cleaned)
+    cleaned = re.sub(r"(.{1,16}[。！？!?])(?:\1)+$", r"\1", cleaned)
+    return cleaned
+
+
 WEAK_BOUNDARY_SUFFIX_CHARS = {
     "的",
     "了",
@@ -794,6 +831,11 @@ class WebSocketStreamingSession:
         return merge_text(self.final_text, self.pending_final_chunk).strip()
 
     def emit_json(self, payload: dict):
+        text = payload.get("text")
+        if isinstance(text, str) and payload.get("type") in {"interim", "final_chunk", "final"}:
+            language = (self.params.get("language", [""])[0] or "").lower()
+            if language.startswith("ja") or re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text):
+                payload = {**payload, "text": cleanup_japanese_asr_text(text)}
         self.websocket.send(json.dumps(payload, ensure_ascii=False))
 
     def transcribe_pcm(self, pcm_data: bytes) -> dict:

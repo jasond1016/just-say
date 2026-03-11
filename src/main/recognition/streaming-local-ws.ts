@@ -3,7 +3,12 @@ import { EventEmitter } from 'events'
 
 import { getWhisperServer, LocalEngine } from './whisperServer'
 import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
-import { findTextOverlap, mergeStreamingChunkText, mergeText } from './text-utils'
+import {
+  cleanupJapaneseAsrText,
+  findTextOverlap,
+  mergeStreamingChunkText,
+  mergeText
+} from './text-utils'
 import { isWeakBoundarySuffix, shouldFlushSentenceByBoundary } from './commit-boundary'
 
 interface LocalTranslationConfig {
@@ -377,7 +382,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   }
 
   private normalizeText(text: string): string {
-    return text.trim()
+    return cleanupJapaneseAsrText(text).trim()
   }
 
   private deduplicateFromVisible(text: string): string {

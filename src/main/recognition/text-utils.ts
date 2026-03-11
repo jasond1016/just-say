@@ -42,6 +42,42 @@ export const mergeStreamingChunkText = (left: string, right: string): string => 
   return mergeText(left, right)
 }
 
+export const normalizeJapaneseSpacing = (text: string): string => {
+  if (!text) return text
+
+  let normalized = text
+  while (true) {
+    const next = normalized
+      .replace(
+        /([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[ \t\u3000]+([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])/gu,
+        '$1$2'
+      )
+      .replace(
+        /([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])[ \t\u3000]+([。、「」『』（）！？、])/gu,
+        '$1$2'
+      )
+      .replace(
+        /([。、「」『』（）！？、])[ \t\u3000]+([\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])/gu,
+        '$1$2'
+      )
+    if (next === normalized) return next
+    normalized = next
+  }
+}
+
+export const cleanupJapaneseAsrText = (text: string): string => {
+  if (!text) return text
+
+  return collapseRepeatedJapaneseTailSentence(
+    normalizeJapaneseSpacing(text)
+      .replace(/^[\s\u3000🎼♪♫♬♩♭♯]+/u, '')
+  )
+}
+
+const collapseRepeatedJapaneseTailSentence = (text: string): string => {
+  return text.replace(/(.{1,16}[。！？!?])\1+$/u, '$1')
+}
+
 const shouldInsertSpace = (left: string, right: string): boolean => {
   const tail = left[left.length - 1]
   const head = right[0]

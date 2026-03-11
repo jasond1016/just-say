@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { findTextOverlap, mergeStreamingChunkText, mergeText } from './text-utils'
+import {
+  cleanupJapaneseAsrText,
+  findTextOverlap,
+  mergeStreamingChunkText,
+  mergeText
+} from './text-utils'
 
 describe('text utils', () => {
   describe('findTextOverlap', () => {
@@ -50,6 +55,22 @@ describe('text utils', () => {
       expect(mergeStreamingChunkText('につけて食べます。', '入れると 美味しいです。')).toBe(
         'につけて食べます。入れると 美味しいです。'
       )
+    })
+  })
+
+  describe('cleanupJapaneseAsrText', () => {
+    it('removes decorative symbols and normalizes Japanese spacing', () => {
+      expect(
+        cleanupJapaneseAsrText(
+          '🎼 そうめん は 細い 小麦粉 の 麺 です。'
+        )
+      ).toBe('そうめんは細い小麦粉の麺です。')
+    })
+
+    it('collapses repeated trailing sentences', () => {
+      expect(
+        cleanupJapaneseAsrText('流しそうめんもあります。流しそうめんもあります。')
+      ).toBe('流しそうめんもあります。')
     })
   })
 })
