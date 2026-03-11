@@ -10,6 +10,7 @@ import { join } from 'path'
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as http from 'http'
+import * as net from 'net'
 
 export type LocalEngine = 'faster-whisper' | 'sensevoice'
 
@@ -247,6 +248,18 @@ class WhisperServerClient {
 
     while (Date.now() - startTime < timeoutMs) {
       if (await this.isHealthy()) {
+        const capabilities = await this.readCapabilities()
+        if (capabilities.streaming_asr) {
+          const wsPort =
+            typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
+              ? Math.floor(capabilities.ws_port)
+              : this.config.port + 1
+          const wsReady = await this.isTcpPortOpen(this.config.host, wsPort, 500)
+          if (!wsReady) {
+            await new Promise((resolve) => setTimeout(resolve, pollInterval))
+            continue
+          }
+        }
         console.log('[WhisperServer] Server is ready')
         return
       }
@@ -307,11 +320,34 @@ class WhisperServerClient {
    */
   async getCapabilities(): Promise<WhisperServerCapabilities> {
     await this.ensureRunning()
+    return this.readCapabilities()
+  }
+
+  private async readCapabilities(): Promise<WhisperServerCapabilities> {
     try {
       return await this.httpGet<WhisperServerCapabilities>('/capabilities')
     } catch {
       return { streaming_asr: false }
     }
+  }
+
+  private isTcpPortOpen(host: string, port: number, timeoutMs: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      const socket = net.createConnection({ host, port })
+      let settled = false
+
+      const finish = (result: boolean): void => {
+        if (settled) return
+        settled = true
+        socket.destroy()
+        resolve(result)
+      }
+
+      socket.setTimeout(timeoutMs)
+      socket.once('connect', () => finish(true))
+      socket.once('timeout', () => finish(false))
+      socket.once('error', () => finish(false))
+    })
   }
 
   /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findTextOverlap, mergeText } from './text-utils'
+import { findTextOverlap, mergeStreamingChunkText, mergeText } from './text-utils'
 
 describe('text utils', () => {
   describe('findTextOverlap', () => {
@@ -33,6 +33,23 @@ describe('text utils', () => {
 
     it('avoids inserting space between CJK characters', () => {
       expect(mergeText('你好', '世界')).toBe('你好世界')
+    })
+  })
+
+  describe('mergeStreamingChunkText', () => {
+    it('replaces a weak trailing fragment when the next chunk continues it', () => {
+      expect(
+        mergeStreamingChunkText(
+          'まず1つ目はそうめんですそうめんは細い小麦。',
+          '小麦粉 の 麺です茹で 時間 は12分で。'
+        )
+      ).toBe('まず1つ目はそうめんですそうめんは細い小麦粉 の 麺です茹で 時間 は12分で。')
+    })
+
+    it('falls back to regular merge when the next chunk does not continue the tail', () => {
+      expect(mergeStreamingChunkText('につけて食べます。', '入れると 美味しいです。')).toBe(
+        'につけて食べます。入れると 美味しいです。'
+      )
     })
   })
 })

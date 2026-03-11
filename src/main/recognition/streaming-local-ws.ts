@@ -3,7 +3,7 @@ import { EventEmitter } from 'events'
 
 import { getWhisperServer, LocalEngine } from './whisperServer'
 import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
-import { findTextOverlap, mergeText } from './text-utils'
+import { findTextOverlap, mergeStreamingChunkText, mergeText } from './text-utils'
 import { isWeakBoundarySuffix, shouldFlushSentenceByBoundary } from './commit-boundary'
 
 interface LocalTranslationConfig {
@@ -65,6 +65,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private translationQueue: Promise<void> = Promise.resolve()
 
   private confirmedText = ''
+  private pendingChunkText = ''
   private previewText = ''
   private pendingSentenceOriginal = ''
   private sentencePairs: SentencePair[] = []
@@ -178,6 +179,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.startTime = Date.now()
     this.translationQueue = Promise.resolve()
     this.confirmedText = ''
+    this.pendingChunkText = ''
     this.previewText = ''
     this.pendingSentenceOriginal = ''
     this.sentencePairs = []
@@ -277,6 +279,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     this.previewText = ''
+    this.commitPendingChunk()
     this.clearBoundaryHoldTimer()
     this.flushPendingSentencePair(true, true)
     this.flushPendingTranslationBatch()
@@ -309,6 +312,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
   close(): void {
     this.isActive = false
+    this.pendingChunkText = ''
     this.previewText = ''
     this.clearBoundaryHoldTimer()
     this.pendingTranslationPairIndices = []
@@ -330,26 +334,26 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
     if (data.type === 'interim') {
       const preview = this.normalizeText(data.text || '')
-      this.previewText = this.deduplicateFromConfirmed(preview)
+      this.previewText = this.deduplicateFromVisible(preview)
       this.emitPartialResult()
       return
     }
 
     if (data.type === 'final_chunk') {
       this.clearBoundaryHoldTimer()
-      const committed = this.appendConfirmed(data.text || '')
+      this.pendingChunkText = this.mergePendingChunk(data.text || '')
       this.previewText = ''
-      if (committed) {
-        this.pendingSentenceOriginal = mergeText(this.pendingSentenceOriginal, committed)
-        this.flushPendingSentencePair(false, false)
-      }
       this.emitPartialResult()
       return
     }
 
     if (data.type === 'endpoint') {
+      const shouldDeferChunkCommit = this.shouldDeferChunkCommit(data.reason || '')
+      if (!shouldDeferChunkCommit) {
+        this.commitPendingChunk()
+      }
       if (this.pendingSentenceOriginal.trim()) {
-        if (isWeakBoundarySuffix(this.pendingSentenceOriginal)) {
+        if (shouldDeferChunkCommit || isWeakBoundarySuffix(this.pendingSentenceOriginal)) {
           this.scheduleBoundaryHoldFlush(data.reason || 'endpoint')
         } else {
           this.flushPendingSentencePair(false, true)
@@ -360,6 +364,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     if (data.type === 'final') {
+      this.commitPendingChunk()
       this.previewText = ''
       this.flushPendingSentencePair(true, true)
       this.emitPartialResult()
@@ -375,9 +380,10 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return text.trim()
   }
 
-  private deduplicateFromConfirmed(text: string): string {
-    if (!text || !this.confirmedText) return text
-    const overlap = findTextOverlap(this.confirmedText, text, 200)
+  private deduplicateFromVisible(text: string): string {
+    const base = this.getVisibleBaseText()
+    if (!text || !base) return text
+    const overlap = findTextOverlap(base, text, 200)
     return overlap > 0 ? text.slice(overlap) : text
   }
 
@@ -395,6 +401,50 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
     this.confirmedText = mergeText(this.confirmedText, deduped)
     return deduped
+  }
+
+  private mergePendingChunk(text: string): string {
+    const normalized = this.normalizeText(text)
+    if (!normalized) {
+      return this.pendingChunkText
+    }
+    if (!this.pendingChunkText) {
+      return normalized
+    }
+    return mergeStreamingChunkText(this.pendingChunkText, normalized)
+  }
+
+  private commitPendingChunk(): string {
+    const normalized = this.pendingChunkText.trim()
+    if (!normalized) {
+      this.pendingChunkText = ''
+      return ''
+    }
+
+    this.pendingChunkText = ''
+    const committed = this.appendConfirmed(normalized)
+    if (committed) {
+      this.pendingSentenceOriginal = mergeText(this.pendingSentenceOriginal, committed)
+    }
+    return committed
+  }
+
+  private shouldDeferChunkCommit(reason: string): boolean {
+    const normalized = this.pendingChunkText.trim()
+    if (!normalized || reason !== 'max_chunk') {
+      return false
+    }
+
+    return !shouldFlushSentenceByBoundary(normalized, true, {
+      sentenceMinFlushChars: this.SENTENCE_MIN_FLUSH_CHARS,
+      sentenceSoftFlushChars: this.SENTENCE_SOFT_FLUSH_CHARS,
+      sentenceForceFlushChars: this.SENTENCE_FORCE_FLUSH_CHARS,
+      strongPunctuationMinTailChars: this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
+    })
+  }
+
+  private getVisibleBaseText(): string {
+    return mergeText(this.confirmedText, this.pendingChunkText).trim()
   }
 
   private getHoldMs(): number {
@@ -611,11 +661,13 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   }
 
   private emitPartialResult(): void {
-    const combined = mergeText(this.confirmedText, this.previewText).trim()
+    const visibleBase = this.getVisibleBaseText()
+    const combined = mergeText(visibleBase, this.previewText).trim()
     const translated = this.confirmedTranslation.trim()
 
     const pairs: SentencePair[] = [...this.sentencePairs]
-    const pendingPairText = mergeText(this.pendingSentenceOriginal, this.previewText).trim()
+    const pendingPairBase = mergeText(this.pendingSentenceOriginal, this.pendingChunkText)
+    const pendingPairText = mergeText(pendingPairBase, this.previewText).trim()
     if (pendingPairText) {
       pairs.push({ original: pendingPairText })
     }

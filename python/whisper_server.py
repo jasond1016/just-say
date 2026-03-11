@@ -79,6 +79,7 @@ _runtime_policy = {
     "sensevoice_use_itn": True,
     "device": "cpu",
     "compute_type": "int8",
+    "download_root": None,
     "ws_port": 8766,
 }
 _ws_server = None
@@ -401,6 +402,7 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     default_compute_type = _model_info["compute_type"] or _runtime_policy["compute_type"] or "int8"
     default_language = _runtime_policy["default_language"]
     default_sensevoice_use_itn = _runtime_policy["sensevoice_use_itn"]
+    default_download_root = _model_info["download_root"] or _runtime_policy["download_root"]
 
     requested_engine = params.get("engine", [default_engine])[0]
     requested_model_type = params.get("model", [default_model_type])[0]
@@ -412,7 +414,7 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     requested_device = params.get("device", [default_device])[0]
     requested_compute_type = params.get("compute_type", [default_compute_type])[0]
     requested_language = params.get("language", [default_language])[0]
-    download_root = params.get("download_root", [None])[0]
+    download_root = params.get("download_root", [default_download_root])[0]
 
     if _runtime_policy["lock_model"]:
         engine = default_engine
@@ -561,6 +563,175 @@ def merge_text(left: str, right: str) -> str:
     return left + right
 
 
+def normalize_loose_text(text: str) -> str:
+    chars = []
+    for ch in text:
+        if ch.isalnum() or "\u3040" <= ch <= "\u30ff" or "\u31f0" <= ch <= "\u31ff" or "\u3400" <= ch <= "\u9fff":
+            chars.append(ch.lower())
+    return "".join(chars)
+
+
+def is_loose_word_char(ch: str) -> bool:
+    return ch.isalnum() or "\u3040" <= ch <= "\u30ff" or "\u31f0" <= ch <= "\u31ff" or "\u3400" <= ch <= "\u9fff"
+
+
+def replace_weak_tail_with_continuation(left: str, right: str) -> str | None:
+    trimmed_left = left.rstrip(" \t\r\n,，、。！？!?;；:：")
+    if not trimmed_left:
+        return None
+
+    normalized_right = normalize_loose_text(right)
+    max_size = min(8, len(trimmed_left))
+    for size in range(max_size, 1, -1):
+        tail = trimmed_left[-size:]
+        if not all(is_loose_word_char(ch) for ch in tail):
+            continue
+
+        normalized_tail = normalize_loose_text(tail)
+        if len(normalized_tail) < 2:
+            continue
+        if not normalized_right.startswith(normalized_tail) or len(normalized_right) <= len(normalized_tail):
+            continue
+
+        return merge_text(trimmed_left[:-size], right)
+
+    return None
+
+
+def merge_streaming_chunk_text(left: str, right: str) -> str:
+    if not left:
+        return right
+    if not right:
+        return left
+
+    overlap = find_text_overlap(left, right, 200)
+    if overlap > 0:
+        return merge_text(left, right[overlap:])
+
+    replacement = replace_weak_tail_with_continuation(left, right)
+    if replacement:
+        return replacement
+
+    return merge_text(left, right)
+
+
+WEAK_BOUNDARY_SUFFIX_CHARS = {
+    "的",
+    "了",
+    "和",
+    "与",
+    "及",
+    "并",
+    "而",
+    "但",
+    "就",
+    "还",
+    "呢",
+    "吗",
+    "吧",
+    "啊",
+    "は",
+    "が",
+    "を",
+    "に",
+    "で",
+    "と",
+    "へ",
+    "も",
+    "の",
+}
+
+
+def count_meaningful_chars(text: str) -> int:
+    count = 0
+    for ch in text:
+        if ch.isalnum() or "\u3040" <= ch <= "\u30ff" or "\u31f0" <= ch <= "\u31ff" or "\u3400" <= ch <= "\u9fff":
+            count += 1
+    return count
+
+
+def is_weak_boundary_suffix(text: str) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return False
+
+    trimmed = normalized.rstrip("。！？!?，、,;；:： \t\r\n")
+    if not trimmed:
+        return True
+
+    return trimmed[-1] in WEAK_BOUNDARY_SUFFIX_CHARS
+
+
+def get_tail_after_last_boundary(text: str) -> str:
+    for idx in range(len(text) - 1, -1, -1):
+        if text[idx] in {" ", "\t", "\r", "\n", ",", "，", "、", "。", "！", "？", "!", "?", ";", "；", ":", "："}:
+            return text[idx + 1 :]
+    return text
+
+
+def split_prefix_and_tail(text: str) -> tuple[str, str]:
+    normalized = (text or "").strip()
+    if not normalized:
+        return "", ""
+
+    without_trailing_boundary = normalized.rstrip("。！？!?")
+    if not without_trailing_boundary:
+        return "", ""
+
+    tail = get_tail_after_last_boundary(without_trailing_boundary)
+    if not tail:
+        return without_trailing_boundary, ""
+
+    prefix = without_trailing_boundary[: len(without_trailing_boundary) - len(tail)]
+    return prefix, tail
+
+
+def replace_trailing_tail(candidate: str, replacement_tail: str) -> str:
+    prefix, _ = split_prefix_and_tail(candidate)
+    return merge_text(prefix, replacement_tail)
+
+
+def try_extend_candidate_with_preview(candidate: str, preview: str) -> str | None:
+    normalized_candidate = (candidate or "").strip()
+    normalized_preview = (preview or "").strip()
+    if not normalized_candidate or not normalized_preview:
+        return None
+
+    _, candidate_tail = split_prefix_and_tail(normalized_candidate)
+    preview_tail = normalized_preview
+
+    candidate_tail = candidate_tail.strip()
+    preview_tail = preview_tail.strip()
+    if not candidate_tail or not preview_tail:
+        return None
+
+    normalized_candidate_tail = normalize_loose_text(
+        candidate_tail.rstrip("。！？!?，、,;；:： \t\r\n")
+    )
+    normalized_preview_tail = normalize_loose_text(
+        preview_tail.rstrip("。！？!?，、,;；:： \t\r\n")
+    )
+    if len(normalized_candidate_tail) < 4 or len(normalized_preview_tail) <= len(normalized_candidate_tail):
+        return None
+    if not normalized_preview_tail.startswith(normalized_candidate_tail):
+        return None
+
+    return replace_trailing_tail(candidate, preview_tail.rstrip("。！？!? \t\r\n"))
+
+
+def has_stable_final_boundary(text: str, min_tail_chars: int = 3) -> bool:
+    normalized = (text or "").strip()
+    if not normalized or normalized[-1] not in {"。", "！", "？", "!", "?"}:
+        return False
+
+    without_punctuation = normalized.rstrip("。！？!?")
+    if not without_punctuation:
+        return False
+
+    tail = get_tail_after_last_boundary(without_punctuation)
+    return count_meaningful_chars(tail) >= min_tail_chars and not is_weak_boundary_suffix(normalized)
+
+
 class WebSocketStreamingSession:
     """WS streaming session for local ASR (based on websockets library)."""
 
@@ -575,11 +746,16 @@ class WebSocketStreamingSession:
         self.min_chunk_ms = parse_positive_int(params.get("min_chunk_ms", ["1000"])[0], 1000)
         self.silence_threshold_ms = parse_positive_int(params.get("silence_ms", ["700"])[0], 700)
         self.max_chunk_ms = parse_positive_int(params.get("max_chunk_ms", ["5000"])[0], 5000)
-        self.overlap_ms = parse_positive_int(params.get("overlap_ms", ["320"])[0], 320)
+        self.overlap_ms = parse_positive_int(params.get("overlap_ms", ["520"])[0], 520)
+        self.max_chunk_extension_ms = parse_positive_int(
+            params.get("max_chunk_extension_ms", ["1400"])[0], 1400
+        )
 
         self.pending_pcm = bytearray()
         self.pending_new_bytes = 0
         self.final_text = ""
+        self.pending_final_chunk = ""
+        self.last_preview_text = ""
         self.last_preview_at = 0.0
         self.last_preview_audio_bytes = 0
         self.buffer_start_at = 0.0
@@ -614,6 +790,9 @@ class WebSocketStreamingSession:
         if len(self.pending_pcm) > overlap_bytes:
             self.pending_pcm = bytearray(self.pending_pcm[-overlap_bytes:])
 
+    def get_visible_text_base(self) -> str:
+        return merge_text(self.final_text, self.pending_final_chunk).strip()
+
     def emit_json(self, payload: dict):
         self.websocket.send(json.dumps(payload, ensure_ascii=False))
 
@@ -643,9 +822,33 @@ class WebSocketStreamingSession:
         preview_text = (result.get("text") or "").strip()
         if not preview_text:
             return
-        overlap = find_text_overlap(self.final_text, preview_text)
+        overlap = find_text_overlap(self.get_visible_text_base(), preview_text)
         deduped = preview_text[overlap:] if overlap > 0 else preview_text
+        self.last_preview_text = deduped
         self.emit_json({"type": "interim", "text": deduped, "ts": int(time.time() * 1000)})
+
+    def commit_pending_final_chunk(self, reason: str):
+        normalized = self.pending_final_chunk.strip()
+        if not normalized:
+            self.pending_final_chunk = ""
+            return
+
+        self.pending_final_chunk = ""
+        self.final_text = merge_text(self.final_text, normalized)
+        self.emit_json({"type": "final_chunk", "text": normalized, "ts": int(time.time() * 1000)})
+        self.emit_json({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
+
+    def should_defer_final_chunk(self, candidate: str, reason: str) -> bool:
+        if reason != "max_chunk":
+            return False
+        normalized = candidate.strip()
+        if not normalized:
+            return False
+        preview_extension = try_extend_candidate_with_preview(normalized, self.last_preview_text)
+        if preview_extension:
+            self.pending_final_chunk = preview_extension
+            return True
+        return not has_stable_final_boundary(normalized)
 
     def emit_final(self, reason: str):
         if self.closed or self.pending_new_bytes <= 0:
@@ -658,17 +861,19 @@ class WebSocketStreamingSession:
         final_chunk = (result.get("text") or "").strip()
         if not final_chunk:
             self.pending_new_bytes = 0
+            self.last_preview_text = ""
             self.retain_overlap()
             return
 
-        overlap = find_text_overlap(self.final_text, final_chunk)
+        overlap = find_text_overlap(self.get_visible_text_base(), final_chunk)
         deduped = final_chunk[overlap:] if overlap > 0 else final_chunk
         if deduped.strip():
-            self.final_text = merge_text(self.final_text, deduped)
-            self.emit_json({"type": "final_chunk", "text": deduped, "ts": int(time.time() * 1000)})
-            self.emit_json({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
+            self.pending_final_chunk = merge_streaming_chunk_text(self.pending_final_chunk, deduped)
+            if not self.should_defer_final_chunk(self.pending_final_chunk, reason):
+                self.commit_pending_final_chunk(reason)
 
         self.pending_new_bytes = 0
+        self.last_preview_text = ""
         self.retain_overlap()
         self.buffer_start_at = 0.0
         self.last_preview_audio_bytes = len(self.pending_pcm)
@@ -680,6 +885,10 @@ class WebSocketStreamingSession:
         pending_ms = self.duration_ms_from_bytes(self.pending_new_bytes)
         silence_ms = (now - self.last_audio_at) * 1000
         if pending_ms >= self.max_chunk_ms:
+            if pending_ms < self.max_chunk_ms + self.max_chunk_extension_ms:
+                preview_text = (self.last_preview_text or "").strip()
+                if preview_text and not has_stable_final_boundary(preview_text):
+                    return
             self.emit_final("max_chunk")
             return
         if pending_ms >= self.min_chunk_ms and silence_ms >= self.silence_threshold_ms:
@@ -698,9 +907,11 @@ class WebSocketStreamingSession:
                     msg_type = data.get("type")
                     if msg_type == "flush":
                         self.emit_final("flush")
+                        self.commit_pending_final_chunk("flush")
                         self.emit_json({"type": "final", "text": self.final_text, "ts": int(time.time() * 1000)})
                     elif msg_type == "close":
                         self.emit_final("close")
+                        self.commit_pending_final_chunk("close")
                         self.closed = True
                         break
                     elif msg_type == "ping":
@@ -1069,6 +1280,7 @@ def main():
     _runtime_policy["sensevoice_use_itn"] = parse_bool(args.sensevoice_use_itn, True)
     _runtime_policy["device"] = args.device
     _runtime_policy["compute_type"] = args.compute_type
+    _runtime_policy["download_root"] = args.download_root
     _runtime_policy["ws_port"] = args.ws_port
 
     ensure_download_env(args.download_root)
