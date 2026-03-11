@@ -33,6 +33,46 @@ uv sync --frozen --python 3.12
 pnpm dev
 ```
 
+## Windows 本地 SenseVoice（GPU）
+
+如果你想在 Windows 手动启动 Python 后台，并在应用里以远程模式连接本机服务，可直接使用 PowerShell 包装脚本：
+
+```powershell
+cd .\python
+.\run_whisper_server.ps1
+```
+
+默认行为：
+
+1. 使用 `SenseVoiceSmall`：`FunAudioLLM/SenseVoiceSmall`
+2. 使用 `CUDA` + `float16`
+3. HTTP 端口 `8765`，WS 端口 `8766`
+4. 模型缓存目录：`python\.cache\models`
+5. 固定模型与算力参数，避免客户端请求覆盖
+
+常见自定义：
+
+```powershell
+.\run_whisper_server.ps1 -Port 9000 -WsPort 9001
+.\run_whisper_server.ps1 -DownloadRoot D:\AI\models\justsay
+.\run_whisper_server.ps1 -SenseVoiceModelId FunAudioLLM/SenseVoiceSmall
+```
+
+启动后可验证：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8765/health
+Invoke-RestMethod http://127.0.0.1:8765/gpu
+Invoke-RestMethod http://127.0.0.1:8765/model/info
+```
+
+在 JustSay 里连接这个服务：
+
+1. 识别引擎选 `SenseVoice（本地）`
+2. `Local Server Mode` 选 `Remote`
+3. `Host` 填 `127.0.0.1`
+4. `Port` 填 `8765`
+
 ## Usage
 
 1. 启动后程序在系统托盘运行。
