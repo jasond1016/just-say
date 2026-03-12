@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import traceback
+import unicodedata
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 from websockets.exceptions import ConnectionClosed, InvalidUpgrade
@@ -642,12 +643,51 @@ def normalize_japanese_spacing(text: str) -> str:
         normalized = next_text
 
 
+JAPANESE_ORDINAL_DIGIT_MAP = {
+    "1": "一",
+    "2": "二",
+    "3": "三",
+    "4": "四",
+    "5": "五",
+    "6": "六",
+    "7": "七",
+    "8": "八",
+    "9": "九",
+    "10": "十",
+}
+
+
+def normalize_japanese_ordinals(text: str) -> str:
+    if not text:
+        return text
+
+    def _replace(match: re.Match[str]) -> str:
+        digit = unicodedata.normalize("NFKC", match.group(1))
+        mapped = JAPANESE_ORDINAL_DIGIT_MAP.get(digit)
+        if not mapped:
+            return match.group(0)
+        return f"{mapped}つ目"
+
+    return re.sub(r"([0-9０-９]{1,2})\s*つ目", _replace, text)
+
+
+def strip_japanese_asr_symbols(text: str) -> str:
+    if not text:
+        return text
+
+    cleaned = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]+", "", text)
+    cleaned = re.sub(r"[🎼♪♫♬♩♭♯]+", "", cleaned)
+    return cleaned
+
+
 def cleanup_japanese_asr_text(text: str) -> str:
     if not text:
         return text
 
     cleaned = normalize_japanese_spacing(text)
-    cleaned = re.sub(r"^[\s\u3000🎼♪♫♬♩♭♯]+", "", cleaned)
+    cleaned = normalize_japanese_ordinals(cleaned)
+    cleaned = strip_japanese_asr_symbols(cleaned)
+    cleaned = re.sub(r"^[\s\u3000]+", "", cleaned)
     cleaned = re.sub(r"(.{1,16}[。！？!?])(?:\1)+$", r"\1", cleaned)
     return cleaned
 

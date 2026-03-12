@@ -164,7 +164,18 @@ const defaultConfig: AppConfig = {
       threads: 4,
       computeType: 'int8',
       serverMode: 'local',
-      serverPort: 8765
+      serverPort: 8765,
+      segmentation: {
+        previewIntervalMs: 450,
+        previewMinAudioMs: 350,
+        previewMinNewAudioMs: 220,
+        previewWindowMs: 2600,
+        minChunkMs: 1000,
+        silenceMs: 550,
+        maxChunkMs: 3800,
+        overlapMs: 450,
+        holdMs: 260
+      }
     },
     api: {
       endpoint: 'https://api.openai.com/v1',
