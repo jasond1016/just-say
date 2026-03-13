@@ -72,6 +72,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private confirmedText = ''
   private pendingChunkText = ''
   private previewText = ''
+  private previewStableText = ''
+  private previewUnstableText = ''
   private pendingSentenceOriginal = ''
   private sentencePairs: SentencePair[] = []
   private confirmedTranslation = ''
@@ -186,6 +188,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.confirmedText = ''
     this.pendingChunkText = ''
     this.previewText = ''
+    this.previewStableText = ''
+    this.previewUnstableText = ''
     this.pendingSentenceOriginal = ''
     this.sentencePairs = []
     this.confirmedTranslation = ''
@@ -284,6 +288,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     this.previewText = ''
+    this.previewStableText = ''
+    this.previewUnstableText = ''
     this.commitPendingChunk()
     this.clearBoundaryHoldTimer()
     this.flushPendingSentencePair(true, true)
@@ -319,6 +325,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.isActive = false
     this.pendingChunkText = ''
     this.previewText = ''
+    this.previewStableText = ''
+    this.previewUnstableText = ''
     this.clearBoundaryHoldTimer()
     this.pendingTranslationPairIndices = []
     this.clearTranslationBatchTimer()
@@ -330,7 +338,14 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   }
 
   private handleMessage(raw: string): void {
-    let data: { type?: string; text?: string; message?: string; reason?: string }
+    let data: {
+      type?: string
+      text?: string
+      stableText?: string
+      unstableText?: string
+      message?: string
+      reason?: string
+    }
     try {
       data = JSON.parse(raw) as { type?: string; text?: string; message?: string; reason?: string }
     } catch {
@@ -340,6 +355,15 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     if (data.type === 'interim') {
       const preview = this.normalizeText(data.text || '')
       this.previewText = this.deduplicateFromVisible(preview)
+      const stablePreview = this.normalizeText(data.stableText || '')
+      const unstablePreview = this.normalizeText(data.unstableText || '')
+      if (stablePreview || unstablePreview) {
+        this.previewStableText = this.deduplicateFromVisible(stablePreview)
+        this.previewUnstableText = unstablePreview
+      } else {
+        this.previewStableText = this.previewText
+        this.previewUnstableText = ''
+      }
       this.emitPartialResult()
       return
     }
@@ -348,6 +372,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       this.clearBoundaryHoldTimer()
       this.pendingChunkText = this.mergePendingChunk(data.text || '')
       this.previewText = ''
+      this.previewStableText = ''
+      this.previewUnstableText = ''
       this.emitPartialResult()
       return
     }
@@ -371,6 +397,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     if (data.type === 'final') {
       this.commitPendingChunk()
       this.previewText = ''
+      this.previewStableText = ''
+      this.previewUnstableText = ''
       this.flushPendingSentencePair(true, true)
       this.emitPartialResult()
       return
@@ -668,6 +696,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private emitPartialResult(): void {
     const visibleBase = this.getVisibleBaseText()
     const combined = mergeText(visibleBase, this.previewText).trim()
+    const combinedStable = mergeText(visibleBase, this.previewStableText).trim()
+    const combinedUnstable = this.previewUnstableText.trim()
     const translated = this.confirmedTranslation.trim()
 
     const pairs: SentencePair[] = [...this.sentencePairs]
@@ -681,6 +711,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       ? {
           speaker: 0,
           text: combined,
+          stableText: combinedStable || undefined,
+          unstableText: combinedUnstable || undefined,
           translatedText: translated || undefined,
           sentencePairs: pairs.length > 0 ? pairs : undefined,
           isFinal: false

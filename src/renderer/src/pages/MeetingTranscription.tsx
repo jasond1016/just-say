@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Headphones, Play, Settings2, Square } from 'lucide-react'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
-import { toSentencePairsFromLive } from '@/lib/transcript-segmentation'
+import {
+  toSentencePairsFromCurrentLive,
+  toSentencePairsFromLive
+} from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n/useI18n'
 
@@ -248,7 +251,7 @@ export function MeetingTranscription({
                   >
                     {m.meeting.speakerLabel(state.currentSegment.speaker + 1)}
                   </p>
-                  <BilingualSegment pairs={toSentencePairsFromLive(state.currentSegment)} />
+                  <BilingualSegment pairs={toSentencePairsFromCurrentLive(state.currentSegment)} />
                 </div>
               </div>
             )}

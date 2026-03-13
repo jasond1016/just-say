@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { toSentencePairsFromLive, toSentencePairsFromStored } from './transcript-segmentation'
+import {
+  toSentencePairsFromCurrentLive,
+  toSentencePairsFromLive,
+  toSentencePairsFromStored
+} from './transcript-segmentation'
 
 describe('transcript-segmentation', () => {
   it('uses sentence_pairs for stored segments when available', () => {
@@ -66,5 +70,17 @@ describe('transcript-segmentation', () => {
     })
 
     expect(pairs).toEqual([{ original: 'Hello world.', translated: '你好，世界。' }])
+  })
+
+  it('falls back to full text for current live segment when sentencePairs no longer align', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'Hello world again.',
+      translatedText: '你好，世界，再次问好。',
+      sentencePairs: [{ original: 'world again.', translated: '世界，再次问好。' }]
+    })
+
+    expect(pairs).toEqual([
+      { original: 'Hello world again.', translated: '你好，世界，再次问好。' }
+    ])
   })
 })

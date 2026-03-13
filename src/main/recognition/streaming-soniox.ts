@@ -46,6 +46,8 @@ export interface SentencePair {
 export interface SpeakerSegment {
   speaker: number
   text: string
+  stableText?: string
+  unstableText?: string
   translatedText?: string // Translated text (when translation enabled)
   isFinal: boolean // Is this segment complete (speaker changed or session ended)
   /** Sentence pairs aligned by <end> tokens for interleaved display */

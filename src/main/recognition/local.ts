@@ -374,7 +374,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
       if ((this.config.engine || 'faster-whisper') === 'faster-whisper') {
         args.push('--model', this.config.modelType || 'tiny')
-      } else {
+      } else if ((this.config.engine || 'faster-whisper') === 'sensevoice') {
         args.push('--sensevoice-model-id', this.getSenseVoiceModelId())
         args.push('--sensevoice-use-itn', this.shouldUseSenseVoiceItn() ? 'true' : 'false')
       }
@@ -870,9 +870,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
   private getAutoComputeHintKey(device: 'cpu' | 'cuda'): string {
     const modelIdentity =
-      this.getEngine() === 'sensevoice'
-        ? this.getSenseVoiceModelId()
-        : this.config.modelType || 'tiny'
+      this.getEngine() === 'sensevoice' ? this.getSenseVoiceModelId() : this.config.modelType || 'tiny'
     return `${this.getEngine()}|${modelIdentity}|${device}`
   }
 

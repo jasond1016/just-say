@@ -57,3 +57,27 @@ export function toSentencePairsFromLive(segment: LiveSegmentLike): RendererSente
   const original = segment.text || ''
   return original.trim() ? [{ original, translated: segment.translatedText ?? null }] : []
 }
+
+export function toSentencePairsFromCurrentLive(segment: LiveSegmentLike): RendererSentencePair[] {
+  const pairs = normalizePairs(segment.sentencePairs)
+  if (pairs.length > 0) {
+    const fullText = segment.text || ''
+    const joinedOriginal = pairs.map((pair) => pair.original).join('')
+    if (fullText.startsWith(joinedOriginal)) {
+      const tail = fullText.slice(joinedOriginal.length)
+      if (tail.trim()) {
+        return [...pairs, { original: tail, translated: null }]
+      }
+      return pairs
+    }
+
+    if (fullText.trim()) {
+      return [{ original: fullText, translated: segment.translatedText ?? null }]
+    }
+
+    return pairs
+  }
+
+  const original = segment.text || ''
+  return original.trim() ? [{ original, translated: segment.translatedText ?? null }] : []
+}

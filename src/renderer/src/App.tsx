@@ -14,6 +14,7 @@ import { startSystemAudioCapture, stopSystemAudioCapture } from './system-audio-
 import { stopMicrophoneCapture } from './microphone-capture'
 import { I18nProvider } from './i18n/I18nProvider'
 import { AppLocale, resolveLocale } from './i18n'
+import { accumulateInterimText } from './lib/live-transcript'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type AppView = 'workspace' | 'meeting-session'
@@ -121,7 +122,6 @@ function App(): React.JSX.Element {
 
   const meetingStateRef = useRef<MeetingSessionState>(INITIAL_MEETING_STATE)
   const meetingSecondsTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const lastCurrentTextRef = useRef('')
 
   meetingStateRef.current = meetingState
 
@@ -176,7 +176,6 @@ function App(): React.JSX.Element {
             nextSegments.push({ ...segment.currentSpeakerSegment, timestamp: Date.now() })
           }
         }
-        lastCurrentTextRef.current = ''
         return { ...prev, segments: nextSegments, currentSegment: null }
       }
 
@@ -184,19 +183,25 @@ function App(): React.JSX.Element {
 
       let nextCurrentSegment: SpeakerSegment | null = null
       if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
-        const { stable, preview } = splitStablePreview(
-          lastCurrentTextRef.current,
+        const previousCurrentSegment =
+          prev.currentSegment?.speaker === segment.currentSpeakerSegment.speaker
+            ? prev.currentSegment
+            : null
+        const previousDisplayText = previousCurrentSegment?.text || ''
+        const nextDisplayText = accumulateInterimText(
+          previousDisplayText,
           segment.currentSpeakerSegment.text
         )
-        lastCurrentTextRef.current = segment.currentSpeakerSegment.text
+        const { stable, preview } = splitStablePreview(previousDisplayText, nextDisplayText)
         nextCurrentSegment = {
           ...segment.currentSpeakerSegment,
-          stableText: stable,
-          previewText: preview,
-          timestamp: Date.now()
+          text: nextDisplayText,
+          stableText: stable || nextDisplayText,
+          previewText: stable ? preview : undefined,
+          timestamp: previousCurrentSegment?.timestamp ?? Date.now()
         }
-      } else {
-        lastCurrentTextRef.current = ''
+      } else if (prev.currentSegment) {
+        nextCurrentSegment = prev.currentSegment
       }
 
       return {
@@ -275,7 +280,6 @@ function App(): React.JSX.Element {
         targetLanguage: translationEnabled ? targetLanguage : undefined
       })
       await startSystemAudioCapture(null)
-      lastCurrentTextRef.current = ''
       setMeetingState((prev) => ({
         ...prev,
         status: 'transcribing',

@@ -197,12 +197,13 @@ class WhisperServerClient {
       '--device',
       this.config.device,
       '--compute-type',
-      this.config.computeType,
-      '--sensevoice-model-id',
-      this.config.sensevoiceModelId,
-      '--sensevoice-use-itn',
-      this.config.sensevoiceUseItn ? 'true' : 'false'
+      this.config.computeType
     ]
+
+    if (this.config.engine === 'sensevoice') {
+      args.push('--sensevoice-model-id', this.config.sensevoiceModelId)
+      args.push('--sensevoice-use-itn', this.config.sensevoiceUseItn ? 'true' : 'false')
+    }
 
     args.push('--download-root', downloadRoot)
 

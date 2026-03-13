@@ -617,6 +617,149 @@ def merge_streaming_chunk_text(left: str, right: str) -> str:
     return merge_text(left, right)
 
 
+def get_common_prefix(left: str, right: str) -> str:
+    if not left or not right:
+        return ""
+
+    index = 0
+    limit = min(len(left), len(right))
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return left[:index]
+
+
+def collect_loose_chars(text: str) -> list[tuple[str, int]]:
+    chars: list[tuple[str, int]] = []
+    for index, ch in enumerate(text):
+        if is_loose_word_char(ch):
+            chars.append((ch.lower(), index))
+    return chars
+
+
+def replace_near_tail_with_incoming(previous: str, incoming: str) -> str | None:
+    previous_chars = collect_loose_chars(previous)
+    incoming_chars = collect_loose_chars(incoming)
+    if len(previous_chars) < 6 or len(incoming_chars) < 6:
+        return None
+
+    max_size = min(24, len(previous_chars), len(incoming_chars))
+    for size in range(max_size, 5, -1):
+        incoming_prefix = "".join(ch for ch, _ in incoming_chars[:size])
+
+        search_start = max(0, len(previous_chars) - size - 20)
+        search_end = len(previous_chars) - size
+        for start in range(search_end, search_start - 1, -1):
+            candidate = "".join(ch for ch, _ in previous_chars[start : start + size])
+            if candidate != incoming_prefix:
+                continue
+
+            replace_from = previous_chars[start][1]
+            return merge_text(previous[:replace_from].rstrip(), incoming)
+
+    return None
+
+
+def merge_with_anchor_alignment(
+    previous: str,
+    incoming: str,
+    *,
+    min_match_chars: int = 6,
+    max_previous_window_chars: int = 72,
+    max_incoming_skip_chars: int = 8,
+) -> str | None:
+    previous_chars = collect_loose_chars(previous)
+    incoming_chars = collect_loose_chars(incoming)
+    if len(previous_chars) < min_match_chars or len(incoming_chars) < min_match_chars:
+        return None
+
+    previous_start_min = max(0, len(previous_chars) - max_previous_window_chars)
+    incoming_skip_max = min(max_incoming_skip_chars, len(incoming_chars) - min_match_chars)
+    best_match: tuple[int, int, int] | None = None
+
+    for incoming_start in range(incoming_skip_max + 1):
+        previous_start_max = len(previous_chars) - min_match_chars
+        for previous_start in range(previous_start_max, previous_start_min - 1, -1):
+            run = 0
+            while (
+                previous_start + run < len(previous_chars)
+                and incoming_start + run < len(incoming_chars)
+                and previous_chars[previous_start + run][0] == incoming_chars[incoming_start + run][0]
+            ):
+                run += 1
+
+            if run < min_match_chars:
+                continue
+
+            if best_match is None or run > best_match[2]:
+                best_match = (previous_start, incoming_start, run)
+                continue
+
+            if run == best_match[2]:
+                _, best_incoming_start, _ = best_match
+                if incoming_start < best_incoming_start:
+                    best_match = (previous_start, incoming_start, run)
+
+    if best_match is None:
+        return None
+
+    previous_start, incoming_start, _ = best_match
+    previous_prefix = previous[: previous_chars[previous_start][1]]
+    incoming_suffix = incoming[incoming_chars[incoming_start][1] :]
+    if not incoming_suffix.strip():
+        return None
+
+    return merge_text(previous_prefix.rstrip(), incoming_suffix)
+
+
+def accumulate_preview_text(previous: str, incoming: str) -> str:
+    normalized_previous = (previous or "").strip()
+    normalized_incoming = (incoming or "").strip()
+
+    if not normalized_incoming:
+        return normalized_previous
+    if not normalized_previous:
+        return normalized_incoming
+    if normalized_incoming == normalized_previous:
+        return normalized_incoming
+    if normalized_incoming.startswith(normalized_previous):
+        return normalized_incoming
+    if normalized_previous.startswith(normalized_incoming):
+        return normalized_previous
+
+    common_prefix = get_common_prefix(normalized_previous, normalized_incoming)
+    common_meaningful_chars = count_meaningful_chars(common_prefix)
+    previous_meaningful_chars = count_meaningful_chars(normalized_previous)
+    incoming_meaningful_chars = count_meaningful_chars(normalized_incoming)
+    meaningful_floor = max(1, min(previous_meaningful_chars, incoming_meaningful_chars))
+
+    if (
+        common_meaningful_chars >= 12
+        or common_meaningful_chars / meaningful_floor >= 0.7
+    ):
+        return normalized_incoming
+
+    overlap = find_text_overlap(normalized_previous, normalized_incoming, 200)
+    if overlap > 0:
+        return merge_text(normalized_previous, normalized_incoming[overlap:])
+
+    anchored = merge_with_anchor_alignment(normalized_previous, normalized_incoming)
+    if anchored:
+        return anchored
+
+    replacement = replace_near_tail_with_incoming(normalized_previous, normalized_incoming)
+    if replacement:
+        return replacement
+
+    previous_is_sentence_like = (
+        normalized_previous[-1] in {"。", "！", "？", "!", "?"}
+        and previous_meaningful_chars >= 12
+    )
+    if previous_is_sentence_like and incoming_meaningful_chars >= 8:
+        return merge_text(normalized_previous, normalized_incoming)
+
+    return normalized_incoming
+
+
 def normalize_japanese_spacing(text: str) -> str:
     if not text:
         return text
@@ -727,6 +870,51 @@ def count_meaningful_chars(text: str) -> int:
     return count
 
 
+def trim_stable_prefix(text: str, keep_tail_meaningful_chars: int) -> str:
+    normalized = (text or "").strip()
+    if not normalized:
+        return ""
+
+    if keep_tail_meaningful_chars <= 0:
+        return normalized
+
+    remaining = keep_tail_meaningful_chars
+    index = len(normalized)
+    while index > 0 and remaining > 0:
+        index -= 1
+        if is_loose_word_char(normalized[index]):
+            remaining -= 1
+
+    if remaining > 0:
+        return ""
+    return normalized[:index].rstrip()
+
+
+def get_common_prefix_for_many(texts: list[str]) -> str:
+    if not texts:
+        return ""
+
+    prefix = texts[0]
+    for text in texts[1:]:
+        prefix = get_common_prefix(prefix, text)
+        if not prefix:
+            break
+    return prefix
+
+
+def shrink_stable_prefix(previous_stable: str, next_stable: str, max_rollback_chars: int) -> str:
+    if not previous_stable:
+        return next_stable
+    if next_stable.startswith(previous_stable):
+        return next_stable
+
+    common = get_common_prefix(previous_stable, next_stable)
+    rollback_chars = count_meaningful_chars(previous_stable[len(common) :])
+    if rollback_chars <= max_rollback_chars:
+        return common.rstrip()
+    return previous_stable
+
+
 def is_weak_boundary_suffix(text: str) -> bool:
     normalized = (text or "").strip()
     if not normalized:
@@ -812,6 +1000,10 @@ def has_stable_final_boundary(text: str, min_tail_chars: int = 3) -> bool:
 class WebSocketStreamingSession:
     """WS streaming session for local ASR (based on websockets library)."""
 
+    PREVIEW_STABILITY_WINDOW = 3
+    PREVIEW_STABLE_TAIL_CHARS = 6
+    PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 6
+
     def __init__(self, websocket, params: dict):
         self.websocket = websocket
         self.params = params
@@ -832,12 +1024,23 @@ class WebSocketStreamingSession:
         self.pending_new_bytes = 0
         self.final_text = ""
         self.pending_final_chunk = ""
+        self.current_preview_text = ""
+        self.current_preview_stable_text = ""
+        self.current_preview_unstable_text = ""
+        self.preview_history: list[str] = []
         self.last_preview_text = ""
         self.last_preview_at = 0.0
         self.last_preview_audio_bytes = 0
         self.buffer_start_at = 0.0
         self.last_audio_at = time.time()
         self.closed = False
+
+    def normalize_event_text(self, text: str) -> str:
+        normalized = text or ""
+        language = (self.params.get("language", [""])[0] or "").lower()
+        if language.startswith("ja") or re.search(r"[\u3040-\u30ff\u3400-\u9fff]", normalized):
+            normalized = cleanup_japanese_asr_text(normalized)
+        return normalized
 
     def bytes_for_ms(self, ms: int) -> int:
         if ms <= 0:
@@ -870,12 +1073,51 @@ class WebSocketStreamingSession:
     def get_visible_text_base(self) -> str:
         return merge_text(self.final_text, self.pending_final_chunk).strip()
 
+    def reset_preview_state(self):
+        self.current_preview_text = ""
+        self.current_preview_stable_text = ""
+        self.current_preview_unstable_text = ""
+        self.preview_history = []
+        self.last_preview_text = ""
+
+    def build_preview_snapshot(self, text: str) -> tuple[str, str]:
+        normalized = self.normalize_event_text(text).strip()
+        if not normalized:
+            self.preview_history = []
+            self.current_preview_stable_text = ""
+            self.current_preview_unstable_text = ""
+            return "", ""
+
+        self.preview_history.append(normalized)
+        if len(self.preview_history) > self.PREVIEW_STABILITY_WINDOW:
+            self.preview_history = self.preview_history[-self.PREVIEW_STABILITY_WINDOW :]
+
+        stable_candidate = trim_stable_prefix(
+            get_common_prefix_for_many(self.preview_history),
+            self.PREVIEW_STABLE_TAIL_CHARS,
+        )
+        next_stable = shrink_stable_prefix(
+            self.current_preview_stable_text,
+            stable_candidate,
+            self.PREVIEW_MAX_STABLE_ROLLBACK_CHARS,
+        )
+        if stable_candidate.startswith(next_stable):
+            next_stable = stable_candidate
+
+        if normalized.startswith(next_stable):
+            unstable = normalized[len(next_stable) :].lstrip()
+        else:
+            next_stable = ""
+            unstable = normalized
+
+        self.current_preview_stable_text = next_stable
+        self.current_preview_unstable_text = unstable
+        return next_stable, unstable
+
     def emit_json(self, payload: dict):
         text = payload.get("text")
         if isinstance(text, str) and payload.get("type") in {"interim", "final_chunk", "final"}:
-            language = (self.params.get("language", [""])[0] or "").lower()
-            if language.startswith("ja") or re.search(r"[\u3040-\u30ff\u3400-\u9fff]", text):
-                payload = {**payload, "text": cleanup_japanese_asr_text(text)}
+            payload = {**payload, "text": self.normalize_event_text(text)}
         self.websocket.send(json.dumps(payload, ensure_ascii=False))
 
     def transcribe_pcm(self, pcm_data: bytes) -> dict:
@@ -906,16 +1148,32 @@ class WebSocketStreamingSession:
             return
         overlap = find_text_overlap(self.get_visible_text_base(), preview_text)
         deduped = preview_text[overlap:] if overlap > 0 else preview_text
+        accumulated = accumulate_preview_text(self.current_preview_text, deduped)
+        normalized_accumulated = self.normalize_event_text(accumulated)
+        self.current_preview_text = normalized_accumulated
         self.last_preview_text = deduped
-        self.emit_json({"type": "interim", "text": deduped, "ts": int(time.time() * 1000)})
+        if not normalized_accumulated.strip():
+            return
+        stable_text, unstable_text = self.build_preview_snapshot(normalized_accumulated)
+        self.emit_json(
+            {
+                "type": "interim",
+                "text": normalized_accumulated,
+                "stableText": stable_text,
+                "unstableText": unstable_text,
+                "ts": int(time.time() * 1000),
+            }
+        )
 
     def commit_pending_final_chunk(self, reason: str):
         normalized = self.pending_final_chunk.strip()
         if not normalized:
             self.pending_final_chunk = ""
+            self.reset_preview_state()
             return
 
         self.pending_final_chunk = ""
+        self.reset_preview_state()
         self.final_text = merge_text(self.final_text, normalized)
         self.emit_json({"type": "final_chunk", "text": normalized, "ts": int(time.time() * 1000)})
         self.emit_json({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
@@ -943,7 +1201,7 @@ class WebSocketStreamingSession:
         final_chunk = (result.get("text") or "").strip()
         if not final_chunk:
             self.pending_new_bytes = 0
-            self.last_preview_text = ""
+            self.reset_preview_state()
             self.retain_overlap()
             return
 
@@ -955,7 +1213,7 @@ class WebSocketStreamingSession:
                 self.commit_pending_final_chunk(reason)
 
         self.pending_new_bytes = 0
-        self.last_preview_text = ""
+        self.reset_preview_state()
         self.retain_overlap()
         self.buffer_start_at = 0.0
         self.last_preview_audio_bytes = len(self.pending_pcm)
@@ -1090,6 +1348,11 @@ class WhisperHandler(BaseHTTPRequestHandler):
                     "sample_rate": 16000,
                     "ws_path": "/stream",
                     "ws_port": _runtime_policy["ws_port"],
+                    "interim_schema": {
+                        "text": "Current chunk full snapshot",
+                        "stableText": "Stable prefix for current chunk",
+                        "unstableText": "Tail still allowed to change",
+                    },
                 }
             )
         elif parsed.path == "/gpu":
