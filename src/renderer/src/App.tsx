@@ -14,7 +14,7 @@ import { startSystemAudioCapture, stopSystemAudioCapture } from './system-audio-
 import { stopMicrophoneCapture } from './microphone-capture'
 import { I18nProvider } from './i18n/I18nProvider'
 import { AppLocale, resolveLocale } from './i18n'
-import { accumulateInterimText } from './lib/live-transcript'
+import { buildCurrentSpeakerSegment } from './lib/live-segment'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type AppView = 'workspace' | 'meeting-session'
@@ -41,6 +41,7 @@ interface AppConfig {
 
 interface MeetingTranscriptEvent {
   isFinal: boolean
+  currentWordTimings?: SpeakerSegment['wordTimings']
   speakerSegments?: SpeakerSegment[]
   currentSpeakerSegment?: SpeakerSegment
 }
@@ -54,23 +55,6 @@ const INITIAL_MEETING_STATE: MeetingSessionState = {
   segments: [],
   currentSegment: null,
   lastError: null
-}
-
-function splitStablePreview(prev: string, next: string): { stable: string; preview: string } {
-  if (!next) {
-    return { stable: '', preview: '' }
-  }
-  if (!prev) {
-    return { stable: '', preview: next }
-  }
-
-  const max = Math.min(prev.length, next.length)
-  let index = 0
-  while (index < max && prev[index] === next[index]) {
-    index += 1
-  }
-
-  return { stable: next.slice(0, index), preview: next.slice(index) }
 }
 
 function isMeetingActiveStatus(status: MeetingSessionState['status']): boolean {
@@ -187,19 +171,11 @@ function App(): React.JSX.Element {
           prev.currentSegment?.speaker === segment.currentSpeakerSegment.speaker
             ? prev.currentSegment
             : null
-        const previousDisplayText = previousCurrentSegment?.text || ''
-        const nextDisplayText = accumulateInterimText(
-          previousDisplayText,
-          segment.currentSpeakerSegment.text
+        nextCurrentSegment = buildCurrentSpeakerSegment(
+          previousCurrentSegment,
+          segment.currentSpeakerSegment,
+          segment.currentWordTimings
         )
-        const { stable, preview } = splitStablePreview(previousDisplayText, nextDisplayText)
-        nextCurrentSegment = {
-          ...segment.currentSpeakerSegment,
-          text: nextDisplayText,
-          stableText: stable || nextDisplayText,
-          previewText: stable ? preview : undefined,
-          timestamp: previousCurrentSegment?.timestamp ?? Date.now()
-        }
       } else if (prev.currentSegment) {
         nextCurrentSegment = prev.currentSegment
       }

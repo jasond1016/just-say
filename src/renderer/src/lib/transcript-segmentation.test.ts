@@ -83,4 +83,29 @@ describe('transcript-segmentation', () => {
       { original: 'Hello world again.', translated: '你好，世界，再次问好。' }
     ])
   })
+
+  it('uses stableText for current live segment instead of unstable preview tail', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'かき氷はイチゴ味です',
+      stableText: 'かき氷は',
+      previewText: 'イチゴ味です',
+      sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
+    })
+
+    expect(pairs).toEqual([{ original: 'かき氷は', translated: 'Shaved ice is' }])
+  })
+
+  it('appends only stable tail beyond translated sentencePairs for current live segment', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'かき氷はイチゴ味です',
+      stableText: 'かき氷はイチゴ',
+      previewText: '味です',
+      sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
+    })
+
+    expect(pairs).toEqual([
+      { original: 'かき氷は', translated: 'Shaved ice is' },
+      { original: 'イチゴ', translated: null }
+    ])
+  })
 })

@@ -36,6 +36,12 @@ interface SonioxResponse {
   message?: string
 }
 
+export interface WordTiming {
+  text: string
+  startMs: number
+  endMs: number
+}
+
 // A sentence pair: original text and its translation (aligned by <end> token)
 export interface SentencePair {
   original: string
@@ -48,6 +54,7 @@ export interface SpeakerSegment {
   text: string
   stableText?: string
   unstableText?: string
+  wordTimings?: WordTiming[]
   translatedText?: string // Translated text (when translation enabled)
   isFinal: boolean // Is this segment complete (speaker changed or session ended)
   /** Sentence pairs aligned by <end> tokens for interleaved display */
@@ -60,6 +67,8 @@ export interface PartialResult {
   segments: SpeakerSegment[]
   /** Current active segment being transcribed */
   currentSegment: SpeakerSegment | null
+  /** Optional per-word timings for the current live result when the backend supports it */
+  currentWordTimings?: WordTiming[]
   /** Legacy: combined text for backward compatibility */
   combined: string
   /** Current speaker number */

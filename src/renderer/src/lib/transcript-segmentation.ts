@@ -11,8 +11,25 @@ interface StoredSegmentLike {
 
 interface LiveSegmentLike {
   text: string
+  stableText?: string
+  previewText?: string
   translatedText?: string
   sentencePairs?: Array<{ original: string; translated?: string }>
+}
+
+function getStableLiveText(segment: LiveSegmentLike): string {
+  const stableText = segment.stableText || ''
+  if (stableText.trim()) {
+    return stableText
+  }
+
+  const fullText = segment.text || ''
+  const previewText = segment.previewText || ''
+  if (previewText.trim() && fullText.endsWith(previewText)) {
+    return fullText.slice(0, fullText.length - previewText.length)
+  }
+
+  return fullText
 }
 
 function normalizePairs(
@@ -60,24 +77,24 @@ export function toSentencePairsFromLive(segment: LiveSegmentLike): RendererSente
 
 export function toSentencePairsFromCurrentLive(segment: LiveSegmentLike): RendererSentencePair[] {
   const pairs = normalizePairs(segment.sentencePairs)
+  const stableOriginal = getStableLiveText(segment)
   if (pairs.length > 0) {
-    const fullText = segment.text || ''
     const joinedOriginal = pairs.map((pair) => pair.original).join('')
-    if (fullText.startsWith(joinedOriginal)) {
-      const tail = fullText.slice(joinedOriginal.length)
+    if (stableOriginal.startsWith(joinedOriginal)) {
+      const tail = stableOriginal.slice(joinedOriginal.length)
       if (tail.trim()) {
         return [...pairs, { original: tail, translated: null }]
       }
       return pairs
     }
 
-    if (fullText.trim()) {
-      return [{ original: fullText, translated: segment.translatedText ?? null }]
+    if (stableOriginal.trim()) {
+      return [{ original: stableOriginal, translated: segment.translatedText ?? null }]
     }
 
     return pairs
   }
 
-  const original = segment.text || ''
+  const original = stableOriginal || segment.text || ''
   return original.trim() ? [{ original, translated: segment.translatedText ?? null }] : []
 }

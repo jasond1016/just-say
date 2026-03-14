@@ -14,13 +14,21 @@ export interface SentencePair {
   translated?: string
 }
 
+export interface WordTiming {
+  text: string
+  startMs: number
+  endMs: number
+}
+
 export interface SpeakerSegment {
   speaker: number
   text: string
   translatedText?: string
   sentencePairs?: SentencePair[]
   stableText?: string
+  unstableText?: string
   previewText?: string
+  wordTimings?: WordTiming[]
   timestamp?: number
 }
 
@@ -251,7 +259,10 @@ export function MeetingTranscription({
                   >
                     {m.meeting.speakerLabel(state.currentSegment.speaker + 1)}
                   </p>
-                  <BilingualSegment pairs={toSentencePairsFromCurrentLive(state.currentSegment)} />
+                  <BilingualSegment
+                    pairs={toSentencePairsFromCurrentLive(state.currentSegment)}
+                    previewText={state.currentSegment.previewText}
+                  />
                 </div>
               </div>
             )}

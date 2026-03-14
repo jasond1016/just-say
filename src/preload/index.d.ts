@@ -9,10 +9,22 @@ interface MeetingTranscriptSegment {
   text: string
   timestamp: number
   isFinal: boolean
+  currentWordTimings?: Array<{
+    text: string
+    startMs: number
+    endMs: number
+  }>
   speakerSegments?: Array<{
     speaker: number
     text: string
+    stableText?: string
+    unstableText?: string
     translatedText?: string
+    wordTimings?: Array<{
+      text: string
+      startMs: number
+      endMs: number
+    }>
     sentencePairs?: Array<{
       original: string
       translated?: string
@@ -21,7 +33,14 @@ interface MeetingTranscriptSegment {
   currentSpeakerSegment?: {
     speaker: number
     text: string
+    stableText?: string
+    unstableText?: string
     translatedText?: string
+    wordTimings?: Array<{
+      text: string
+      startMs: number
+      endMs: number
+    }>
     sentencePairs?: Array<{
       original: string
       translated?: string

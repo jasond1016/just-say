@@ -11,6 +11,10 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as http from 'http'
 import * as net from 'net'
+import {
+  TextCorrectionConfig,
+  serializeTextCorrectionConfig
+} from './text-corrections'
 
 export type LocalEngine = 'faster-whisper' | 'sensevoice'
 
@@ -358,6 +362,8 @@ class WhisperServerClient {
     wsPort?: number
     sampleRate?: number
     language?: string
+    returnWordTimings?: boolean
+    textCorrections?: TextCorrectionConfig
     previewIntervalMs?: number
     previewMinAudioMs?: number
     previewMinNewAudioMs?: number
@@ -382,6 +388,13 @@ class WhisperServerClient {
     }
     if (options?.language && options.language !== 'auto') {
       params.set('language', options.language)
+    }
+    if (options?.returnWordTimings === true) {
+      params.set('return_word_timestamps', 'true')
+    }
+    const serializedTextCorrections = serializeTextCorrectionConfig(options?.textCorrections)
+    if (serializedTextCorrections) {
+      params.set('text_corrections', serializedTextCorrections)
     }
 
     const maybeSetMs = (key: string, value: number | undefined): void => {
@@ -480,6 +493,7 @@ class WhisperServerClient {
       device?: 'cpu' | 'cuda'
       computeType?: string
       language?: string
+      textCorrections?: TextCorrectionConfig
       skipHealthCheck?: boolean
     }
   ): Promise<TranscribeResult> {
@@ -516,6 +530,10 @@ class WhisperServerClient {
 
     if (options?.language && options.language !== 'auto') {
       params.set('language', options.language)
+    }
+    const serializedTextCorrections = serializeTextCorrectionConfig(options?.textCorrections)
+    if (serializedTextCorrections) {
+      params.set('text_corrections', serializedTextCorrections)
     }
 
     const downloadRoot = this.modelsPath

@@ -3,7 +3,8 @@ import {
   StreamingSonioxRecognizer,
   StreamingSonioxConfig,
   SpeakerSegment,
-  PartialResult
+  PartialResult,
+  WordTiming
 } from './recognition/streaming-soniox'
 import { StreamingGroqRecognizer, StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingLocalRecognizer, StreamingLocalConfig } from './recognition/streaming-local'
@@ -42,6 +43,8 @@ export interface TranscriptSegment {
   speakerSegments?: SpeakerSegment[]
   /** Current active segment being transcribed */
   currentSpeakerSegment?: SpeakerSegment | null
+  /** Optional per-word timings for the current live result */
+  currentWordTimings?: WordTiming[]
   /** Whether translation is enabled */
   translationEnabled?: boolean
 }
@@ -448,6 +451,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
           speaker: result.currentSpeaker,
           speakerSegments: result.segments,
           currentSpeakerSegment: result.currentSegment,
+          currentWordTimings: result.currentWordTimings,
           translationEnabled: result.translationEnabled
         }
         this.emit('transcript', segment)

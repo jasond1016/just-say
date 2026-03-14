@@ -37,7 +37,7 @@ export function BilingualSegment({
     <div className={cn('space-y-1', className)}>
       {normalizedPairs.map((pair, pairIndex) => {
         const translated = pair.translated?.trim()
-        const shouldShowPreview = normalizedPairs.length === 1 && pairIndex === 0 && !!previewText
+        const shouldShowPreview = pairIndex === normalizedPairs.length - 1 && !!previewText
 
         return (
           <div key={pairIndex} className="space-y-1">

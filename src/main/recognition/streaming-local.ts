@@ -3,6 +3,7 @@ import { LocalRecognizer } from './local'
 import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
 import { VADState } from './vad-utils'
 import { findTextOverlap, mergeText } from './text-utils'
+import { TextCorrectionConfig } from './text-corrections'
 
 interface LocalTranslationConfig {
   enabled: boolean
@@ -28,6 +29,7 @@ export interface StreamingLocalConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  textCorrections?: TextCorrectionConfig
   segmentation?: {
     previewIntervalMs?: number
     previewMinAudioMs?: number
@@ -49,7 +51,8 @@ export interface StreamingLocalConfig {
  * then sends finalized chunks to LocalRecognizer (HTTP server path).
  */
 export class StreamingLocalRecognizer extends EventEmitter {
-  private config: Required<Omit<StreamingLocalConfig, 'translation'>> & {
+  private config: Required<Omit<StreamingLocalConfig, 'translation' | 'textCorrections'>> & {
+    textCorrections?: TextCorrectionConfig
     translation?: LocalTranslationConfig
   }
   private recognizer: LocalRecognizer
@@ -158,7 +161,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
       nextConfig.serverMode !== this.config.serverMode ||
       nextConfig.serverHost !== this.config.serverHost ||
       nextConfig.serverPort !== this.config.serverPort ||
-      nextConfig.sampleRate !== this.config.sampleRate
+      nextConfig.sampleRate !== this.config.sampleRate ||
+      JSON.stringify(nextConfig.textCorrections || null) !==
+        JSON.stringify(this.config.textCorrections || null)
 
     this.config = nextConfig
 
@@ -332,6 +337,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
       serverHost: this.config.serverHost,
       serverPort: this.config.serverPort,
       sampleRate: this.config.sampleRate,
+      textCorrections: this.config.textCorrections,
       useHttpServer: true
     })
   }

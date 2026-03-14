@@ -5,6 +5,7 @@ import * as fs from 'fs'
 import { EventEmitter } from 'events'
 import { SpeechRecognizer, RecognitionResult } from './index'
 import { getWhisperServer, WhisperServerClient, LocalEngine } from './whisperServer'
+import { TextCorrectionConfig } from './text-corrections'
 
 const DEFAULT_SENSEVOICE_MODEL_ID = 'FunAudioLLM/SenseVoiceSmall'
 const SENSEVOICE_SMALL_MODEL_KEY = 'sensevoice-small'
@@ -50,6 +51,7 @@ export interface LocalRecognizerConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  textCorrections?: TextCorrectionConfig
 }
 
 export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
@@ -206,7 +208,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         engine: this.config.engine,
         sensevoiceModelId: this.getSenseVoiceModelId(),
         sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
-        language: this.config.language
+        language: this.config.language,
+        textCorrections: this.config.textCorrections
       }
 
       let remoteResult
@@ -269,7 +272,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
       device,
       computeType,
-      language: this.config.language
+      language: this.config.language,
+      textCorrections: this.config.textCorrections
     }
     const prewarmKey = this.getPrewarmKey(runtime)
 
@@ -308,7 +312,8 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
           sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
           device,
           computeType: 'int8_float16',
-          language: this.config.language
+          language: this.config.language,
+          textCorrections: this.config.textCorrections
         })
         if (retry.success) {
           this.rememberAutoComputeTypeHint(device, 'int8_float16')

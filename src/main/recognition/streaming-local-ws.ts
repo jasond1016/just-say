@@ -2,13 +2,14 @@ import WebSocket from 'ws'
 import { EventEmitter } from 'events'
 
 import { getWhisperServer, LocalEngine } from './whisperServer'
-import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
+import { SpeakerSegment, PartialResult, SentencePair, WordTiming } from './streaming-soniox'
 import {
   cleanupJapaneseAsrText,
   findTextOverlap,
   mergeStreamingChunkText,
   mergeText
 } from './text-utils'
+import { TextCorrectionConfig } from './text-corrections'
 import { isWeakBoundarySuffix, shouldFlushSentenceByBoundary } from './commit-boundary'
 
 interface LocalTranslationConfig {
@@ -46,18 +47,21 @@ export interface StreamingLocalWsConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  includeWordTimings?: boolean
+  textCorrections?: TextCorrectionConfig
   segmentation?: StreamingSegmentationConfig
   translation?: LocalTranslationConfig
 }
 
 export class StreamingLocalWsRecognizer extends EventEmitter {
   private config: Required<
-    Omit<StreamingLocalWsConfig, 'translation' | 'segmentation' | 'sensevoice'>
+    Omit<StreamingLocalWsConfig, 'translation' | 'segmentation' | 'sensevoice' | 'textCorrections'>
   > & {
     sensevoice: {
       modelId: string
       useItn: boolean
     }
+    textCorrections?: TextCorrectionConfig
     translation?: LocalTranslationConfig
     segmentation?: StreamingSegmentationConfig
   }
@@ -74,6 +78,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private previewText = ''
   private previewStableText = ''
   private previewUnstableText = ''
+  private currentWordTimings: WordTiming[] = []
   private pendingSentenceOriginal = ''
   private sentencePairs: SentencePair[] = []
   private confirmedTranslation = ''
@@ -104,7 +109,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       serverMode: 'local',
       serverHost: '127.0.0.1',
       serverPort: 8765,
-      sampleRate: 16000
+      sampleRate: 16000,
+      includeWordTimings: true
     } as const
     this.config = {
       ...defaults,
@@ -190,6 +196,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
+    this.currentWordTimings = []
     this.pendingSentenceOriginal = ''
     this.sentencePairs = []
     this.confirmedTranslation = ''
@@ -202,6 +209,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       wsPort: this.wsPort,
       sampleRate: this.config.sampleRate,
       language: this.config.language,
+      returnWordTimings: this.config.engine === 'sensevoice' && this.config.includeWordTimings,
+      textCorrections: this.config.textCorrections,
       previewIntervalMs: this.config.segmentation?.previewIntervalMs,
       previewMinAudioMs: this.config.segmentation?.previewMinAudioMs,
       previewMinNewAudioMs: this.config.segmentation?.previewMinNewAudioMs,
@@ -290,6 +299,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
+    this.currentWordTimings = []
     this.commitPendingChunk()
     this.clearBoundaryHoldTimer()
     this.flushPendingSentencePair(true, true)
@@ -327,6 +337,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
+    this.currentWordTimings = []
     this.clearBoundaryHoldTimer()
     this.pendingTranslationPairIndices = []
     this.clearTranslationBatchTimer()
@@ -343,6 +354,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       text?: string
       stableText?: string
       unstableText?: string
+      wordTimings?: Array<{ text?: string; startMs?: number; endMs?: number }>
       message?: string
       reason?: string
     }
@@ -353,17 +365,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     if (data.type === 'interim') {
-      const preview = this.normalizeText(data.text || '')
+      const preview = this.normalizePreviewText(data.text || '')
       this.previewText = this.deduplicateFromVisible(preview)
-      const stablePreview = this.normalizeText(data.stableText || '')
-      const unstablePreview = this.normalizeText(data.unstableText || '')
-      if (stablePreview || unstablePreview) {
-        this.previewStableText = this.deduplicateFromVisible(stablePreview)
-        this.previewUnstableText = unstablePreview
-      } else {
-        this.previewStableText = this.previewText
-        this.previewUnstableText = ''
-      }
+      const stablePreview = this.normalizePreviewText(data.stableText || '')
+      const unstablePreview = this.normalizePreviewText(data.unstableText || '')
+      this.applyPreviewStateFromServer(stablePreview, unstablePreview)
+      this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
       this.emitPartialResult()
       return
     }
@@ -374,6 +381,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       this.previewText = ''
       this.previewStableText = ''
       this.previewUnstableText = ''
+      this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
       this.emitPartialResult()
       return
     }
@@ -399,6 +407,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       this.previewText = ''
       this.previewStableText = ''
       this.previewUnstableText = ''
+      this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
       this.flushPendingSentencePair(true, true)
       this.emitPartialResult()
       return
@@ -411,6 +420,76 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
   private normalizeText(text: string): string {
     return cleanupJapaneseAsrText(text).trim()
+  }
+
+  private normalizePreviewText(text: string): string {
+    return cleanupJapaneseAsrText(text)
+  }
+
+  private normalizeWordTimings(
+    items: Array<{ text?: string; startMs?: number; endMs?: number }> | undefined
+  ): WordTiming[] {
+    if (!Array.isArray(items) || items.length === 0) {
+      return []
+    }
+
+    return items
+      .map((item) => {
+        const text = this.normalizeText(item.text || '')
+        const startMs = Number(item.startMs)
+        const endMs = Number(item.endMs)
+        if (!text || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+          return null
+        }
+        return {
+          text,
+          startMs: Math.max(0, Math.floor(startMs)),
+          endMs: Math.max(0, Math.floor(endMs))
+        }
+      })
+      .filter((item): item is WordTiming => item !== null)
+  }
+
+  private applyPreviewStateFromServer(stablePreview: string, unstablePreview: string): void {
+    if (!this.previewText.trim()) {
+      this.previewStableText = ''
+      this.previewUnstableText = ''
+      return
+    }
+
+    if (!stablePreview.trim() && !unstablePreview.trim()) {
+      this.previewStableText = this.previewText
+      this.previewUnstableText = ''
+      return
+    }
+
+    let nextStable = stablePreview ? this.deduplicateFromVisible(stablePreview) : ''
+    nextStable = this.clampStablePreview(nextStable)
+
+    let nextUnstable = unstablePreview
+    if (nextStable && this.previewText.startsWith(nextStable)) {
+      nextUnstable = this.previewText.slice(nextStable.length)
+    } else if (nextUnstable && this.previewText.endsWith(nextUnstable)) {
+      nextStable = this.previewText.slice(0, this.previewText.length - nextUnstable.length)
+    } else {
+      nextStable = this.previewText
+      nextUnstable = ''
+    }
+
+    this.previewStableText = nextStable
+    this.previewUnstableText = nextUnstable
+  }
+
+  private clampStablePreview(candidateStable: string): string {
+    const previousStable = this.previewStableText
+    if (
+      previousStable.trim() &&
+      previousStable.length > candidateStable.length &&
+      this.previewText.startsWith(previousStable)
+    ) {
+      return previousStable
+    }
+    return candidateStable
   }
 
   private deduplicateFromVisible(text: string): string {
@@ -697,7 +776,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     const visibleBase = this.getVisibleBaseText()
     const combined = mergeText(visibleBase, this.previewText).trim()
     const combinedStable = mergeText(visibleBase, this.previewStableText).trim()
-    const combinedUnstable = this.previewUnstableText.trim()
+    const combinedUnstable = this.previewUnstableText
     const translated = this.confirmedTranslation.trim()
 
     const pairs: SentencePair[] = [...this.sentencePairs]
@@ -712,7 +791,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
           speaker: 0,
           text: combined,
           stableText: combinedStable || undefined,
-          unstableText: combinedUnstable || undefined,
+          unstableText: combinedUnstable.trim() ? combinedUnstable : undefined,
           translatedText: translated || undefined,
           sentencePairs: pairs.length > 0 ? pairs : undefined,
           isFinal: false
@@ -722,6 +801,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     const result: PartialResult = {
       segments: [],
       currentSegment,
+      currentWordTimings:
+        this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
       combined,
       currentSpeaker: 0,
       translationEnabled: this.config.translation?.enabled === true
