@@ -114,6 +114,95 @@ def parse_bool(value, default=False):
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def parse_text_corrections(raw_value) -> list[dict]:
+    if not raw_value:
+        return []
+
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return []
+
+    if isinstance(parsed, dict):
+        entries = parsed.get("entries")
+    elif isinstance(parsed, list):
+        entries = parsed
+    else:
+        return []
+
+    if not isinstance(entries, list):
+        return []
+
+    normalized_entries = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+
+        target = entry.get("target")
+        aliases = entry.get("aliases")
+        if not isinstance(target, str):
+            continue
+        normalized_target = target.strip()
+        if not normalized_target:
+            continue
+
+        normalized_aliases = []
+        if isinstance(aliases, list):
+            for alias in aliases:
+                if not isinstance(alias, str):
+                    continue
+                normalized_alias = alias.strip()
+                if not normalized_alias or normalized_alias == normalized_target:
+                    continue
+                if normalized_alias not in normalized_aliases:
+                    normalized_aliases.append(normalized_alias)
+
+        if not normalized_aliases:
+            continue
+
+        normalized_entries.append(
+            {
+                "target": normalized_target,
+                "aliases": normalized_aliases,
+            }
+        )
+
+    return normalized_entries
+
+
+def apply_text_corrections(text: str, corrections: list[dict]) -> tuple[str, bool]:
+    normalized = (text or "").strip()
+    if not normalized or not corrections:
+        return normalized, False
+
+    replacements: list[tuple[str, str]] = []
+    seen_pairs = set()
+    for entry in corrections:
+        if not isinstance(entry, dict):
+            continue
+        target = entry.get("target")
+        aliases = entry.get("aliases")
+        if not isinstance(target, str) or not isinstance(aliases, list):
+            continue
+        for alias in aliases:
+            if not isinstance(alias, str):
+                continue
+            pair = (alias, target)
+            if not alias or alias == target or pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            replacements.append(pair)
+
+    if not replacements:
+        return normalized, False
+
+    corrected = normalized
+    for alias, target in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        corrected = corrected.replace(alias, target)
+
+    return corrected, corrected != normalized
+
+
 def ensure_download_env(download_root: str | None):
     if not download_root:
         return
@@ -362,7 +451,42 @@ def transcribe_with_faster_whisper(model, temp_path: str, language: str | None):
     }
 
 
-def transcribe_with_sensevoice(model, temp_path: str, language: str | None, sensevoice_use_itn: bool):
+def build_word_timings(words, timestamps):
+    if not isinstance(words, list) or not isinstance(timestamps, list):
+        return None
+
+    count = min(len(words), len(timestamps))
+    if count <= 0:
+        return None
+
+    word_timings = []
+    for index in range(count):
+        word = words[index]
+        timing = timestamps[index]
+        if not isinstance(word, str) or not isinstance(timing, (list, tuple)) or len(timing) < 2:
+            continue
+        start_ms = timing[0]
+        end_ms = timing[1]
+        if not isinstance(start_ms, (int, float)) or not isinstance(end_ms, (int, float)):
+            continue
+        word_timings.append(
+            {
+                "text": word,
+                "startMs": int(start_ms),
+                "endMs": int(end_ms),
+            }
+        )
+
+    return word_timings or None
+
+
+def transcribe_with_sensevoice(
+    model,
+    temp_path: str,
+    language: str | None,
+    sensevoice_use_itn: bool,
+    output_word_timestamps: bool,
+):
     from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
     final_language = language if language and language != "auto" else "auto"
@@ -372,6 +496,7 @@ def transcribe_with_sensevoice(model, temp_path: str, language: str | None, sens
         language=final_language,
         use_itn=sensevoice_use_itn,
         batch_size_s=60,
+        output_timestamp=output_word_timestamps,
     )
 
     item = None
@@ -388,10 +513,18 @@ def transcribe_with_sensevoice(model, temp_path: str, language: str | None, sens
 
     text = rich_transcription_postprocess(text_raw) if text_raw else ""
     detected_language = None
+    word_timings = None
     if isinstance(item, dict):
         detected_language = item.get("language") or item.get("lang")
+        word_timings = build_word_timings(item.get("words"), item.get("timestamp"))
 
-    return {"text": text, "language": detected_language or final_language, "language_probability": None, "duration": None}
+    return {
+        "text": text,
+        "language": detected_language or final_language,
+        "language_probability": None,
+        "duration": None,
+        "word_timings": word_timings,
+    }
 
 
 def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
@@ -417,6 +550,8 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     requested_compute_type = params.get("compute_type", [default_compute_type])[0]
     requested_language = params.get("language", [default_language])[0]
     download_root = params.get("download_root", [default_download_root])[0]
+    output_word_timestamps = parse_bool(params.get("return_word_timestamps", ["false"])[0], False)
+    text_corrections = parse_text_corrections(params.get("text_corrections", [None])[0])
 
     if _runtime_policy["lock_model"]:
         engine = default_engine
@@ -463,13 +598,20 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
         )
 
         if engine == "sensevoice":
-            payload = transcribe_with_sensevoice(model, temp_path, language, sensevoice_use_itn)
+            payload = transcribe_with_sensevoice(
+                model,
+                temp_path,
+                language,
+                sensevoice_use_itn,
+                output_word_timestamps,
+            )
         else:
             payload = transcribe_with_faster_whisper(model, temp_path, language)
 
+        corrected_text, corrected = apply_text_corrections(payload["text"], text_corrections)
         return {
             "success": True,
-            "text": payload["text"],
+            "text": corrected_text,
             "language": payload.get("language"),
             "language_probability": payload.get("language_probability"),
             "duration": payload.get("duration"),
@@ -480,6 +622,7 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
             "compute_type": compute_type,
             "model_reused": model_reused,
             "reload_reason": reload_reason,
+            "word_timings": None if corrected else payload.get("word_timings"),
         }
     except Exception as exc:
         model_name = model_type if engine == "faster-whisper" else sensevoice_model_id
@@ -562,7 +705,38 @@ def merge_text(left: str, right: str) -> str:
         return left
     if left[-1].isspace() or right[0].isspace():
         return left + right
+    if should_insert_space(left[-1], right[0]):
+        return f"{left} {right}"
     return left + right
+
+
+def is_cjk_char(ch: str) -> bool:
+    return (
+        "\u3040" <= ch <= "\u30ff"
+        or "\u31f0" <= ch <= "\u31ff"
+        or "\u3400" <= ch <= "\u4dbf"
+        or "\u4e00" <= ch <= "\u9fff"
+        or "\uf900" <= ch <= "\ufaff"
+    )
+
+
+def should_insert_space(left_char: str, right_char: str) -> bool:
+    if not left_char or not right_char:
+        return False
+    if left_char.isspace() or right_char.isspace():
+        return False
+    if left_char in {"'", "’", "(", "[", "{"} or right_char in {"'", "’", ".", ",", "!", "?", ";", ":", ")", "]", "}"}:
+        return False
+    if is_cjk_char(left_char) or is_cjk_char(right_char):
+        return False
+
+    left_is_word = is_loose_word_char(left_char)
+    right_is_word = is_loose_word_char(right_char)
+    if left_is_word and right_is_word:
+        return True
+    if left_char in {".", ",", "!", "?", ";", ":"} and right_is_word:
+        return True
+    return False
 
 
 def normalize_loose_text(text: str) -> str:
@@ -702,9 +876,24 @@ def merge_with_anchor_alignment(
     if best_match is None:
         return None
 
-    previous_start, incoming_start, _ = best_match
+    previous_start, incoming_start, run = best_match
+
+    # When the new preview starts from the middle of an already visible sentence,
+    # keep the matched prefix from the previous preview and only append the
+    # truly new tail. This avoids artifacts like "HelloAnd welcome".
     previous_prefix = previous[: previous_chars[previous_start][1]]
     incoming_suffix = incoming[incoming_chars[incoming_start][1] :]
+
+    if incoming_start == 0 and previous_start > 0 and incoming_suffix:
+        matched_previous_char = previous[previous_chars[previous_start][1]]
+        matched_incoming_char = incoming_suffix[0]
+        if (
+            matched_previous_char.isalpha()
+            and matched_incoming_char.isalpha()
+            and matched_previous_char.lower() == matched_incoming_char.lower()
+        ):
+            incoming_suffix = matched_previous_char + incoming_suffix[1:]
+
     if not incoming_suffix.strip():
         return None
 
@@ -870,6 +1059,270 @@ def count_meaningful_chars(text: str) -> int:
     return count
 
 
+def trim_loose_prefix(text: str, prefix: str) -> str | None:
+    normalized_text = (text or "").strip()
+    normalized_prefix = (prefix or "").strip()
+    if not normalized_text or not normalized_prefix:
+        return None
+
+    text_chars = collect_loose_chars(normalized_text)
+    prefix_chars = collect_loose_chars(normalized_prefix)
+    if not text_chars or not prefix_chars or len(prefix_chars) > len(text_chars):
+        return None
+
+    if "".join(ch for ch, _ in text_chars[: len(prefix_chars)]) != "".join(
+        ch for ch, _ in prefix_chars
+    ):
+        return None
+
+    cut_index = text_chars[len(prefix_chars) - 1][1] + 1
+    return normalized_text[cut_index:].lstrip()
+
+
+def drop_word_timing_prefix(
+    word_timings: list[dict] | None, prefix_text: str, max_items: int = 12
+) -> list[dict] | None:
+    if not isinstance(word_timings, list) or not word_timings:
+        return None
+
+    normalized_prefix = normalize_loose_text(prefix_text)
+    if not normalized_prefix:
+        return word_timings
+
+    merged_prefix = ""
+    for index, item in enumerate(word_timings[:max_items]):
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        merged_prefix = merge_text(merged_prefix, text.strip()) if merged_prefix else text.strip()
+        merged_normalized = normalize_loose_text(merged_prefix)
+        if not merged_normalized:
+            continue
+        if merged_normalized == normalized_prefix:
+            remaining = word_timings[index + 1 :]
+            return remaining or None
+        if len(merged_normalized) > len(normalized_prefix):
+            break
+
+    return word_timings
+
+
+def split_word_timings_by_prefix(
+    word_timings: list[dict] | None,
+    prefix_text: str,
+    max_items: int = 96,
+) -> tuple[list[dict] | None, list[dict] | None]:
+    if not isinstance(word_timings, list) or not word_timings:
+        return None, None
+
+    normalized_prefix = normalize_loose_text(prefix_text)
+    if not normalized_prefix:
+        return None, word_timings
+    stripped_prefix_text = prefix_text.strip()
+    trailing_punctuation_chars: list[str] = []
+    for ch in reversed(stripped_prefix_text):
+        if ch.isspace():
+            continue
+        if is_loose_word_char(ch):
+            break
+        trailing_punctuation_chars.append(ch)
+    trailing_punctuation = "".join(reversed(trailing_punctuation_chars))
+
+    merged_prefix = ""
+    for index, item in enumerate(word_timings[:max_items]):
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        merged_prefix = merge_text(merged_prefix, text.strip()) if merged_prefix else text.strip()
+        merged_normalized = normalize_loose_text(merged_prefix)
+        if not merged_normalized:
+            continue
+        if merged_normalized == normalized_prefix:
+            split_index = index + 1
+            if trailing_punctuation:
+                matched_punctuation = ""
+                while split_index < len(word_timings):
+                    next_text = word_timings[split_index].get("text")
+                    if not isinstance(next_text, str) or not next_text.strip():
+                        split_index += 1
+                        continue
+                    stripped_next_text = next_text.strip()
+                    if is_loose_word_char(stripped_next_text[0]):
+                        break
+                    matched_punctuation += stripped_next_text
+                    split_index += 1
+                    if matched_punctuation == trailing_punctuation:
+                        break
+                    if not trailing_punctuation.startswith(matched_punctuation):
+                        split_index = index + 1
+                        break
+
+            committed = word_timings[:split_index]
+            remaining = word_timings[split_index:]
+            return committed or None, remaining or None
+        if len(merged_normalized) > len(normalized_prefix):
+            break
+
+    return None, word_timings
+
+
+def deduplicate_timed_prefix_from_base(
+    base_text: str,
+    incoming_text: str,
+    word_timings: list[dict] | None,
+    *,
+    max_items: int = 8,
+    max_end_ms: int = 900,
+) -> tuple[str, list[dict] | None]:
+    if not base_text or not incoming_text or not isinstance(word_timings, list) or not word_timings:
+        return incoming_text, word_timings
+
+    normalized_base = normalize_loose_text(base_text)
+    if not normalized_base:
+        return incoming_text, word_timings
+
+    merged_prefix = ""
+    best_trimmed_text = incoming_text
+    best_drop_count = 0
+    best_prefix_chars = 0
+    for index, item in enumerate(word_timings[:max_items]):
+        text = item.get("text")
+        end_ms = item.get("endMs")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        if index > 0 and isinstance(end_ms, (int, float)) and end_ms > max_end_ms:
+            break
+
+        merged_prefix = merge_text(merged_prefix, text.strip()) if merged_prefix else text.strip()
+        normalized_prefix = normalize_loose_text(merged_prefix)
+        if len(normalized_prefix) < 3 or not normalized_base.endswith(normalized_prefix):
+            continue
+
+        trimmed_text = trim_loose_prefix(incoming_text, merged_prefix)
+        if trimmed_text is None or not trimmed_text.strip():
+            continue
+
+        if len(normalized_prefix) > best_prefix_chars:
+            best_prefix_chars = len(normalized_prefix)
+            best_trimmed_text = trimmed_text.strip()
+            best_drop_count = index + 1
+
+    if best_drop_count <= 0:
+        return incoming_text, word_timings
+
+    remaining = word_timings[best_drop_count:]
+    return best_trimmed_text, remaining or None
+
+
+def has_unstable_timing_tail(
+    word_timings: list[dict] | None,
+    audio_duration_ms: float,
+    unstable_text: str,
+    *,
+    near_end_ms: int = 240,
+    max_tail_span_ms: int = 650,
+    max_tail_items: int = 4,
+    min_unstable_chars: int = 2,
+) -> bool:
+    if not isinstance(word_timings, list) or not word_timings or audio_duration_ms <= 0:
+        return False
+
+    unstable_chars = count_meaningful_chars((unstable_text or "").strip())
+    if unstable_chars < min_unstable_chars:
+        return False
+
+    valid_items = []
+    for item in word_timings:
+        start_ms = item.get("startMs")
+        end_ms = item.get("endMs")
+        if not isinstance(start_ms, (int, float)) or not isinstance(end_ms, (int, float)):
+            continue
+        if end_ms < start_ms:
+            continue
+        valid_items.append(item)
+
+    if not valid_items:
+        return False
+
+    last_end_ms = float(valid_items[-1]["endMs"])
+    if max(0.0, audio_duration_ms - last_end_ms) > near_end_ms:
+        return False
+
+    tail_items: list[dict] = []
+    collected_chars = 0
+    for item in reversed(valid_items):
+        tail_items.insert(0, item)
+        collected_chars += count_meaningful_chars(str(item.get("text") or ""))
+        if len(tail_items) >= max_tail_items or collected_chars >= unstable_chars:
+            break
+
+    if not tail_items:
+        return False
+
+    tail_span_ms = float(tail_items[-1]["endMs"]) - float(tail_items[0]["startMs"])
+    return tail_span_ms <= max_tail_span_ms
+
+
+def has_min_stable_preview_coverage(
+    candidate: str,
+    stable_preview: str,
+    unstable_preview: str,
+    *,
+    min_stable_tail_chars: int = 6,
+    max_unstable_chars: int = 4,
+) -> bool:
+    normalized_candidate = (candidate or "").strip()
+    normalized_stable = (stable_preview or "").strip()
+    normalized_unstable = (unstable_preview or "").strip()
+    if not normalized_candidate or not normalized_stable:
+        return False
+
+    stable_prefix = get_common_prefix(normalized_candidate, normalized_stable)
+    stable_prefix_chars = count_meaningful_chars(stable_prefix)
+    if stable_prefix_chars < min_stable_tail_chars:
+        return False
+
+    remaining_chars = count_meaningful_chars(normalized_candidate[len(stable_prefix) :])
+    if remaining_chars > max_unstable_chars:
+        return False
+
+    unstable_chars = count_meaningful_chars(normalized_unstable)
+    if unstable_chars > max_unstable_chars:
+        return False
+
+    stable_tail = get_tail_after_last_boundary(stable_prefix.rstrip("。！？!?，、,;；:： \t\r\n"))
+    return count_meaningful_chars(stable_tail) >= min_stable_tail_chars
+
+
+def is_abnormal_short_final_chunk(
+    text: str,
+    word_timings: list[dict] | None,
+    *,
+    max_meaningful_chars: int = 2,
+    max_timing_items: int = 2,
+) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return False
+
+    meaningful_chars = count_meaningful_chars(normalized)
+    if meaningful_chars <= 0:
+        return True
+    if meaningful_chars > max_meaningful_chars:
+        return False
+    if not any(ch.isalnum() or is_loose_word_char(ch) for ch in normalized):
+        return True
+    if normalized[-1] in {"。", "！", "？", "!", "?"} and not has_stable_final_boundary(
+        normalized, min_tail_chars=max_meaningful_chars + 1
+    ):
+        return True
+    if isinstance(word_timings, list) and len(word_timings) <= max_timing_items:
+        return True
+    return is_weak_boundary_suffix(normalized)
+
+
 def trim_stable_prefix(text: str, keep_tail_meaningful_chars: int) -> str:
     normalized = (text or "").strip()
     if not normalized:
@@ -997,6 +1450,34 @@ def has_stable_final_boundary(text: str, min_tail_chars: int = 3) -> bool:
     return count_meaningful_chars(tail) >= min_tail_chars and not is_weak_boundary_suffix(normalized)
 
 
+def find_committable_sentence_prefix(
+    text: str,
+    *,
+    min_prefix_chars: int = 8,
+    min_suffix_chars: int = 3,
+) -> tuple[str, str] | None:
+    normalized = (text or "").strip()
+    if not normalized or has_stable_final_boundary(normalized):
+        return None
+
+    best_split: tuple[str, str] | None = None
+    for index, ch in enumerate(normalized[:-1]):
+        if ch not in {"。", "！", "？", "!", "?", "."}:
+            continue
+
+        prefix = normalized[: index + 1].strip()
+        suffix = normalized[index + 1 :].strip()
+        if not prefix or not suffix:
+            continue
+        if count_meaningful_chars(prefix) < min_prefix_chars:
+            continue
+        if count_meaningful_chars(suffix) < min_suffix_chars:
+            continue
+        best_split = (prefix, suffix)
+
+    return best_split
+
+
 class WebSocketStreamingSession:
     """WS streaming session for local ASR (based on websockets library)."""
 
@@ -1022,8 +1503,11 @@ class WebSocketStreamingSession:
 
         self.pending_pcm = bytearray()
         self.pending_new_bytes = 0
+        self.final_text_raw = ""
         self.final_text = ""
         self.pending_final_chunk = ""
+        self.pending_final_word_timings = None
+        self.text_corrections = parse_text_corrections(params.get("text_corrections", [None])[0])
         self.current_preview_text = ""
         self.current_preview_stable_text = ""
         self.current_preview_unstable_text = ""
@@ -1071,7 +1555,7 @@ class WebSocketStreamingSession:
             self.pending_pcm = bytearray(self.pending_pcm[-overlap_bytes:])
 
     def get_visible_text_base(self) -> str:
-        return merge_text(self.final_text, self.pending_final_chunk).strip()
+        return merge_text(self.final_text_raw, self.pending_final_chunk).strip()
 
     def reset_preview_state(self):
         self.current_preview_text = ""
@@ -1146,8 +1630,17 @@ class WebSocketStreamingSession:
         preview_text = (result.get("text") or "").strip()
         if not preview_text:
             return
+        preview_word_timings = result.get("word_timings")
         overlap = find_text_overlap(self.get_visible_text_base(), preview_text)
-        deduped = preview_text[overlap:] if overlap > 0 else preview_text
+        if overlap > 0:
+            deduped = preview_text[overlap:]
+            preview_word_timings = drop_word_timing_prefix(preview_word_timings, preview_text[:overlap])
+        else:
+            deduped, preview_word_timings = deduplicate_timed_prefix_from_base(
+                self.get_visible_text_base(),
+                preview_text,
+                preview_word_timings,
+            )
         accumulated = accumulate_preview_text(self.current_preview_text, deduped)
         normalized_accumulated = self.normalize_event_text(accumulated)
         self.current_preview_text = normalized_accumulated
@@ -1161,32 +1654,84 @@ class WebSocketStreamingSession:
                 "text": normalized_accumulated,
                 "stableText": stable_text,
                 "unstableText": unstable_text,
+                "wordTimings": preview_word_timings,
                 "ts": int(time.time() * 1000),
             }
         )
 
     def commit_pending_final_chunk(self, reason: str):
-        normalized = self.pending_final_chunk.strip()
-        if not normalized:
+        normalized_raw = self.pending_final_chunk.strip()
+        if not normalized_raw:
             self.pending_final_chunk = ""
+            self.pending_final_word_timings = None
             self.reset_preview_state()
             return
 
         self.pending_final_chunk = ""
+        word_timings = self.pending_final_word_timings
+        self.pending_final_word_timings = None
+        corrected_text, corrected = apply_text_corrections(normalized_raw, self.text_corrections)
+        if corrected:
+            word_timings = None
         self.reset_preview_state()
-        self.final_text = merge_text(self.final_text, normalized)
-        self.emit_json({"type": "final_chunk", "text": normalized, "ts": int(time.time() * 1000)})
+        self.final_text_raw = merge_text(self.final_text_raw, normalized_raw)
+        self.final_text = merge_text(self.final_text, corrected_text)
+        self.emit_json(
+            {
+                "type": "final_chunk",
+                "text": corrected_text,
+                "wordTimings": word_timings,
+                "ts": int(time.time() * 1000),
+            }
+        )
         self.emit_json({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
 
-    def should_defer_final_chunk(self, candidate: str, reason: str) -> bool:
-        if reason != "max_chunk":
+    def commit_sentence_prefix_if_possible(self, reason: str) -> bool:
+        split = find_committable_sentence_prefix(self.pending_final_chunk)
+        if not split:
             return False
+
+        commit_text, remaining_text = split
+        commit_timings, remaining_timings = split_word_timings_by_prefix(
+            self.pending_final_word_timings,
+            commit_text,
+        )
+        if commit_timings is None:
+            return False
+
+        self.pending_final_chunk = commit_text
+        self.pending_final_word_timings = commit_timings
+        self.commit_pending_final_chunk(reason)
+        self.pending_final_chunk = remaining_text
+        self.pending_final_word_timings = remaining_timings
+        return True
+
+    def should_defer_final_chunk(
+        self, candidate: str, reason: str, word_timings: list[dict] | None = None
+    ) -> bool:
         normalized = candidate.strip()
         if not normalized:
+            return False
+        if reason not in {"flush", "close"} and is_abnormal_short_final_chunk(normalized, word_timings):
+            return True
+        if reason != "max_chunk":
             return False
         preview_extension = try_extend_candidate_with_preview(normalized, self.last_preview_text)
         if preview_extension:
             self.pending_final_chunk = preview_extension
+            return True
+        pending_audio_ms = self.duration_ms_from_bytes(len(self.pending_pcm))
+        if has_unstable_timing_tail(
+            word_timings,
+            pending_audio_ms,
+            self.current_preview_unstable_text,
+        ):
+            return True
+        if not has_min_stable_preview_coverage(
+            normalized,
+            self.current_preview_stable_text,
+            self.current_preview_unstable_text,
+        ):
             return True
         return not has_stable_final_boundary(normalized)
 
@@ -1205,11 +1750,32 @@ class WebSocketStreamingSession:
             self.retain_overlap()
             return
 
+        final_word_timings = result.get("word_timings")
         overlap = find_text_overlap(self.get_visible_text_base(), final_chunk)
-        deduped = final_chunk[overlap:] if overlap > 0 else final_chunk
+        if overlap > 0:
+            deduped = final_chunk[overlap:]
+            final_word_timings = drop_word_timing_prefix(final_word_timings, final_chunk[:overlap])
+        else:
+            deduped, final_word_timings = deduplicate_timed_prefix_from_base(
+                self.get_visible_text_base(),
+                final_chunk,
+                final_word_timings,
+            )
         if deduped.strip():
             self.pending_final_chunk = merge_streaming_chunk_text(self.pending_final_chunk, deduped)
-            if not self.should_defer_final_chunk(self.pending_final_chunk, reason):
+            self.pending_final_word_timings = final_word_timings
+            if reason in {"max_chunk", "silence"} and self.commit_sentence_prefix_if_possible(reason):
+                if self.pending_final_chunk and not self.should_defer_final_chunk(
+                    self.pending_final_chunk,
+                    reason,
+                    self.pending_final_word_timings,
+                ):
+                    self.commit_pending_final_chunk(reason)
+            elif not self.should_defer_final_chunk(
+                self.pending_final_chunk,
+                reason,
+                self.pending_final_word_timings,
+            ):
                 self.commit_pending_final_chunk(reason)
 
         self.pending_new_bytes = 0
@@ -1248,7 +1814,14 @@ class WebSocketStreamingSession:
                     if msg_type == "flush":
                         self.emit_final("flush")
                         self.commit_pending_final_chunk("flush")
-                        self.emit_json({"type": "final", "text": self.final_text, "ts": int(time.time() * 1000)})
+                        self.emit_json(
+                            {
+                                "type": "final",
+                                "text": self.final_text,
+                                "wordTimings": None,
+                                "ts": int(time.time() * 1000),
+                            }
+                        )
                     elif msg_type == "close":
                         self.emit_final("close")
                         self.commit_pending_final_chunk("close")
@@ -1352,6 +1925,11 @@ class WhisperHandler(BaseHTTPRequestHandler):
                         "text": "Current chunk full snapshot",
                         "stableText": "Stable prefix for current chunk",
                         "unstableText": "Tail still allowed to change",
+                        "wordTimings": "Optional per-word timings when return_word_timestamps=true and engine supports it",
+                    },
+                    "query_options": {
+                        "return_word_timestamps": "Set to true to request optional per-word timings when supported",
+                        "text_corrections": "Optional JSON object with user-configurable text correction entries",
                     },
                 }
             )

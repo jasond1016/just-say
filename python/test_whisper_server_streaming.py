@@ -1,7 +1,15 @@
 import json
 import unittest
 
-from whisper_server import WebSocketStreamingSession, accumulate_preview_text
+from whisper_server import (
+    WebSocketStreamingSession,
+    apply_text_corrections,
+    accumulate_preview_text,
+    deduplicate_timed_prefix_from_base,
+    has_unstable_timing_tail,
+    has_min_stable_preview_coverage,
+    is_abnormal_short_final_chunk,
+)
 
 
 class DummyWebSocket:
@@ -34,6 +42,92 @@ class AccumulatePreviewTextTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "今日は日本の夏によく食べるものをご紹介しま。")
+
+    def test_keeps_spacing_when_incoming_preview_restarts_mid_sentence(self):
+        result = accumulate_preview_text(
+            "Hello and welcome to Co Recursive.",
+            "And welcome to Co recursive, I'm Adam Gordon.",
+        )
+
+        self.assertEqual(result, "Hello and welcome to Co recursive, I'm Adam Gordon.")
+
+
+class WordTimingHeuristicsTests(unittest.TestCase):
+    def test_apply_text_corrections_rewrites_aliases_to_targets(self):
+        corrected, changed = apply_text_corrections(
+            "私はう事キん時が食べたいです。",
+            [{"target": "宇治金時", "aliases": ["う事キん時", "無事キン時"]}],
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(corrected, "私は宇治金時が食べたいです。")
+
+    def test_deduplicate_timed_prefix_from_base_trims_repeated_overlap(self):
+        text, timings = deduplicate_timed_prefix_from_base(
+            "シロップも売っています",
+            "います赤福氷も人気です。",
+            [
+                {"text": "います", "startMs": 20, "endMs": 180},
+                {"text": "赤福", "startMs": 180, "endMs": 420},
+                {"text": "氷も", "startMs": 420, "endMs": 620},
+                {"text": "人気です。", "startMs": 620, "endMs": 980},
+            ],
+        )
+
+        self.assertEqual(text, "赤福氷も人気です。")
+        self.assertEqual([item["text"] for item in timings], ["赤福", "氷も", "人気です。"])
+
+    def test_has_unstable_timing_tail_detects_short_tail_near_audio_end(self):
+        self.assertTrue(
+            has_unstable_timing_tail(
+                [
+                    {"text": "売っ", "startMs": 4300, "endMs": 4490},
+                    {"text": "ています", "startMs": 4490, "endMs": 4860},
+                ],
+                5000,
+                "売っています",
+            )
+        )
+
+    def test_has_unstable_timing_tail_ignores_stable_gap_before_end(self):
+        self.assertFalse(
+            has_unstable_timing_tail(
+                [
+                    {"text": "赤福", "startMs": 3600, "endMs": 3900},
+                    {"text": "氷です。", "startMs": 3900, "endMs": 4200},
+                ],
+                5000,
+                "氷です",
+            )
+        )
+
+    def test_has_min_stable_preview_coverage_requires_short_unstable_tail(self):
+        self.assertFalse(
+            has_min_stable_preview_coverage(
+                "プはイチゴやメロンが定番です。",
+                "部はイチゴやメロ",
+                "ンが定番です。",
+            )
+        )
+        self.assertTrue(
+            has_min_stable_preview_coverage(
+                "かき氷を売っています。",
+                "かき氷を売ってい",
+                "ます。",
+            )
+        )
+
+    def test_is_abnormal_short_final_chunk_flags_short_sentence_fragment(self):
+        self.assertTrue(is_abnormal_short_final_chunk("う。", [{"text": "う", "startMs": 0, "endMs": 750}]))
+        self.assertFalse(
+            is_abnormal_short_final_chunk(
+                "人気です。",
+                [
+                    {"text": "人気", "startMs": 0, "endMs": 320},
+                    {"text": "です。", "startMs": 320, "endMs": 760},
+                ],
+            )
+        )
 
 
 class StreamingSessionPreviewTests(unittest.TestCase):
@@ -106,6 +200,189 @@ class StreamingSessionPreviewTests(unittest.TestCase):
 
         interim_messages = [message for message in websocket.messages if message["type"] == "interim"]
         self.assertEqual(interim_messages, [])
+
+    def test_emit_final_trims_timed_prefix_duplicate_from_visible_base(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(
+            websocket,
+            {
+                "text_corrections": [
+                    '{"entries":[{"target":"赤福氷","aliases":["赤福氷"]}]}'
+                ]
+            },
+        )
+        session.final_text = "シロップも売っています"
+        session.final_text_raw = "シロップも売っています"
+        final_pcm = b"\x00\x00" * (session.bytes_for_ms(2200) // 2)
+        session.pending_pcm = bytearray(final_pcm)
+        session.pending_new_bytes = len(final_pcm)
+        session.buffer_start_at = 1.0
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "います赤福氷も人気です。",
+            "word_timings": [
+                {"text": "います", "startMs": 20, "endMs": 180},
+                {"text": "赤福", "startMs": 180, "endMs": 420},
+                {"text": "氷も", "startMs": 420, "endMs": 620},
+                {"text": "人気です。", "startMs": 620, "endMs": 980},
+            ],
+        }
+
+        session.emit_final("silence")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(final_chunks[0]["text"], "赤福氷も人気です。")
+        self.assertEqual(
+            [item["text"] for item in final_chunks[0]["wordTimings"]],
+            ["赤福", "氷も", "人気です。"],
+        )
+        self.assertEqual(session.final_text_raw, "シロップも売っています赤福氷も人気です。")
+
+    def test_emit_final_defers_max_chunk_when_timing_tail_is_unstable(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {})
+        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(max_chunk_pcm)
+        session.pending_new_bytes = len(max_chunk_pcm)
+        session.buffer_start_at = 1.0
+        session.current_preview_unstable_text = "売っています"
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "かき氷を売っています。",
+            "word_timings": [
+                {"text": "かき氷を", "startMs": 3600, "endMs": 4150},
+                {"text": "売っ", "startMs": 4300, "endMs": 4490},
+                {"text": "ています", "startMs": 4490, "endMs": 4860},
+            ],
+        }
+
+        session.emit_final("max_chunk")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(final_chunks, [])
+        self.assertEqual(session.pending_final_chunk, "かき氷を売っています。")
+
+    def test_emit_final_commits_sentence_prefix_and_keeps_unfinished_tail(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {})
+        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(max_chunk_pcm)
+        session.pending_new_bytes = len(max_chunk_pcm)
+        session.buffer_start_at = 1.0
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "Hello world. This is still going",
+            "word_timings": [
+                {"text": "Hello", "startMs": 0, "endMs": 300},
+                {"text": "world", "startMs": 300, "endMs": 600},
+                {"text": ".", "startMs": 600, "endMs": 720},
+                {"text": "This", "startMs": 720, "endMs": 960},
+                {"text": "is", "startMs": 960, "endMs": 1110},
+                {"text": "still", "startMs": 1110, "endMs": 1380},
+                {"text": "going", "startMs": 1380, "endMs": 1620},
+            ],
+        }
+
+        session.emit_final("max_chunk")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(final_chunks[0]["text"], "Hello world.")
+        self.assertEqual(
+            [item["text"] for item in final_chunks[0]["wordTimings"]],
+            ["Hello", "world", "."],
+        )
+        self.assertEqual(session.final_text_raw, "Hello world.")
+        self.assertEqual(session.pending_final_chunk, "This is still going")
+        self.assertEqual(
+            [item["text"] for item in session.pending_final_word_timings],
+            ["This", "is", "still", "going"],
+        )
+
+    def test_emit_final_defers_max_chunk_when_stable_preview_coverage_is_too_short(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {})
+        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(max_chunk_pcm)
+        session.pending_new_bytes = len(max_chunk_pcm)
+        session.buffer_start_at = 1.0
+        session.current_preview_stable_text = "部はイチゴやメロ"
+        session.current_preview_unstable_text = "ンが定番です。"
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "プはイチゴやメロンが定番です。",
+            "word_timings": [
+                {"text": "プ", "startMs": 0, "endMs": 270},
+                {"text": "は", "startMs": 270, "endMs": 510},
+                {"text": "イ", "startMs": 510, "endMs": 690},
+                {"text": "チ", "startMs": 690, "endMs": 810},
+                {"text": "ゴ", "startMs": 810, "endMs": 930},
+                {"text": "や", "startMs": 930, "endMs": 1050},
+                {"text": "メ", "startMs": 1110, "endMs": 1230},
+                {"text": "ロ", "startMs": 1230, "endMs": 1290},
+                {"text": "ン", "startMs": 1290, "endMs": 1410},
+                {"text": "が", "startMs": 1470, "endMs": 1530},
+                {"text": "定", "startMs": 1650, "endMs": 1770},
+                {"text": "番", "startMs": 1770, "endMs": 2009},
+                {"text": "で", "startMs": 2009, "endMs": 2250},
+                {"text": "す", "startMs": 2250, "endMs": 2490},
+                {"text": "。", "startMs": 2490, "endMs": 4290},
+            ],
+        }
+
+        session.emit_final("max_chunk")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(final_chunks, [])
+        self.assertEqual(session.pending_final_chunk, "プはイチゴやメロンが定番です。")
+
+    def test_emit_final_defers_short_silence_chunk_until_more_context_arrives(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {})
+        short_pcm = b"\x00\x00" * (session.bytes_for_ms(1200) // 2)
+        session.pending_pcm = bytearray(short_pcm)
+        session.pending_new_bytes = len(short_pcm)
+        session.buffer_start_at = 1.0
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "う。",
+            "word_timings": [
+                {"text": "う", "startMs": 0, "endMs": 750},
+                {"text": "。", "startMs": 750, "endMs": 870},
+            ],
+        }
+
+        session.emit_final("silence")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(final_chunks, [])
+        self.assertEqual(session.pending_final_chunk, "う。")
+
+    def test_commit_pending_final_chunk_emits_corrected_visible_text_but_keeps_raw_base(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(
+            websocket,
+            {
+                "text_corrections": [
+                    '{"entries":[{"target":"宇治金時","aliases":["う事キん時"]}]}'
+                ]
+            },
+        )
+        session.pending_final_chunk = "私はう事キん時が好きです。"
+        session.pending_final_word_timings = [
+            {"text": "私", "startMs": 0, "endMs": 120},
+            {"text": "は", "startMs": 120, "endMs": 240},
+        ]
+
+        session.commit_pending_final_chunk("silence")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(final_chunks[0]["text"], "私は宇治金時が好きです。")
+        self.assertIsNone(final_chunks[0]["wordTimings"])
+        self.assertEqual(session.final_text, "私は宇治金時が好きです。")
+        self.assertEqual(session.final_text_raw, "私はう事キん時が好きです。")
 
 
 if __name__ == "__main__":

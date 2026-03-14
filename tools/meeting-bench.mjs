@@ -37,6 +37,8 @@ Options:
   --flush-wait-ms <n>       发送 flush 后等待毫秒（default: ${DEFAULTS.flushWaitMs}）
   --close-timeout-ms <n>    会话关闭超时毫秒（default: ${DEFAULTS.closeTimeoutMs}）
   --out-dir <path>          输出目录（默认 out/meeting-bench/<case>-<timestamp>）
+  --text-corrections-file <path>
+                            纠偏词表 JSON 文件（会编码到 text_corrections query）
 
 WS Query（会覆盖 ref.json 的 wsParams）:
   --engine <value>
@@ -47,6 +49,7 @@ WS Query（会覆盖 ref.json 的 wsParams）:
   --compute-type <value>
   --language <value>
   --sample-rate <n>
+  --return-word-timestamps <true|false>
   --preview-interval-ms <n>
   --preview-min-audio-ms <n>
   --preview-min-new-audio-ms <n>
@@ -86,6 +89,7 @@ function parseArgs(argv) {
     'compute-type': 'compute_type',
     language: 'language',
     'sample-rate': 'sample_rate',
+    'return-word-timestamps': 'return_word_timestamps',
     'preview-interval-ms': 'preview_interval_ms',
     'preview-min-audio-ms': 'preview_min_audio_ms',
     'preview-min-new-audio-ms': 'preview_min_new_audio_ms',
@@ -507,6 +511,7 @@ function buildRunSummary(runResult, reference) {
   const cerThreshold =
     typeof reference.cerThreshold === 'number' ? reference.cerThreshold : undefined
   const passedByCer = typeof cerThreshold === 'number' ? cer <= cerThreshold : undefined
+  const wordTimingStats = summarizeWordTimingStats(runResult.events)
 
   return {
     ...runResult,
@@ -526,7 +531,55 @@ function buildRunSummary(runResult, reference) {
     exactMatch: normalizedExpected === normalizedFinal,
     cerThreshold,
     passedByCer,
-    sentenceStats
+    sentenceStats,
+    wordTimingStats
+  }
+}
+
+function summarizeWordTimingStats(events) {
+  const byType = {}
+  let totalTimedEvents = 0
+  let totalItems = 0
+  let maxItemsPerEvent = 0
+
+  for (const event of events) {
+    const eventType = typeof event.type === 'string' ? event.type : 'unknown'
+    const timings = Array.isArray(event.wordTimings) ? event.wordTimings : []
+    const itemCount = timings.length
+    if (!byType[eventType]) {
+      byType[eventType] = {
+        timedEvents: 0,
+        totalItems: 0,
+        maxItemsPerEvent: 0
+      }
+    }
+    if (itemCount <= 0) {
+      continue
+    }
+    byType[eventType].timedEvents += 1
+    byType[eventType].totalItems += itemCount
+    byType[eventType].maxItemsPerEvent = Math.max(byType[eventType].maxItemsPerEvent, itemCount)
+    totalTimedEvents += 1
+    totalItems += itemCount
+    maxItemsPerEvent = Math.max(maxItemsPerEvent, itemCount)
+  }
+
+  if (totalTimedEvents === 0) {
+    return undefined
+  }
+
+  for (const stats of Object.values(byType)) {
+    if (stats.timedEvents > 0) {
+      stats.avgItemsPerEvent = Number((stats.totalItems / stats.timedEvents).toFixed(2))
+    }
+  }
+
+  return {
+    timedEventCount: totalTimedEvents,
+    totalItems,
+    avgItemsPerTimedEvent: Number((totalItems / totalTimedEvents).toFixed(2)),
+    maxItemsPerEvent,
+    byType
   }
 }
 
@@ -646,9 +699,17 @@ function buildMarkdownReport({
   lines.push('| --- | --- | --- | --- | --- |')
   for (const run of runSummaries) {
     const counts = run.eventTypeCounts || {}
+    const timedInterim = run.wordTimingStats?.byType?.interim?.timedEvents || 0
+    const timedFinalChunk = run.wordTimingStats?.byType?.final_chunk?.timedEvents || 0
+    const timedFinal = run.wordTimingStats?.byType?.final?.timedEvents || 0
     lines.push(
       `| ${run.runIndex} | ${(run.cer * 100).toFixed(2)}% | ${run.firstVisibleMs ?? '-'} | ${run.durationMs} | ${counts.interim || 0}/${counts.final_chunk || 0}/${counts.final || 0}/${counts.error || 0} |`
     )
+    if (run.wordTimingStats) {
+      lines.push(
+        `Word timings: events=${run.wordTimingStats.timedEventCount}, avgItems=${run.wordTimingStats.avgItemsPerTimedEvent}, maxItems=${run.wordTimingStats.maxItemsPerEvent}, byType(interim/final_chunk/final)=${timedInterim}/${timedFinalChunk}/${timedFinal}`
+      )
+    }
   }
   lines.push('')
   return lines.join('\n')
@@ -740,6 +801,19 @@ async function main() {
   if (mergedWsParams.sampleRate !== undefined && mergedWsParams.sample_rate === undefined) {
     mergedWsParams.sample_rate = mergedWsParams.sampleRate
     delete mergedWsParams.sampleRate
+  }
+  if (
+    mergedWsParams.textCorrections !== undefined &&
+    mergedWsParams.text_corrections === undefined &&
+    typeof mergedWsParams.textCorrections !== 'string'
+  ) {
+    mergedWsParams.text_corrections = JSON.stringify(mergedWsParams.textCorrections)
+    delete mergedWsParams.textCorrections
+  }
+  if (typeof rawArgs['text-corrections-file'] === 'string' && rawArgs['text-corrections-file']) {
+    const textCorrectionsPath = path.resolve(process.cwd(), rawArgs['text-corrections-file'])
+    const textCorrectionsJson = await fs.readFile(textCorrectionsPath, 'utf8')
+    mergedWsParams.text_corrections = JSON.stringify(JSON.parse(textCorrectionsJson))
   }
   const desiredSampleRate = Number(
     mergedWsParams.sample_rate || rawArgs['sample-rate'] || wavSampleRate

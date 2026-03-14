@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import { DEFAULT_TRIGGER_KEY, type TriggerKey } from '../shared/hotkey'
+import type { TextCorrectionConfig } from './recognition/text-corrections'
 
 export interface AppConfig {
   general?: {
@@ -56,6 +57,7 @@ export interface AppConfig {
       serverMode?: 'local' | 'remote'
       serverHost?: string
       serverPort?: number
+      textCorrections?: TextCorrectionConfig
       segmentation?: {
         previewIntervalMs?: number
         previewMinAudioMs?: number
@@ -166,14 +168,14 @@ const defaultConfig: AppConfig = {
       serverMode: 'local',
       serverPort: 8765,
       segmentation: {
-        previewIntervalMs: 450,
-        previewMinAudioMs: 350,
-        previewMinNewAudioMs: 220,
-        previewWindowMs: 2600,
-        minChunkMs: 1000,
-        silenceMs: 550,
-        maxChunkMs: 3800,
-        overlapMs: 450,
+        previewIntervalMs: 520,
+        previewMinAudioMs: 450,
+        previewMinNewAudioMs: 360,
+        previewWindowMs: 4200,
+        minChunkMs: 950,
+        silenceMs: 520,
+        maxChunkMs: 3600,
+        overlapMs: 480,
         holdMs: 260
       }
     },
