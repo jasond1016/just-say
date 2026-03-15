@@ -11,10 +11,7 @@ import { app } from 'electron'
 import * as fs from 'fs'
 import * as http from 'http'
 import * as net from 'net'
-import {
-  TextCorrectionConfig,
-  serializeTextCorrectionConfig
-} from './text-corrections'
+import { TextCorrectionConfig, serializeTextCorrectionConfig } from './text-corrections'
 
 export type LocalEngine = 'faster-whisper' | 'sensevoice'
 
@@ -61,6 +58,98 @@ export interface WhisperServerCapabilities {
   sample_rate?: number
   ws_path?: string
   ws_port?: number
+  interim_schema?: WhisperCapabilitySchema
+  final_chunk_schema?: WhisperCapabilitySchema
+  sentence_schema?: WhisperCapabilitySchema
+  query_options?: WhisperCapabilitySchema
+}
+
+export interface WhisperCapabilitySchema {
+  [field: string]: string | undefined
+}
+
+export interface WhisperStreamWordTimingPayload {
+  text?: string
+  startMs?: number
+  endMs?: number
+}
+
+export interface WhisperStreamReadyEvent {
+  type: 'ready'
+  streaming?: boolean
+  ts?: number
+}
+
+export interface WhisperStreamInterimEvent {
+  type: 'interim'
+  text?: string
+  stableText?: string
+  unstableText?: string
+  wordTimings?: WhisperStreamWordTimingPayload[]
+  ts?: number
+}
+
+export interface WhisperStreamFinalChunkEvent {
+  type: 'final_chunk'
+  text?: string
+  wordTimings?: WhisperStreamWordTimingPayload[]
+  ts?: number
+}
+
+export interface WhisperStreamSentenceEvent {
+  type: 'sentence'
+  text?: string
+  ts?: number
+}
+
+export interface WhisperStreamEndpointEvent {
+  type: 'endpoint'
+  reason?: string
+  ts?: number
+}
+
+export interface WhisperStreamFinalEvent {
+  type: 'final'
+  text?: string
+  wordTimings?: WhisperStreamWordTimingPayload[]
+  ts?: number
+}
+
+export interface WhisperStreamErrorEvent {
+  type: 'error'
+  message?: string
+  ts?: number
+}
+
+export interface WhisperStreamPongEvent {
+  type: 'pong'
+  ts?: number
+}
+
+export type WhisperStreamEvent =
+  | WhisperStreamReadyEvent
+  | WhisperStreamInterimEvent
+  | WhisperStreamFinalChunkEvent
+  | WhisperStreamSentenceEvent
+  | WhisperStreamEndpointEvent
+  | WhisperStreamFinalEvent
+  | WhisperStreamErrorEvent
+  | WhisperStreamPongEvent
+
+export function getWhisperStreamWsPort(
+  capabilities: WhisperServerCapabilities,
+  fallbackPort: number
+): number {
+  return typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
+    ? Math.floor(capabilities.ws_port)
+    : fallbackPort
+}
+
+export function supportsWhisperStreamEvent(
+  capabilities: WhisperServerCapabilities,
+  eventType: WhisperStreamEvent['type']
+): boolean {
+  return Array.isArray(capabilities.events) && capabilities.events.includes(eventType)
 }
 
 type WhisperServerRuntimeConfig = {
@@ -255,10 +344,7 @@ class WhisperServerClient {
       if (await this.isHealthy()) {
         const capabilities = await this.readCapabilities()
         if (capabilities.streaming_asr) {
-          const wsPort =
-            typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
-              ? Math.floor(capabilities.ws_port)
-              : this.config.port + 1
+          const wsPort = getWhisperStreamWsPort(capabilities, this.config.port + 1)
           const wsReady = await this.isTcpPortOpen(this.config.host, wsPort, 500)
           if (!wsReady) {
             await new Promise((resolve) => setTimeout(resolve, pollInterval))

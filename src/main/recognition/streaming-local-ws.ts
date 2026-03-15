@@ -1,16 +1,22 @@
 import WebSocket from 'ws'
 import { EventEmitter } from 'events'
 
-import { getWhisperServer, LocalEngine } from './whisperServer'
+import {
+  getWhisperServer,
+  getWhisperStreamWsPort,
+  LocalEngine,
+  supportsWhisperStreamEvent,
+  WhisperStreamEvent,
+  WhisperStreamWordTimingPayload
+} from './whisperServer'
 import { SpeakerSegment, PartialResult, SentencePair, WordTiming } from './streaming-soniox'
 import {
   cleanupJapaneseAsrText,
   findTextOverlap,
-  mergeStreamingChunkText,
-  mergeText
+  mergeText,
+  normalizeJapaneseSpacing
 } from './text-utils'
 import { TextCorrectionConfig } from './text-corrections'
-import { isWeakBoundarySuffix, shouldFlushSentenceByBoundary } from './commit-boundary'
 
 interface LocalTranslationConfig {
   enabled: boolean
@@ -74,23 +80,16 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private translationQueue: Promise<void> = Promise.resolve()
 
   private confirmedText = ''
-  private pendingChunkText = ''
   private previewText = ''
   private previewStableText = ''
   private previewUnstableText = ''
   private currentWordTimings: WordTiming[] = []
-  private pendingSentenceOriginal = ''
+  private liveSentenceTail = ''
   private sentencePairs: SentencePair[] = []
   private confirmedTranslation = ''
-  private boundaryHoldTimer: NodeJS.Timeout | null = null
   private pendingTranslationPairIndices: number[] = []
   private translationBatchTimer: NodeJS.Timeout | null = null
 
-  private readonly SENTENCE_MIN_FLUSH_CHARS = 14
-  private readonly SENTENCE_SOFT_FLUSH_CHARS = 28
-  private readonly SENTENCE_FORCE_FLUSH_CHARS = 48
-  private readonly STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
-  private readonly DEFAULT_HOLD_MS = 260
   private readonly DEFAULT_TRANSLATION_BATCH_WINDOW_MS = 450
   private readonly DEFAULT_TRANSLATION_MAX_BATCH_ITEMS = 6
 
@@ -132,7 +131,6 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         useItn: config.sensevoice?.useItn ?? this.config.sensevoice.useItn
       }
     }
-    this.clearBoundaryHoldTimer()
     this.pendingTranslationPairIndices = []
     this.clearTranslationBatchTimer()
     this.preConnected = false
@@ -171,10 +169,10 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     if (!capabilities.streaming_asr) {
       throw new Error('Local server does not support websocket streaming ASR')
     }
-    this.wsPort =
-      typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
-        ? Math.floor(capabilities.ws_port)
-        : undefined
+    this.wsPort = getWhisperStreamWsPort(capabilities, (this.config.serverPort || 8765) + 1)
+    if (!supportsWhisperStreamEvent(capabilities, 'sentence')) {
+      console.warn('[StreamingLocalWs] Server does not advertise sentence events')
+    }
     this.preConnected = true
     console.log('[StreamingLocalWs] Pre-connected successfully')
   }
@@ -192,16 +190,14 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.startTime = Date.now()
     this.translationQueue = Promise.resolve()
     this.confirmedText = ''
-    this.pendingChunkText = ''
     this.previewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
     this.currentWordTimings = []
-    this.pendingSentenceOriginal = ''
+    this.liveSentenceTail = ''
     this.sentencePairs = []
     this.confirmedTranslation = ''
     this.pendingTranslationPairIndices = []
-    this.clearBoundaryHoldTimer()
     this.clearTranslationBatchTimer()
 
     const server = this.getServerClient()
@@ -300,9 +296,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewStableText = ''
     this.previewUnstableText = ''
     this.currentWordTimings = []
-    this.commitPendingChunk()
-    this.clearBoundaryHoldTimer()
-    this.flushPendingSentencePair(true, true)
+    this.liveSentenceTail = ''
     this.flushPendingTranslationBatch()
     await this.translationQueue
     this.isActive = false
@@ -333,12 +327,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
   close(): void {
     this.isActive = false
-    this.pendingChunkText = ''
     this.previewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
     this.currentWordTimings = []
-    this.clearBoundaryHoldTimer()
+    this.liveSentenceTail = ''
     this.pendingTranslationPairIndices = []
     this.clearTranslationBatchTimer()
     if (this.ws) {
@@ -349,72 +342,62 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   }
 
   private handleMessage(raw: string): void {
-    let data: {
-      type?: string
-      text?: string
-      stableText?: string
-      unstableText?: string
-      wordTimings?: Array<{ text?: string; startMs?: number; endMs?: number }>
-      message?: string
-      reason?: string
+    const data = this.parseStreamEvent(raw)
+    if (!data) {
+      return
     }
+
+    switch (data.type) {
+      case 'interim': {
+        const preview = this.normalizePreviewText(data.text || '')
+        this.previewText = this.deduplicatePreviewFromCommitted(preview)
+        const stablePreview = this.normalizePreviewText(data.stableText || '')
+        const unstablePreview = this.normalizeUnstablePreviewText(data.unstableText || '')
+        this.applyPreviewStateFromServer(stablePreview, unstablePreview)
+        this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.emitPartialResult()
+        return
+      }
+      case 'final_chunk':
+        this.appendCommittedChunk(data.text || '')
+        this.previewText = ''
+        this.previewStableText = ''
+        this.previewUnstableText = ''
+        this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.emitPartialResult()
+        return
+      case 'sentence':
+        this.applyFinalizedSentenceFromServer(data.text || '')
+        this.emitPartialResult()
+        return
+      case 'endpoint':
+        this.emitPartialResult()
+        return
+      case 'final':
+        this.previewText = ''
+        this.previewStableText = ''
+        this.previewUnstableText = ''
+        this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.liveSentenceTail = ''
+        this.emitPartialResult()
+        return
+      case 'error':
+        this.emit('error', new Error(data.message || 'streaming_local_ws_error'))
+        return
+      default:
+        return
+    }
+  }
+
+  private parseStreamEvent(raw: string): WhisperStreamEvent | null {
     try {
-      data = JSON.parse(raw) as { type?: string; text?: string; message?: string; reason?: string }
+      const parsed = JSON.parse(raw) as Partial<WhisperStreamEvent>
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.type !== 'string') {
+        return null
+      }
+      return parsed as WhisperStreamEvent
     } catch {
-      return
-    }
-
-    if (data.type === 'interim') {
-      const preview = this.normalizePreviewText(data.text || '')
-      this.previewText = this.deduplicateFromVisible(preview)
-      const stablePreview = this.normalizePreviewText(data.stableText || '')
-      const unstablePreview = this.normalizePreviewText(data.unstableText || '')
-      this.applyPreviewStateFromServer(stablePreview, unstablePreview)
-      this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'final_chunk') {
-      this.clearBoundaryHoldTimer()
-      this.pendingChunkText = this.mergePendingChunk(data.text || '')
-      this.previewText = ''
-      this.previewStableText = ''
-      this.previewUnstableText = ''
-      this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'endpoint') {
-      const shouldDeferChunkCommit = this.shouldDeferChunkCommit(data.reason || '')
-      if (!shouldDeferChunkCommit) {
-        this.commitPendingChunk()
-      }
-      if (this.pendingSentenceOriginal.trim()) {
-        if (shouldDeferChunkCommit || isWeakBoundarySuffix(this.pendingSentenceOriginal)) {
-          this.scheduleBoundaryHoldFlush(data.reason || 'endpoint')
-        } else {
-          this.flushPendingSentencePair(false, true)
-        }
-      }
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'final') {
-      this.commitPendingChunk()
-      this.previewText = ''
-      this.previewStableText = ''
-      this.previewUnstableText = ''
-      this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
-      this.flushPendingSentencePair(true, true)
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'error') {
-      this.emit('error', new Error(data.message || 'streaming_local_ws_error'))
+      return null
     }
   }
 
@@ -426,9 +409,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return cleanupJapaneseAsrText(text)
   }
 
-  private normalizeWordTimings(
-    items: Array<{ text?: string; startMs?: number; endMs?: number }> | undefined
-  ): WordTiming[] {
+  private normalizeUnstablePreviewText(text: string): string {
+    return normalizeJapaneseSpacing(text)
+  }
+
+  private normalizeWordTimings(items: WhisperStreamWordTimingPayload[] | undefined): WordTiming[] {
     if (!Array.isArray(items) || items.length === 0) {
       return []
     }
@@ -457,42 +442,14 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       return
     }
 
-    if (!stablePreview.trim() && !unstablePreview.trim()) {
-      this.previewStableText = this.previewText
-      this.previewUnstableText = ''
-      return
-    }
-
-    let nextStable = stablePreview ? this.deduplicateFromVisible(stablePreview) : ''
-    nextStable = this.clampStablePreview(nextStable)
-
-    let nextUnstable = unstablePreview
-    if (nextStable && this.previewText.startsWith(nextStable)) {
-      nextUnstable = this.previewText.slice(nextStable.length)
-    } else if (nextUnstable && this.previewText.endsWith(nextUnstable)) {
-      nextStable = this.previewText.slice(0, this.previewText.length - nextUnstable.length)
-    } else {
-      nextStable = this.previewText
-      nextUnstable = ''
-    }
-
-    this.previewStableText = nextStable
-    this.previewUnstableText = nextUnstable
+    this.previewStableText = stablePreview
+      ? this.deduplicatePreviewFromCommitted(stablePreview)
+      : ''
+    this.previewUnstableText =
+      unstablePreview || (!this.previewStableText.trim() ? this.previewText : '')
   }
 
-  private clampStablePreview(candidateStable: string): string {
-    const previousStable = this.previewStableText
-    if (
-      previousStable.trim() &&
-      previousStable.length > candidateStable.length &&
-      this.previewText.startsWith(previousStable)
-    ) {
-      return previousStable
-    }
-    return candidateStable
-  }
-
-  private deduplicateFromVisible(text: string): string {
+  private deduplicatePreviewFromCommitted(text: string): string {
     const base = this.getVisibleBaseText()
     if (!text || !base) return text
     const overlap = findTextOverlap(base, text, 200)
@@ -515,101 +472,37 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return deduped
   }
 
-  private mergePendingChunk(text: string): string {
-    const normalized = this.normalizeText(text)
-    if (!normalized) {
-      return this.pendingChunkText
-    }
-    if (!this.pendingChunkText) {
-      return normalized
-    }
-    return mergeStreamingChunkText(this.pendingChunkText, normalized)
-  }
-
-  private commitPendingChunk(): string {
-    const normalized = this.pendingChunkText.trim()
-    if (!normalized) {
-      this.pendingChunkText = ''
-      return ''
-    }
-
-    this.pendingChunkText = ''
-    const committed = this.appendConfirmed(normalized)
+  private appendCommittedChunk(text: string): string {
+    const committed = this.appendConfirmed(text)
     if (committed) {
-      this.pendingSentenceOriginal = mergeText(this.pendingSentenceOriginal, committed)
+      this.liveSentenceTail = mergeText(this.liveSentenceTail, committed)
     }
     return committed
   }
 
-  private shouldDeferChunkCommit(reason: string): boolean {
-    const normalized = this.pendingChunkText.trim()
-    if (!normalized || reason !== 'max_chunk') {
-      return false
-    }
-
-    return !shouldFlushSentenceByBoundary(normalized, true, {
-      sentenceMinFlushChars: this.SENTENCE_MIN_FLUSH_CHARS,
-      sentenceSoftFlushChars: this.SENTENCE_SOFT_FLUSH_CHARS,
-      sentenceForceFlushChars: this.SENTENCE_FORCE_FLUSH_CHARS,
-      strongPunctuationMinTailChars: this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
-    })
-  }
-
   private getVisibleBaseText(): string {
-    return mergeText(this.confirmedText, this.pendingChunkText).trim()
+    return this.confirmedText.trim()
   }
 
-  private getHoldMs(): number {
-    const holdMs = this.config.segmentation?.holdMs
-    if (typeof holdMs === 'number' && Number.isFinite(holdMs) && holdMs > 0) {
-      return Math.floor(holdMs)
-    }
-    return this.DEFAULT_HOLD_MS
-  }
-
-  private scheduleBoundaryHoldFlush(reason: string): void {
-    this.clearBoundaryHoldTimer()
-    const holdMs = this.getHoldMs()
-    this.boundaryHoldTimer = setTimeout(() => {
-      this.boundaryHoldTimer = null
-      if (!this.isActive) {
-        return
-      }
-      this.flushPendingSentencePair(false, true)
-      this.emitPartialResult()
-      if (reason) {
-        console.log(`[StreamingLocalWs] Hold flush executed after weak boundary: ${reason}`)
-      }
-    }, holdMs)
-  }
-
-  private clearBoundaryHoldTimer(): void {
-    if (this.boundaryHoldTimer) {
-      clearTimeout(this.boundaryHoldTimer)
-      this.boundaryHoldTimer = null
-    }
-  }
-
-  private flushPendingSentencePair(force: boolean, endpointTriggered: boolean): number | null {
-    const normalized = this.pendingSentenceOriginal.trim()
+  private applyFinalizedSentenceFromServer(text: string): number | null {
+    const normalized = this.normalizeText(text)
     if (!normalized) {
-      this.pendingSentenceOriginal = ''
       return null
     }
 
-    if (
-      !force &&
-      !shouldFlushSentenceByBoundary(normalized, endpointTriggered, {
-        sentenceMinFlushChars: this.SENTENCE_MIN_FLUSH_CHARS,
-        sentenceSoftFlushChars: this.SENTENCE_SOFT_FLUSH_CHARS,
-        sentenceForceFlushChars: this.SENTENCE_FORCE_FLUSH_CHARS,
-        strongPunctuationMinTailChars: this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
-      })
-    ) {
-      return null
+    if (this.liveSentenceTail.startsWith(normalized)) {
+      this.liveSentenceTail = this.liveSentenceTail.slice(normalized.length).trimStart()
+    } else if (this.liveSentenceTail === normalized) {
+      this.liveSentenceTail = ''
+    } else {
+      const overlap = findTextOverlap(normalized, this.liveSentenceTail, 200)
+      if (overlap > 0 && overlap === normalized.length) {
+        this.liveSentenceTail = this.liveSentenceTail.slice(overlap).trimStart()
+      } else {
+        this.liveSentenceTail = ''
+      }
     }
 
-    this.pendingSentenceOriginal = ''
     const pairIndex = this.sentencePairs.push({ original: normalized }) - 1
     this.translatePairAsync(pairIndex)
     return pairIndex
@@ -780,10 +673,9 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     const translated = this.confirmedTranslation.trim()
 
     const pairs: SentencePair[] = [...this.sentencePairs]
-    const pendingPairBase = mergeText(this.pendingSentenceOriginal, this.pendingChunkText)
-    const pendingPairText = mergeText(pendingPairBase, this.previewText).trim()
-    if (pendingPairText) {
-      pairs.push({ original: pendingPairText })
+    const livePairText = mergeText(this.liveSentenceTail, this.previewText).trim()
+    if (livePairText) {
+      pairs.push({ original: livePairText })
     }
 
     const currentSegment: SpeakerSegment | null = combined

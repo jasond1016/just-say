@@ -8,47 +8,6 @@ vi.mock('./whisperServer', () => ({
 }))
 
 describe('StreamingLocalWsRecognizer', () => {
-  it('keeps the stable preview monotonic when the backend regresses it', async () => {
-    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
-    const recognizer = new StreamingLocalWsRecognizer()
-    const partials: any[] = []
-
-    recognizer.on('partial', (result) => {
-      partials.push(result)
-    })
-
-    ;(recognizer as any).handleMessage(
-      JSON.stringify({
-        type: 'interim',
-        text: '今日は日本の夏によく食べるものをご紹介しま。',
-        stableText: '今日は日本の夏によ',
-        unstableText: 'く食べるものをご紹介しま。'
-      })
-    )
-    ;(recognizer as any).handleMessage(
-      JSON.stringify({
-        type: 'interim',
-        text: '今日は日本の夏によく食べるものをご紹介します。',
-        stableText: '今日は日本の夏によく食べ',
-        unstableText: 'るものをご紹介します。'
-      })
-    )
-    ;(recognizer as any).handleMessage(
-      JSON.stringify({
-        type: 'interim',
-        text: '今日は日本の夏によく食べるものをご紹介します。',
-        stableText: '今',
-        unstableText: '日は日本の夏によく食べるものをご紹介します。'
-      })
-    )
-
-    expect(partials.at(-1)?.currentSegment).toMatchObject({
-      text: '今日は日本の夏によく食べるものをご紹介します。',
-      stableText: '今日は日本の夏によく食べ',
-      unstableText: 'るものをご紹介します。'
-    })
-  })
-
   it('emits a full visible interim after a committed final chunk', async () => {
     const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
     const recognizer = new StreamingLocalWsRecognizer()
@@ -57,7 +16,6 @@ describe('StreamingLocalWsRecognizer', () => {
     recognizer.on('partial', (result) => {
       partials.push(result)
     })
-
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'final_chunk',
@@ -86,6 +44,137 @@ describe('StreamingLocalWsRecognizer', () => {
     })
   })
 
+  it('treats final_chunk as committed immediately without waiting for endpoint', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'Hello and welcome.'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'interim',
+        text: "I'm Adam.",
+        stableText: "I'm",
+        unstableText: ' Adam.'
+      })
+    )
+
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: "Hello and welcome. I'm Adam.",
+      stableText: "Hello and welcome. I'm",
+      unstableText: ' Adam.'
+    })
+  })
+
+  it('uses sentence events from the backend to finalize sentence pairs', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'Hello and welcome.'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'sentence',
+        text: 'Hello and welcome.'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'interim',
+        text: "I'm Adam.",
+        stableText: "I'm",
+        unstableText: ' Adam.'
+      })
+    )
+
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: "Hello and welcome. I'm Adam."
+    })
+    expect(partials.at(-1)?.currentSegment?.sentencePairs).toEqual([
+      { original: 'Hello and welcome.' },
+      { original: "I'm Adam." }
+    ])
+  })
+
+  it('does not synthesize sentence pairs locally on final without a sentence event', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'Hello and welcome.'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final',
+        text: 'Hello and welcome.'
+      })
+    )
+
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: 'Hello and welcome.'
+    })
+    expect(partials.at(-1)?.currentSegment?.sentencePairs).toBeUndefined()
+  })
+
+  it('uses server interim fields directly without local protocol aliases', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'Hello and welcome.'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'endpoint',
+        reason: 'silence'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'interim',
+        text: "I'm Adam.",
+        stableText: "I'm",
+        unstableText: ' Adam.'
+      })
+    )
+
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: "Hello and welcome. I'm Adam.",
+      stableText: "Hello and welcome. I'm",
+      unstableText: ' Adam.'
+    })
+  })
+
   it('preserves english spacing in unstable preview text', async () => {
     const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
     const recognizer = new StreamingLocalWsRecognizer()
@@ -94,7 +183,6 @@ describe('StreamingLocalWsRecognizer', () => {
     recognizer.on('partial', (result) => {
       partials.push(result)
     })
-
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',

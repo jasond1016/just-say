@@ -4,6 +4,7 @@ import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
 import { VADState } from './vad-utils'
 import { findTextOverlap, mergeText } from './text-utils'
 import { TextCorrectionConfig } from './text-corrections'
+import { shouldFlushSentenceByBoundary } from './commit-boundary'
 
 interface LocalTranslationConfig {
   enabled: boolean
@@ -78,7 +79,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private translationQueue: Promise<void> = Promise.resolve()
   private pendingTranslationPairIndices: number[] = []
   private translationBatchTimer: NodeJS.Timeout | null = null
-  private pendingSentenceOriginal = ''
+  private liveSentenceTail = ''
   private previewText = ''
   private pendingHypothesis = ''
   private lastHypothesisUpdateAt = 0
@@ -87,13 +88,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private readonly MIN_CHUNK_DURATION_MS = 1200
   private readonly MAX_CHUNK_DURATION_MS = 6000
   private readonly OVERLAP_AUDIO_MS = 360
-  private readonly SENTENCE_MIN_FLUSH_CHARS = 14
-  private readonly SENTENCE_SOFT_FLUSH_CHARS = 28
-  private readonly SENTENCE_FORCE_FLUSH_CHARS = 48
   private readonly STABILITY_FORCE_COMMIT_CHARS = 20
   private readonly STABILITY_MIN_BOUNDARY_CHARS = 6
   private readonly STABILITY_REPLACE_COMMIT_MIN_COMMON_CHARS = 2
-  private readonly STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
   private readonly HYPOTHESIS_FINALIZE_SILENCE_MS = 1200
   private readonly HYPOTHESIS_FINALIZE_IDLE_MS = 220
   private readonly DEFAULT_TRANSLATION_BATCH_WINDOW_MS = 450
@@ -212,7 +209,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.confirmedTranslation = ''
     this.completedSegments = []
     this.sentencePairs = []
-    this.pendingSentenceOriginal = ''
+    this.liveSentenceTail = ''
     this.previewText = ''
     this.pendingHypothesis = ''
     this.lastHypothesisUpdateAt = 0
@@ -316,7 +313,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.confirmedText = ''
     this.confirmedTranslation = ''
     this.sentencePairs = []
-    this.pendingSentenceOriginal = ''
+    this.liveSentenceTail = ''
     this.previewText = ''
     this.pendingHypothesis = ''
     this.lastHypothesisUpdateAt = 0
@@ -524,10 +521,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
       return null
     }
 
-    this.pendingSentenceOriginal = this.normalizeJapaneseSpacing(
-      mergeText(this.pendingSentenceOriginal, appended)
+    this.liveSentenceTail = this.normalizeJapaneseSpacing(
+      mergeText(this.liveSentenceTail, appended)
     )
-    if (this.shouldFlushSentence(this.pendingSentenceOriginal)) {
+    if (this.shouldFlushSentence(this.liveSentenceTail)) {
       return this.flushPendingSentencePair()
     }
     return null
@@ -901,36 +898,12 @@ export class StreamingLocalRecognizer extends EventEmitter {
   }
 
   private shouldFlushSentence(sentence: string): boolean {
-    const normalized = sentence.trim()
-    if (!normalized) {
-      return false
-    }
-
-    const meaningfulChars = this.getMeaningfulCharCount(normalized)
-    if (meaningfulChars >= this.SENTENCE_FORCE_FLUSH_CHARS) {
-      return true
-    }
-
-    const endsWithStrongPunctuation = /[。！？!?]$/.test(normalized)
-    if (
-      endsWithStrongPunctuation &&
-      meaningfulChars >= this.SENTENCE_MIN_FLUSH_CHARS &&
-      this.hasEnoughTailForStrongPunctuationCommit(normalized)
-    ) {
-      return true
-    }
-
-    const hasSoftBoundary = /[，、,;；:：]$/.test(normalized)
-    if (hasSoftBoundary && meaningfulChars >= this.SENTENCE_SOFT_FLUSH_CHARS) {
-      return true
-    }
-
-    return false
+    return shouldFlushSentenceByBoundary(sentence, false)
   }
 
   private flushPendingSentencePair(): number | null {
-    const finalized = this.normalizeJapaneseSpacing(this.pendingSentenceOriginal).trim()
-    this.pendingSentenceOriginal = ''
+    const finalized = this.normalizeJapaneseSpacing(this.liveSentenceTail).trim()
+    this.liveSentenceTail = ''
     if (!finalized) {
       return null
     }
@@ -969,15 +942,6 @@ export class StreamingLocalRecognizer extends EventEmitter {
 
   private isHanChar(ch: string): boolean {
     return /\p{Script=Han}/u.test(ch)
-  }
-
-  private hasEnoughTailForStrongPunctuationCommit(text: string): boolean {
-    const trailingRemoved = text.replace(/[。！？!?]+$/u, '')
-    if (!trailingRemoved) {
-      return false
-    }
-    const tail = this.getTailAfterLastBoundary(trailingRemoved)
-    return this.getMeaningfulCharCount(tail) >= this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
   }
 
   private getTailAfterLastBoundary(text: string): string {
@@ -1084,7 +1048,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
           speaker: 0,
           text: combined,
           translatedText: translated || undefined,
-          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
+          sentencePairs: this.buildLiveSentencePairs(),
           isFinal: false
         }
       : null
@@ -1125,5 +1089,14 @@ export class StreamingLocalRecognizer extends EventEmitter {
     if (ms <= 0) return 0
     const sampleRate = this.config.sampleRate || 16000
     return Math.floor((sampleRate * 2 * ms) / 1000)
+  }
+
+  private buildLiveSentencePairs(): SentencePair[] | undefined {
+    const pairs: SentencePair[] = [...this.sentencePairs]
+    const livePairText = mergeText(this.liveSentenceTail, this.previewText).trim()
+    if (livePairText) {
+      pairs.push({ original: livePairText })
+    }
+    return pairs.length > 0 ? pairs : undefined
   }
 }
