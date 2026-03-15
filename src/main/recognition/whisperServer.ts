@@ -10,7 +10,7 @@ import { join } from 'path'
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as http from 'http'
-import * as net from 'net'
+import WebSocket from 'ws'
 import { TextCorrectionConfig, serializeTextCorrectionConfig } from './text-corrections'
 
 export type LocalEngine = 'faster-whisper' | 'sensevoice'
@@ -347,7 +347,8 @@ class WhisperServerClient {
         const capabilities = await this.readCapabilities()
         if (capabilities.streaming_asr) {
           const wsPort = getWhisperStreamWsPort(capabilities, this.config.port + 1)
-          const wsReady = await this.isTcpPortOpen(this.config.host, wsPort, 500)
+          const wsPath = capabilities.ws_path || '/stream'
+          const wsReady = await this.isStreamingWsReady(this.config.host, wsPort, wsPath, 800)
           if (!wsReady) {
             await new Promise((resolve) => setTimeout(resolve, pollInterval))
             continue
@@ -424,21 +425,33 @@ class WhisperServerClient {
     }
   }
 
-  private isTcpPortOpen(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  private isStreamingWsReady(
+    host: string,
+    port: number,
+    path: string,
+    timeoutMs: number
+  ): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = net.createConnection({ host, port })
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`
+      const socket = new WebSocket(`ws://${host}:${port}${normalizedPath}`)
       let settled = false
+      let timeout: NodeJS.Timeout | null = null
 
       const finish = (result: boolean): void => {
         if (settled) return
         settled = true
-        socket.destroy()
+        if (timeout) {
+          clearTimeout(timeout)
+          timeout = null
+        }
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.terminate()
+        }
         resolve(result)
       }
 
-      socket.setTimeout(timeoutMs)
-      socket.once('connect', () => finish(true))
-      socket.once('timeout', () => finish(false))
+      timeout = setTimeout(() => finish(false), timeoutMs)
+      socket.once('open', () => finish(true))
       socket.once('error', () => finish(false))
     })
   }
