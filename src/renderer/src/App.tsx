@@ -14,7 +14,6 @@ import { startSystemAudioCapture, stopSystemAudioCapture } from './system-audio-
 import { stopMicrophoneCapture } from './microphone-capture'
 import { I18nProvider } from './i18n/I18nProvider'
 import { AppLocale, resolveLocale } from './i18n'
-import { buildCurrentSpeakerSegment } from './lib/live-segment'
 
 type ThemeOption = 'system' | 'light' | 'dark'
 type AppView = 'workspace' | 'meeting-session'
@@ -65,30 +64,19 @@ function mergeSpeakerSegments(
   prevSegments: SpeakerSegment[],
   incoming: SpeakerSegment[]
 ): SpeakerSegment[] {
-  if (incoming.length === 0) {
-    return prevSegments
-  }
-
-  const nextSegments = [...prevSegments]
+  const nextSegments: SpeakerSegment[] = []
   for (let i = 0; i < incoming.length; i += 1) {
     const incomingSegment = incoming[i]
     if (!incomingSegment.text.trim()) {
       continue
     }
 
-    if (i < nextSegments.length) {
-      const existing = nextSegments[i]
-      nextSegments[i] = {
-        ...existing,
-        ...incomingSegment,
-        timestamp: existing.timestamp ?? Date.now()
-      }
-    } else {
-      nextSegments.push({
-        ...incomingSegment,
-        timestamp: Date.now()
-      })
-    }
+    const existing = prevSegments[i]
+    nextSegments.push({
+      ...existing,
+      ...incomingSegment,
+      timestamp: existing?.timestamp ?? incomingSegment.timestamp ?? Date.now()
+    })
   }
 
   return nextSegments
@@ -154,10 +142,14 @@ function App(): React.JSX.Element {
             nextSegments[nextSegments.length - 1] = {
               ...lastSegment,
               ...segment.currentSpeakerSegment,
-              timestamp: lastSegment.timestamp ?? Date.now()
+              timestamp:
+                lastSegment.timestamp ?? segment.currentSpeakerSegment.timestamp ?? Date.now()
             }
           } else {
-            nextSegments.push({ ...segment.currentSpeakerSegment, timestamp: Date.now() })
+            nextSegments.push({
+              ...segment.currentSpeakerSegment,
+              timestamp: segment.currentSpeakerSegment.timestamp ?? Date.now()
+            })
           }
         }
         return { ...prev, segments: nextSegments, currentSegment: null }
@@ -171,13 +163,17 @@ function App(): React.JSX.Element {
           prev.currentSegment?.speaker === segment.currentSpeakerSegment.speaker
             ? prev.currentSegment
             : null
-        nextCurrentSegment = buildCurrentSpeakerSegment(
-          previousCurrentSegment,
-          segment.currentSpeakerSegment,
-          segment.currentWordTimings
-        )
-      } else if (prev.currentSegment) {
-        nextCurrentSegment = prev.currentSegment
+        nextCurrentSegment = {
+          ...segment.currentSpeakerSegment,
+          wordTimings:
+            segment.currentSpeakerSegment.wordTimings ??
+            segment.currentWordTimings ??
+            undefined,
+          timestamp:
+            previousCurrentSegment?.timestamp ??
+            segment.currentSpeakerSegment.timestamp ??
+            Date.now()
+        }
       }
 
       return {

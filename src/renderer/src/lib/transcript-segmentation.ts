@@ -12,9 +12,24 @@ interface StoredSegmentLike {
 interface LiveSegmentLike {
   text: string
   stableText?: string
+  unstableText?: string
   previewText?: string
   translatedText?: string
   sentencePairs?: Array<{ original: string; translated?: string }>
+}
+
+function getPreviewLiveText(segment: LiveSegmentLike): string {
+  const previewText = segment.previewText || ''
+  if (previewText.trim()) {
+    return previewText
+  }
+
+  const unstableText = segment.unstableText || ''
+  if (unstableText.trim()) {
+    return unstableText
+  }
+
+  return ''
 }
 
 function getStableLiveText(segment: LiveSegmentLike): string {
@@ -24,7 +39,7 @@ function getStableLiveText(segment: LiveSegmentLike): string {
   }
 
   const fullText = segment.text || ''
-  const previewText = segment.previewText || ''
+  const previewText = getPreviewLiveText(segment)
   if (previewText.trim() && fullText.endsWith(previewText)) {
     return fullText.slice(0, fullText.length - previewText.length)
   }

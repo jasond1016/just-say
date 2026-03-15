@@ -278,22 +278,13 @@ export class StreamingLocalRecognizer extends EventEmitter {
     const text = this.normalizeJapaneseSpacing(
       mergeText(this.confirmedText, this.previewText)
     ).trim()
-    const translatedText = this.confirmedTranslation.trim()
-    const finalSegment: SpeakerSegment | null = text
-      ? {
-          speaker: 0,
-          text,
-          translatedText: translatedText || undefined,
-          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
-          isFinal: true
-        }
-      : null
+    const finalSegment = this.buildCurrentLiveSegment()
 
     return {
       text,
       durationMs: Date.now() - this.startTime,
-      segments: [...this.completedSegments],
-      currentSegment: finalSegment
+      segments: this.buildCommittedSegments(),
+      currentSegment: finalSegment ? { ...finalSegment, isFinal: true } : null
     }
   }
 
@@ -1045,19 +1036,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
     const combined = this.normalizeJapaneseSpacing(
       mergeText(this.confirmedText, this.previewText)
     ).trim()
-    const translated = this.confirmedTranslation.trim()
-    const currentSegment: SpeakerSegment | null = combined
-      ? {
-          speaker: 0,
-          text: combined,
-          translatedText: translated || undefined,
-          sentencePairs: this.buildLiveSentencePairs(),
-          isFinal: false
-        }
-      : null
+    const currentSegment = this.buildCurrentLiveSegment()
 
     const result: PartialResult = {
-      segments: [...this.completedSegments],
+      segments: this.buildCommittedSegments(),
       currentSegment,
       combined,
       currentSpeaker: 0,
@@ -1094,12 +1076,39 @@ export class StreamingLocalRecognizer extends EventEmitter {
     return Math.floor((sampleRate * 2 * ms) / 1000)
   }
 
-  private buildLiveSentencePairs(): SentencePair[] | undefined {
-    const pairs: SentencePair[] = [...this.sentencePairs]
-    const livePairText = mergeText(this.liveSentenceTail, this.previewText).trim()
-    if (livePairText) {
-      pairs.push({ original: livePairText })
+  private buildCommittedSegments(): SpeakerSegment[] {
+    const confirmedText = this.confirmedText.trim()
+    const translated = this.confirmedTranslation.trim()
+    if (!confirmedText) {
+      return [...this.completedSegments]
     }
-    return pairs.length > 0 ? pairs : undefined
+
+    return [
+      ...this.completedSegments,
+      {
+        speaker: 0,
+        text: confirmedText,
+        translatedText: translated || undefined,
+        sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
+        isFinal: true
+      }
+    ]
+  }
+
+  private buildCurrentLiveSegment(): SpeakerSegment | null {
+    const liveText = this.normalizeJapaneseSpacing(this.previewText).trim()
+    if (!liveText) {
+      return null
+    }
+
+    const liveStableText = this.normalizeJapaneseSpacing(this.previewText).trim()
+    return {
+      speaker: 0,
+      text: liveText,
+      stableText: liveStableText && liveStableText !== liveText ? liveStableText : undefined,
+      unstableText: this.previewText || undefined,
+      previewText: this.previewText || undefined,
+      isFinal: false
+    }
   }
 }

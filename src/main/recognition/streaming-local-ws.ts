@@ -61,6 +61,8 @@ export interface StreamingLocalWsConfig {
 }
 
 export class StreamingLocalWsRecognizer extends EventEmitter {
+  private static readonly DEBUG_STREAM = true
+
   private config: Required<
     Omit<StreamingLocalWsConfig, 'translation' | 'segmentation' | 'sensevoice' | 'textCorrections'>
   > & {
@@ -85,10 +87,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private previewStableText = ''
   private previewUnstableText = ''
   private currentWordTimings: WordTiming[] = []
+  private completedSegments: SpeakerSegment[] = []
   private liveSentenceTail = ''
   private endpointReason = ''
   private sentencePairs: SentencePair[] = []
-  private confirmedTranslation = ''
+  private sentencePairSegmentIndices: number[] = []
+  private pendingSentenceStartIndex = 0
   private pendingTranslationPairIndices: number[] = []
   private translationBatchTimer: NodeJS.Timeout | null = null
 
@@ -197,10 +201,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewStableText = ''
     this.previewUnstableText = ''
     this.currentWordTimings = []
+    this.completedSegments = []
     this.liveSentenceTail = ''
     this.endpointReason = ''
     this.sentencePairs = []
-    this.confirmedTranslation = ''
+    this.sentencePairSegmentIndices = []
+    this.pendingSentenceStartIndex = 0
     this.pendingTranslationPairIndices = []
     this.clearTranslationBatchTimer()
 
@@ -307,22 +313,13 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.isActive = false
 
     const finalText = this.confirmedText.trim()
-    const finalTranslation = this.confirmedTranslation.trim()
-    const finalSegment: SpeakerSegment | null = finalText
-      ? {
-          speaker: 0,
-          text: finalText,
-          translatedText: finalTranslation || undefined,
-          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
-          isFinal: true
-        }
-      : null
+    const finalSegment = this.buildCurrentLiveSegment()
 
     return {
       text: finalText,
       durationMs: Date.now() - this.startTime,
-      segments: [],
-      currentSegment: finalSegment
+      segments: this.buildCommittedSegments(),
+      currentSegment: finalSegment ? { ...finalSegment, isFinal: true } : null
     }
   }
 
@@ -336,9 +333,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewStableText = ''
     this.previewUnstableText = ''
     this.currentWordTimings = []
+    this.completedSegments = []
     this.liveSentenceTail = ''
     this.endpointReason = ''
     this.pendingTranslationPairIndices = []
+    this.sentencePairSegmentIndices = []
+    this.pendingSentenceStartIndex = 0
     this.clearTranslationBatchTimer()
     if (this.ws) {
       this.ws.close()
@@ -362,6 +362,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         const unstablePreview = this.normalizeUnstablePreviewText(data.unstableText || '')
         this.applyPreviewStateFromServer(stablePreview, unstablePreview)
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.debugStreamState('interim')
         this.emitPartialResult()
         return
       }
@@ -372,14 +373,17 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         this.previewStableText = ''
         this.previewUnstableText = ''
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.debugStreamState('final_chunk')
         this.emitPartialResult()
         return
       case 'sentence':
         this.applyFinalizedSentenceFromServer(data.text || '')
+        this.debugStreamState('sentence')
         this.emitPartialResult()
         return
       case 'endpoint':
         this.endpointReason = typeof data.reason === 'string' ? data.reason.trim() : ''
+        this.debugStreamState(`endpoint:${this.endpointReason || 'unknown'}`)
         this.emitPartialResult()
         return
       case 'final':
@@ -389,6 +393,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
         this.liveSentenceTail = ''
         this.endpointReason = ''
+        this.debugStreamState('final')
         this.emitPartialResult()
         return
       case 'error':
@@ -485,6 +490,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private appendCommittedChunk(text: string): string {
     const committed = this.appendConfirmed(text)
     if (committed) {
+      this.completedSegments.push({
+        speaker: 0,
+        text: committed,
+        isFinal: true,
+        timestamp: Date.now()
+      })
       this.liveSentenceTail = mergeText(this.liveSentenceTail, committed)
     }
     return committed
@@ -514,8 +525,40 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     const pairIndex = this.sentencePairs.push({ original: normalized }) - 1
+    const segmentIndex = this.finalizePendingSentenceSegments(normalized)
+    if (segmentIndex !== null) {
+      this.sentencePairSegmentIndices[pairIndex] = segmentIndex
+    }
     this.translatePairAsync(pairIndex)
     return pairIndex
+  }
+
+  private finalizePendingSentenceSegments(sentenceText: string): number | null {
+    const normalized = this.normalizeText(sentenceText)
+    if (!normalized) {
+      return null
+    }
+
+    const startIndex = Math.max(
+      0,
+      Math.min(this.pendingSentenceStartIndex, this.completedSegments.length)
+    )
+    const endIndex = this.completedSegments.length
+    this.pendingSentenceStartIndex = endIndex
+
+    if (startIndex >= endIndex) {
+      return null
+    }
+
+    if (endIndex - startIndex !== 1) {
+      return null
+    }
+
+    this.completedSegments[startIndex] = {
+      ...this.completedSegments[startIndex],
+      sentencePairs: [{ original: normalized }]
+    }
+    return startIndex
   }
 
   private translatePairAsync(pairIndex: number): void {
@@ -558,7 +601,14 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
           ...this.sentencePairs[pairIndex],
           translated
         }
-        this.rebuildConfirmedTranslation()
+        const segmentIndex = this.sentencePairSegmentIndices[pairIndex]
+        if (typeof segmentIndex === 'number' && this.completedSegments[segmentIndex]) {
+          this.completedSegments[segmentIndex] = {
+            ...this.completedSegments[segmentIndex],
+            translatedText: translated,
+            sentencePairs: [{ original: originalText, translated }]
+          }
+        }
         this.emitPartialResult()
       })
       .catch((error) => {
@@ -646,10 +696,17 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
             ...this.sentencePairs[item.index],
             translated
           }
+          const segmentIndex = this.sentencePairSegmentIndices[item.index]
+          if (typeof segmentIndex === 'number' && this.completedSegments[segmentIndex]) {
+            this.completedSegments[segmentIndex] = {
+              ...this.completedSegments[segmentIndex],
+              translatedText: translated,
+              sentencePairs: [{ original: item.original, translated }]
+            }
+          }
           changed = true
         }
         if (changed) {
-          this.rebuildConfirmedTranslation()
           this.emitPartialResult()
         }
       })
@@ -660,49 +717,44 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       })
   }
 
-  private rebuildConfirmedTranslation(): void {
-    let merged = ''
-    for (const pair of this.sentencePairs) {
-      if (!pair.translated) continue
-      merged = mergeText(merged, pair.translated)
-    }
-    this.confirmedTranslation = merged
-  }
-
   private shouldTranslateText(text: string): boolean {
     const normalized = text.trim()
     if (!normalized) return false
     return Array.from(normalized).some((ch) => /[\p{L}\p{N}]/u.test(ch))
   }
 
+  private debugStreamState(eventType: string): void {
+    if (!StreamingLocalWsRecognizer.DEBUG_STREAM) {
+      return
+    }
+
+    const committedTail = this.completedSegments
+      .slice(-3)
+      .map((segment) => segment.text)
+      .join(' | ')
+    console.log(
+      '[StreamingLocalWs][Debug]',
+      JSON.stringify({
+        eventType,
+        completedSegments: this.completedSegments.length,
+        sentencePairs: this.sentencePairs.length,
+        previewText: this.previewText,
+        previewStableText: this.previewStableText,
+        previewUnstableText: this.previewUnstableText,
+        endpointReason: this.endpointReason,
+        committedTail
+      })
+    )
+  }
+
   private emitPartialResult(): void {
     const visibleBase = this.getVisibleBaseText()
     const combined = mergeText(visibleBase, this.previewText).trim()
-    const combinedStable = mergeText(visibleBase, this.previewStableText).trim()
-    const combinedUnstable = this.previewUnstableText
-    const translated = this.confirmedTranslation.trim()
-
-    const pairs: SentencePair[] = [...this.sentencePairs]
-    const livePairText = mergeText(this.liveSentenceTail, this.previewText).trim()
-    if (livePairText) {
-      pairs.push({ original: livePairText })
-    }
-
-    const currentSegment: SpeakerSegment | null = combined
-      ? {
-          speaker: 0,
-          text: combined,
-          stableText: combinedStable || undefined,
-          unstableText: combinedUnstable.trim() ? combinedUnstable : undefined,
-          endpointReason: this.endpointReason || undefined,
-          translatedText: translated || undefined,
-          sentencePairs: pairs.length > 0 ? pairs : undefined,
-          isFinal: false
-        }
-      : null
+    const currentSegment = this.buildCurrentLiveSegment()
+    const segments = this.buildCommittedSegments()
 
     const result: PartialResult = {
-      segments: [],
+      segments,
       currentSegment,
       currentWordTimings:
         this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
@@ -712,5 +764,32 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     this.emit('partial', result)
+  }
+
+  private buildCommittedSegments(): SpeakerSegment[] {
+    return this.completedSegments.map((segment) => ({
+      ...segment,
+      sentencePairs: segment.sentencePairs ? [...segment.sentencePairs] : undefined,
+      wordTimings: segment.wordTimings ? [...segment.wordTimings] : undefined
+    }))
+  }
+
+  private buildCurrentLiveSegment(): SpeakerSegment | null {
+    const liveText = this.previewText.trim()
+    if (!liveText) {
+      return null
+    }
+
+    const liveStableText = this.previewStableText.trim()
+    return {
+      speaker: 0,
+      text: liveText,
+      stableText: liveStableText || undefined,
+      unstableText: this.previewUnstableText || undefined,
+      previewText: this.previewUnstableText || undefined,
+      endpointReason: this.endpointReason || undefined,
+      wordTimings: this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
+      isFinal: false
+    }
   }
 }

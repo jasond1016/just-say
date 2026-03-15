@@ -454,6 +454,20 @@ export class MeetingTranscriptionManager extends EventEmitter {
           currentWordTimings: result.currentWordTimings,
           translationEnabled: result.translationEnabled
         }
+        if (recognizer instanceof StreamingLocalWsRecognizer) {
+          console.log(
+            '[MeetingTranscription][Debug]',
+            JSON.stringify({
+              segments: result.segments.length,
+              segmentTexts: result.segments.map((item) => item.text),
+              currentText: result.currentSegment?.text || '',
+              currentStableText: result.currentSegment?.stableText || '',
+              currentPreviewText:
+                result.currentSegment?.previewText || result.currentSegment?.unstableText || '',
+              combined: result.combined
+            })
+          )
+        }
         this.emit('transcript', segment)
       })
 

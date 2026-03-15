@@ -69,6 +69,20 @@ function isNearBottom(element: HTMLDivElement, thresholdPx = BOTTOM_FOLLOW_THRES
   return distanceToBottom <= thresholdPx
 }
 
+function getInlinePreviewText(segment: SpeakerSegment): string | undefined {
+  const previewText = segment.previewText || segment.unstableText || ''
+  if (!previewText.trim()) {
+    return undefined
+  }
+
+  return segment.text.endsWith(previewText) && segment.text !== previewText ? previewText : undefined
+}
+
+function getTimingPreviewText(segment: SpeakerSegment): string | undefined {
+  const previewText = segment.previewText || segment.unstableText || ''
+  return previewText.trim() ? previewText : undefined
+}
+
 export function MeetingTranscription({
   state,
   onOpenSettings,
@@ -83,6 +97,12 @@ export function MeetingTranscription({
   const isTranscribing =
     state.status === 'starting' || state.status === 'transcribing' || state.status === 'stopping'
   const hasContent = state.segments.length > 0 || state.currentSegment
+  const currentInlinePreviewText = state.currentSegment
+    ? getInlinePreviewText(state.currentSegment)
+    : undefined
+  const currentTimingPreviewText = state.currentSegment
+    ? getTimingPreviewText(state.currentSegment)
+    : undefined
 
   const formatSegmentTime = useMemo(
     () =>
@@ -268,11 +288,11 @@ export function MeetingTranscription({
                   )}
                   <BilingualSegment
                     pairs={toSentencePairsFromCurrentLive(state.currentSegment)}
-                    previewText={state.currentSegment.previewText}
+                    previewText={currentInlinePreviewText}
                   />
                   <WordTimingTrail
                     wordTimings={state.currentSegment.wordTimings}
-                    previewText={state.currentSegment.previewText}
+                    previewText={currentTimingPreviewText}
                     label={m.meeting.liveWordTimings}
                     previewLabel={m.meeting.previewTail}
                   />

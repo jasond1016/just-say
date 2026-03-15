@@ -19,6 +19,8 @@ interface MeetingTranscriptSegment {
     text: string
     stableText?: string
     unstableText?: string
+    previewText?: string
+    endpointReason?: string
     translatedText?: string
     wordTimings?: Array<{
       text: string
@@ -35,6 +37,8 @@ interface MeetingTranscriptSegment {
     text: string
     stableText?: string
     unstableText?: string
+    previewText?: string
+    endpointReason?: string
     translatedText?: string
     wordTimings?: Array<{
       text: string

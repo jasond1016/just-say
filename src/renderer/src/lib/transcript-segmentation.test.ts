@@ -108,4 +108,14 @@ describe('transcript-segmentation', () => {
       { original: 'イチゴ', translated: null }
     ])
   })
+
+  it('uses unstableText as preview fallback for current live segment', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'Hello world',
+      stableText: 'Hello',
+      unstableText: ' world'
+    })
+
+    expect(pairs).toEqual([{ original: 'Hello', translated: null }])
+  })
 })

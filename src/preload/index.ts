@@ -100,6 +100,8 @@ const api = {
         text: string
         stableText?: string
         unstableText?: string
+        previewText?: string
+        endpointReason?: string
         translatedText?: string
         wordTimings?: Array<{
           text: string
@@ -113,6 +115,8 @@ const api = {
         text: string
         stableText?: string
         unstableText?: string
+        previewText?: string
+        endpointReason?: string
         translatedText?: string
         wordTimings?: Array<{
           text: string
