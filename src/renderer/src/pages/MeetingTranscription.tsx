@@ -29,6 +29,7 @@ export interface SpeakerSegment {
   unstableText?: string
   previewText?: string
   wordTimings?: WordTiming[]
+  endpointReason?: string
   timestamp?: number
 }
 
@@ -259,6 +260,11 @@ export function MeetingTranscription({
                   >
                     {m.meeting.speakerLabel(state.currentSegment.speaker + 1)}
                   </p>
+                  {state.currentSegment.endpointReason && (
+                    <p className="text-[11px] text-muted-foreground">
+                      endpoint: {state.currentSegment.endpointReason}
+                    </p>
+                  )}
                   <BilingualSegment
                     pairs={toSentencePairsFromCurrentLive(state.currentSegment)}
                     previewText={state.currentSegment.previewText}

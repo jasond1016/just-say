@@ -55,6 +55,7 @@ export interface SpeakerSegment {
   stableText?: string
   unstableText?: string
   wordTimings?: WordTiming[]
+  endpointReason?: string
   translatedText?: string // Translated text (when translation enabled)
   isFinal: boolean // Is this segment complete (speaker changed or session ended)
   /** Sentence pairs aligned by <end> tokens for interleaved display */

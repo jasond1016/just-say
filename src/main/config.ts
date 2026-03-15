@@ -142,16 +142,16 @@ const defaultConfig: AppConfig = {
       model: 'gpt-4o-mini',
       timeoutMs: 15000,
       rateControl: {
-        "preset": "balanced",
-        "enabled": true,
-        "maxTokensPerMinute": 8500,
-        "maxRequestsPerMinute": 40,
-        "minRequestIntervalMs": 1200,
-        "maxQueueSize": 64,
-        "maxQueueWaitMs": 45000,
-        "dropPolicy": "drop_oldest",
-        "batchWindowMs": 600,
-        "maxBatchItems": 8
+        preset: 'balanced',
+        enabled: true,
+        maxTokensPerMinute: 8500,
+        maxRequestsPerMinute: 40,
+        minRequestIntervalMs: 1200,
+        maxQueueSize: 64,
+        maxQueueWaitMs: 45000,
+        dropPolicy: 'drop_oldest',
+        batchWindowMs: 600,
+        maxBatchItems: 8
       }
     },
     local: {

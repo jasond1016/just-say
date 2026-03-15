@@ -112,6 +112,33 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
   })
 
+  it('surfaces endpoint reason on the current live segment', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'Hello and welcome.'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'endpoint',
+        reason: 'silence'
+      })
+    )
+
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: 'Hello and welcome.',
+      endpointReason: 'silence'
+    })
+  })
+
   it('does not synthesize sentence pairs locally on final without a sentence event', async () => {
     const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
     const recognizer = new StreamingLocalWsRecognizer()

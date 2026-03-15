@@ -85,6 +85,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private previewUnstableText = ''
   private currentWordTimings: WordTiming[] = []
   private liveSentenceTail = ''
+  private endpointReason = ''
   private sentencePairs: SentencePair[] = []
   private confirmedTranslation = ''
   private pendingTranslationPairIndices: number[] = []
@@ -195,6 +196,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewUnstableText = ''
     this.currentWordTimings = []
     this.liveSentenceTail = ''
+    this.endpointReason = ''
     this.sentencePairs = []
     this.confirmedTranslation = ''
     this.pendingTranslationPairIndices = []
@@ -297,6 +299,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewUnstableText = ''
     this.currentWordTimings = []
     this.liveSentenceTail = ''
+    this.endpointReason = ''
     this.flushPendingTranslationBatch()
     await this.translationQueue
     this.isActive = false
@@ -332,6 +335,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.previewUnstableText = ''
     this.currentWordTimings = []
     this.liveSentenceTail = ''
+    this.endpointReason = ''
     this.pendingTranslationPairIndices = []
     this.clearTranslationBatchTimer()
     if (this.ws) {
@@ -349,6 +353,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
     switch (data.type) {
       case 'interim': {
+        this.endpointReason = ''
         const preview = this.normalizePreviewText(data.text || '')
         this.previewText = this.deduplicatePreviewFromCommitted(preview)
         const stablePreview = this.normalizePreviewText(data.stableText || '')
@@ -359,6 +364,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         return
       }
       case 'final_chunk':
+        this.endpointReason = ''
         this.appendCommittedChunk(data.text || '')
         this.previewText = ''
         this.previewStableText = ''
@@ -371,6 +377,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         this.emitPartialResult()
         return
       case 'endpoint':
+        this.endpointReason = typeof data.reason === 'string' ? data.reason.trim() : ''
         this.emitPartialResult()
         return
       case 'final':
@@ -379,6 +386,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         this.previewUnstableText = ''
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
         this.liveSentenceTail = ''
+        this.endpointReason = ''
         this.emitPartialResult()
         return
       case 'error':
@@ -684,6 +692,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
           text: combined,
           stableText: combinedStable || undefined,
           unstableText: combinedUnstable.trim() ? combinedUnstable : undefined,
+          endpointReason: this.endpointReason || undefined,
           translatedText: translated || undefined,
           sentencePairs: pairs.length > 0 ? pairs : undefined,
           isFinal: false
