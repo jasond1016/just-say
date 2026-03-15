@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Headphones, Play, Settings2, Square } from 'lucide-react'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
+import { WordTimingTrail } from '@/components/transcript/WordTimingTrail'
 import {
   toSentencePairsFromCurrentLive,
   toSentencePairsFromLive
@@ -262,12 +263,18 @@ export function MeetingTranscription({
                   </p>
                   {state.currentSegment.endpointReason && (
                     <p className="text-[11px] text-muted-foreground">
-                      endpoint: {state.currentSegment.endpointReason}
+                      {m.meeting.endpointLabel}: {state.currentSegment.endpointReason}
                     </p>
                   )}
                   <BilingualSegment
                     pairs={toSentencePairsFromCurrentLive(state.currentSegment)}
                     previewText={state.currentSegment.previewText}
+                  />
+                  <WordTimingTrail
+                    wordTimings={state.currentSegment.wordTimings}
+                    previewText={state.currentSegment.previewText}
+                    label={m.meeting.liveWordTimings}
+                    previewLabel={m.meeting.previewTail}
                   />
                 </div>
               </div>

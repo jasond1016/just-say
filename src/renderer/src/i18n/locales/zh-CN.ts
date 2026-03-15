@@ -57,6 +57,9 @@ export const zhCN: typeof enUS = {
     emptyDescription: '点击“开始录音”即可采集麦克风与系统音频并开始转录。',
     warmingUp: '后台预热中。可以立即开始，但首次响应可能稍慢。',
     warmupFailed: '预热失败，首次启动可能更慢。',
+    endpointLabel: '切分点',
+    liveWordTimings: '实时词时序',
+    previewTail: '预览尾部',
     speakerLabel: (index: number): string => `说话人 ${index}`
   },
   history: {

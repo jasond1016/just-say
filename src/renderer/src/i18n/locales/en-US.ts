@@ -57,6 +57,9 @@ export const enUS = {
       'Click Start Recording to begin capturing audio from your microphone and system audio.',
     warmingUp: 'Warming up in background. You can start now, but the first response may be slower.',
     warmupFailed: 'Warm-up failed, first start may take longer.',
+    endpointLabel: 'Endpoint',
+    liveWordTimings: 'Live word timings',
+    previewTail: 'Preview tail',
     speakerLabel: (index: number): string => `Speaker ${index}`
   },
   history: {
