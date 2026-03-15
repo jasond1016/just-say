@@ -44,6 +44,7 @@ export interface AppConfig {
     }
     local?: {
       mode?: 'auto' | 'streaming' | 'http_chunk'
+      transcriptionProfile?: 'single_shot' | 'offline_segmented'
       modelPath?: string
       engine?: 'faster-whisper' | 'sensevoice'
       modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
@@ -156,6 +157,7 @@ const defaultConfig: AppConfig = {
     },
     local: {
       mode: 'auto',
+      transcriptionProfile: 'single_shot',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {

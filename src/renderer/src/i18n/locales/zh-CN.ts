@@ -126,6 +126,11 @@ export const zhCN: typeof enUS = {
     localRecognitionModeAuto: '自动（优先 WebSocket，失败回退 HTTP 分块）',
     localRecognitionModeStreaming: '仅流式（WebSocket）',
     localRecognitionModeHttpChunk: '仅 HTTP 分块',
+    localTranscriptionProfile: 'HTTP 转录 profile',
+    localTranscriptionProfileDescription:
+      '用于本地 HTTP 单次转录，包括 PTT 和 HTTP 分块回退路径。',
+    localTranscriptionProfileSingleShot: '单次整段',
+    localTranscriptionProfileOfflineSegmented: '离线分段',
     localHoldMs: '弱边界等待（毫秒）',
     localHoldMsDescription: '弱边界 endpoint 后延迟提交，避免一句话被过早切开。',
     localServerMode: 'Whisper 服务',

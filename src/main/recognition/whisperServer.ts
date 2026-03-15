@@ -14,6 +14,7 @@ import * as net from 'net'
 import { TextCorrectionConfig, serializeTextCorrectionConfig } from './text-corrections'
 
 export type LocalEngine = 'faster-whisper' | 'sensevoice'
+export type LocalTranscriptionProfile = 'single_shot' | 'offline_segmented'
 
 export interface WhisperServerConfig {
   host?: string
@@ -32,6 +33,7 @@ export interface WhisperServerConfig {
 export interface TranscribeResult {
   success: boolean
   text: string
+  transcription_profile?: LocalTranscriptionProfile
   language?: string
   language_probability?: number
   duration?: number
@@ -574,6 +576,7 @@ class WhisperServerClient {
     options?: {
       modelType?: string
       engine?: LocalEngine
+      transcriptionProfile?: LocalTranscriptionProfile
       sensevoiceModelId?: string
       sensevoiceUseItn?: boolean
       device?: 'cpu' | 'cuda'
@@ -616,6 +619,9 @@ class WhisperServerClient {
 
     if (options?.language && options.language !== 'auto') {
       params.set('language', options.language)
+    }
+    if (options?.transcriptionProfile === 'offline_segmented') {
+      params.set('offline_segmented', 'true')
     }
     const serializedTextCorrections = serializeTextCorrectionConfig(options?.textCorrections)
     if (serializedTextCorrections) {

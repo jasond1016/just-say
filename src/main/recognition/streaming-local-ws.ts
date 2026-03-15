@@ -41,6 +41,7 @@ interface StreamingSegmentationConfig {
 
 export interface StreamingLocalWsConfig {
   engine?: LocalEngine
+  transcriptionProfile?: 'single_shot' | 'offline_segmented'
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
   sensevoice?: {
     modelId?: string
@@ -98,6 +99,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     super()
     const defaults = {
       engine: 'sensevoice',
+      transcriptionProfile: 'single_shot',
       modelType: 'tiny',
       sensevoice: {
         modelId: 'FunAudioLLM/SenseVoiceSmall',

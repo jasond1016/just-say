@@ -35,6 +35,7 @@ export interface GpuInfo {
 }
 
 export interface LocalRecognizerConfig {
+  transcriptionProfile?: 'single_shot' | 'offline_segmented'
   modelPath?: string
   engine?: LocalEngine
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
@@ -71,6 +72,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   constructor(config?: LocalRecognizerConfig) {
     super()
     this.config = {
+      transcriptionProfile: 'single_shot',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
@@ -206,6 +208,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       console.log('[LocalRecognizer] Recognizing via remote HTTP server (server-controlled params)')
       const requestOptions = {
         engine: this.config.engine,
+        transcriptionProfile: this.config.transcriptionProfile,
         sensevoiceModelId: this.getSenseVoiceModelId(),
         sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
         language: this.config.language,
@@ -248,6 +251,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     const runtime = {
       engine: this.getEngine(),
       modelType: this.config.modelType || 'tiny',
+      transcriptionProfile: this.config.transcriptionProfile,
       sensevoiceModelId: this.getSenseVoiceModelId(),
       sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
       device,
@@ -268,6 +272,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     const requestOptions = {
       engine: this.config.engine,
       modelType: this.config.modelType,
+      transcriptionProfile: this.config.transcriptionProfile,
       sensevoiceModelId: this.getSenseVoiceModelId(),
       sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
       device,
@@ -308,6 +313,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         const retry = await this.whisperServer!.transcribe(wavBuffer, {
           engine: this.config.engine,
           modelType: this.config.modelType,
+          transcriptionProfile: this.config.transcriptionProfile,
           sensevoiceModelId: this.getSenseVoiceModelId(),
           sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
           device,

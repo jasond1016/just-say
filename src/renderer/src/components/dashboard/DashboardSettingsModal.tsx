@@ -12,6 +12,7 @@ type ModalTab = 'recognition' | 'appearance' | 'about'
 type Backend = 'local' | 'api' | 'network' | 'soniox' | 'groq'
 type LocalEngine = 'faster-whisper' | 'sensevoice'
 type LocalRecognitionMode = 'auto' | 'streaming' | 'http_chunk'
+type LocalTranscriptionProfile = 'single_shot' | 'offline_segmented'
 type ModelType = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
 type GroqModelType = 'whisper-large-v3-turbo' | 'whisper-large-v3'
 type TranslationProvider = 'openai-compatible'
@@ -42,6 +43,7 @@ interface RendererConfig {
     local?: {
       engine?: LocalEngine
       mode?: LocalRecognitionMode
+      transcriptionProfile?: LocalTranscriptionProfile
       modelType?: ModelType
       serverMode?: 'local' | 'remote'
       serverHost?: string
@@ -155,6 +157,8 @@ export function DashboardSettingsModal({
   const [localServerHost, setLocalServerHost] = useState('127.0.0.1')
   const [localServerPortInput, setLocalServerPortInput] = useState('8765')
   const [localRecognitionMode, setLocalRecognitionMode] = useState<LocalRecognitionMode>('auto')
+  const [localTranscriptionProfile, setLocalTranscriptionProfile] =
+    useState<LocalTranscriptionProfile>('single_shot')
   const [localHoldMsInput, setLocalHoldMsInput] = useState('260')
   const [testingLocalServer, setTestingLocalServer] = useState(false)
   const [localServerTestResult, setLocalServerTestResult] = useState<boolean | null>(null)
@@ -221,6 +225,12 @@ export function DashboardSettingsModal({
             configuredLocalMode === 'http_chunk'
             ? configuredLocalMode
             : 'auto'
+        )
+        const configuredTranscriptionProfile = cfg.recognition?.local?.transcriptionProfile
+        setLocalTranscriptionProfile(
+          configuredTranscriptionProfile === 'offline_segmented'
+            ? 'offline_segmented'
+            : 'single_shot'
         )
         const configuredHoldMs = cfg.recognition?.local?.segmentation?.holdMs
         setLocalHoldMsInput(
@@ -513,6 +523,7 @@ export function DashboardSettingsModal({
           local: {
             engine: localEngine,
             mode: localRecognitionMode,
+            transcriptionProfile: localTranscriptionProfile,
             modelType: localEngine === 'sensevoice' ? 'small' : modelSize,
             serverMode: localServerMode,
             serverHost: localServerHost.trim() || '127.0.0.1',
@@ -819,6 +830,37 @@ export function DashboardSettingsModal({
                               </option>
                             </select>
                           </label>
+                          <label
+                            className="space-y-1.5"
+                            htmlFor="settings-local-transcription-profile"
+                          >
+                            <span className="text-sm font-medium">
+                              {m.settings.localTranscriptionProfile}
+                            </span>
+                            <select
+                              id="settings-local-transcription-profile"
+                              className={fullFieldClassName}
+                              value={localTranscriptionProfile}
+                              onChange={(event) =>
+                                setLocalTranscriptionProfile(
+                                  event.target.value as LocalTranscriptionProfile
+                                )
+                              }
+                            >
+                              <option value="single_shot">
+                                {m.settings.localTranscriptionProfileSingleShot}
+                              </option>
+                              <option value="offline_segmented">
+                                {m.settings.localTranscriptionProfileOfflineSegmented}
+                              </option>
+                            </select>
+                            <p className="text-xs text-muted-foreground">
+                              {m.settings.localTranscriptionProfileDescription}
+                            </p>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
                           <label className="space-y-1.5" htmlFor="settings-local-hold-ms">
                             <span className="text-sm font-medium">{m.settings.localHoldMs}</span>
                             <input
@@ -837,6 +879,7 @@ export function DashboardSettingsModal({
                               {m.settings.localHoldMsDescription}
                             </p>
                           </label>
+                          <div />
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">

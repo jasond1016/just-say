@@ -17,6 +17,7 @@ interface LocalTranslationConfig {
 
 export interface StreamingLocalConfig {
   mode?: 'auto' | 'streaming' | 'http_chunk'
+  transcriptionProfile?: 'single_shot' | 'offline_segmented'
   engine?: 'faster-whisper' | 'sensevoice'
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
   sensevoice?: {
@@ -111,6 +112,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     super()
     this.config = {
       mode: 'auto',
+      transcriptionProfile: 'single_shot',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
@@ -334,6 +336,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
       serverHost: this.config.serverHost,
       serverPort: this.config.serverPort,
       sampleRate: this.config.sampleRate,
+      transcriptionProfile: this.config.transcriptionProfile,
       textCorrections: this.config.textCorrections,
       useHttpServer: true
     })

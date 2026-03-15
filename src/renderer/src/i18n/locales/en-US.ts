@@ -126,6 +126,11 @@ export const enUS = {
     localRecognitionModeAuto: 'Auto (prefer WebSocket, fallback to HTTP chunk)',
     localRecognitionModeStreaming: 'Streaming only (WebSocket)',
     localRecognitionModeHttpChunk: 'HTTP chunk only',
+    localTranscriptionProfile: 'HTTP transcription profile',
+    localTranscriptionProfileDescription:
+      'Used by local one-shot HTTP transcription, including PTT and HTTP chunk fallback.',
+    localTranscriptionProfileSingleShot: 'Single shot',
+    localTranscriptionProfileOfflineSegmented: 'Offline segmented',
     localHoldMs: 'Weak Boundary Hold (ms)',
     localHoldMsDescription: 'Delay commit after weak endpoint boundary to avoid sentence breaks.',
     localServerMode: 'Whisper Service',
