@@ -2,6 +2,8 @@
 /* eslint-disable @typescript-eslint/explicit-function-return-type */
 
 import fs from 'fs/promises'
+import http from 'http'
+import https from 'https'
 import path from 'path'
 import { performance } from 'perf_hooks'
 import { fileURLToPath } from 'url'
@@ -13,6 +15,7 @@ const projectRoot = path.resolve(__dirname, '..')
 
 const DEFAULTS = {
   wsUrl: 'ws://127.0.0.1:8766/stream',
+  httpUrl: 'http://127.0.0.1:8765',
   runs: 5,
   chunkMs: 256,
   speed: 1,
@@ -31,7 +34,9 @@ Required:
 
 Options:
   --ws-url <url>            WS 地址（default: ${DEFAULTS.wsUrl}）
+  --http-url <url>          HTTP 地址，用于整段 full-context baseline（default: ${DEFAULTS.httpUrl}）
   --runs <n>                重复运行次数（default: ${DEFAULTS.runs}）
+  --skip-full-context       跳过整段一次性识别 baseline
   --chunk-ms <n>            音频分片毫秒（default: ${DEFAULTS.chunkMs}）
   --speed <n>               回放速度（1=实时，2=2x，default: ${DEFAULTS.speed}）
   --flush-wait-ms <n>       发送 flush 后等待毫秒（default: ${DEFAULTS.flushWaitMs}）
@@ -177,6 +182,34 @@ function buildWsUrl(baseUrl, params) {
     url.searchParams.set(key, String(value))
   }
   return url.toString()
+}
+
+function buildHttpTranscribeParams(params) {
+  const allowedKeys = new Set([
+    'engine',
+    'model',
+    'sensevoice_model_id',
+    'sensevoice_use_itn',
+    'device',
+    'compute_type',
+    'language',
+    'text_corrections',
+    'download_root',
+    'offline_segmented',
+    'offline_segment_silence_ms',
+    'offline_segment_min_speech_rms',
+    'offline_segment_window_ms',
+    'offline_segment_padding_ms',
+    'offline_segment_max_segment_ms',
+    'offline_segment_overlap_ms'
+  ])
+  const filtered = {}
+  for (const [key, value] of Object.entries(params || {})) {
+    if (!allowedKeys.has(key)) continue
+    if (value === undefined || value === null || value === '') continue
+    filtered[key] = value
+  }
+  return filtered
 }
 
 function parseWav(buffer) {
@@ -344,6 +377,169 @@ function splitSentences(text) {
     .filter(Boolean)
 }
 
+function toMeaningfulCharLength(text) {
+  return Array.from(String(text || '').replace(/\s+/gu, '')).length
+}
+
+function getCommonPrefixCharLength(left, right) {
+  const a = Array.from(String(left || ''))
+  const b = Array.from(String(right || ''))
+  const max = Math.min(a.length, b.length)
+  let index = 0
+  while (index < max && a[index] === b[index]) {
+    index += 1
+  }
+  return index
+}
+
+function findBoundaryOverlap(left, right, maxChars = 200) {
+  const a = Array.from(String(left || ''))
+  const b = Array.from(String(right || ''))
+  const max = Math.min(a.length, b.length, maxChars)
+  for (let size = max; size > 0; size -= 1) {
+    let matched = true
+    for (let i = 0; i < size; i += 1) {
+      if (a[a.length - size + i] !== b[i]) {
+        matched = false
+        break
+      }
+    }
+    if (matched) {
+      return size
+    }
+  }
+  return 0
+}
+
+function summarizeStreamingMetrics(events, audioEndedMs) {
+  const interimTexts = events
+    .filter((event) => event.type === 'interim' && typeof event.text === 'string')
+    .map((event) => String(event.text || ''))
+    .filter((text) => text.trim().length > 0)
+  const previewLengths = interimTexts.map((text) => toMeaningfulCharLength(text))
+
+  let maxPreviewRollbackChars = 0
+  for (let i = 1; i < interimTexts.length; i += 1) {
+    const previousText = interimTexts[i - 1]
+    const nextText = interimTexts[i]
+    const commonPrefixCharLength = getCommonPrefixCharLength(previousText, nextText)
+    const rollbackText = Array.from(previousText).slice(commonPrefixCharLength).join('')
+    maxPreviewRollbackChars = Math.max(
+      maxPreviewRollbackChars,
+      toMeaningfulCharLength(rollbackText)
+    )
+  }
+
+  const finalChunkTexts = events
+    .filter((event) => event.type === 'final_chunk' && typeof event.text === 'string')
+    .map((event) => String(event.text || '').trim())
+    .filter((text) => text.length > 0)
+
+  let accumulatedFinalText = ''
+  let duplicateCharsAcrossChunkBoundaries = 0
+  for (const chunkText of finalChunkTexts) {
+    const overlapChars = findBoundaryOverlap(accumulatedFinalText, chunkText)
+    duplicateCharsAcrossChunkBoundaries += overlapChars
+    accumulatedFinalText = mergeText(accumulatedFinalText, chunkText)
+  }
+
+  const totalFinalChunkChars = finalChunkTexts.reduce(
+    (sum, text) => sum + toMeaningfulCharLength(text),
+    0
+  )
+  const commitEventAfterAudio = events.find(
+    (event) =>
+      (event.type === 'final_chunk' || event.type === 'final') &&
+      typeof event.atMs === 'number' &&
+      typeof audioEndedMs === 'number' &&
+      event.atMs >= audioEndedMs
+  )
+
+  return {
+    finalChunkCount: finalChunkTexts.length,
+    avgPreviewLengthChars:
+      previewLengths.length > 0
+        ? Number(
+            (previewLengths.reduce((sum, value) => sum + value, 0) / previewLengths.length).toFixed(
+              2
+            )
+          )
+        : null,
+    maxPreviewRollbackChars,
+    commitDelayAfterSilenceMs:
+      typeof audioEndedMs === 'number' && commitEventAfterAudio
+        ? Math.max(0, commitEventAfterAudio.atMs - audioEndedMs)
+        : null,
+    duplicateCharsAcrossChunkBoundaries,
+    duplicateRatioAcrossChunkBoundaries:
+      totalFinalChunkChars > 0
+        ? Number((duplicateCharsAcrossChunkBoundaries / totalFinalChunkChars).toFixed(4))
+        : 0
+  }
+}
+
+function summarizeNumericMetric(values) {
+  if (!values.length) return null
+  return {
+    min: Math.min(...values),
+    max: Math.max(...values),
+    p50: percentile(values, 0.5),
+    p95: percentile(values, 0.95),
+    avg: values.reduce((sum, value) => sum + value, 0) / values.length
+  }
+}
+
+async function transcribeFullContext({ httpUrl, wavBuffer, queryParams }) {
+  const baseUrl = new URL(httpUrl)
+  const transcribeUrl = new URL('/transcribe', baseUrl)
+  for (const [key, value] of Object.entries(buildHttpTranscribeParams(queryParams))) {
+    transcribeUrl.searchParams.set(key, String(value))
+  }
+
+  const transport = transcribeUrl.protocol === 'https:' ? https : http
+  const startedAt = performance.now()
+
+  return new Promise((resolve, reject) => {
+    const req = transport.request(
+      transcribeUrl,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'audio/wav',
+          'Content-Length': wavBuffer.length
+        }
+      },
+      (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk) => {
+          body += chunk
+        })
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body)
+            resolve({
+              durationMs: Math.round(performance.now() - startedAt),
+              statusCode: res.statusCode || 0,
+              ...data
+            })
+          } catch {
+            reject(new Error(`Invalid JSON response: ${body}`))
+          }
+        })
+      }
+    )
+
+    req.on('error', reject)
+    req.setTimeout(120000, () => {
+      req.destroy()
+      reject(new Error('Full-context transcribe timeout'))
+    })
+    req.write(wavBuffer)
+    req.end()
+  })
+}
+
 async function runSingleCase({
   runIndex,
   wsUrl,
@@ -365,6 +561,7 @@ async function runSingleCase({
   let closedByTimeout = false
   let bytesSent = 0
   let chunksSent = 0
+  let audioEndedMs = null
 
   const ws = new WebSocket(wsUrl)
   const openPromise = new Promise((resolve, reject) => {
@@ -424,6 +621,7 @@ async function runSingleCase({
     chunksSent += 1
     await sleep(chunkDelayMs)
   }
+  audioEndedMs = Math.round(performance.now() - runStart)
 
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'flush' }))
@@ -459,6 +657,7 @@ async function runSingleCase({
     sampleRate,
     bytesSent,
     chunksSent,
+    audioEndedMs,
     firstVisibleMs,
     finalText,
     closeResult,
@@ -469,10 +668,10 @@ async function runSingleCase({
   }
 }
 
-function buildRunSummary(runResult, reference) {
+function buildTextComparisonSummary(finalText, reference) {
   const comparisonNormalization = reference.normalization || {}
   const normalizedExpected = normalizeForComparison(reference.expectedText, comparisonNormalization)
-  const normalizedFinal = normalizeForComparison(runResult.finalText, comparisonNormalization)
+  const normalizedFinal = normalizeForComparison(finalText, comparisonNormalization)
   const charDistance = levenshteinDistanceByChars(normalizedExpected, normalizedFinal)
   const expectedChars = Array.from(normalizedExpected).length
   const cer =
@@ -482,7 +681,7 @@ function buildRunSummary(runResult, reference) {
     reference.expectedText,
     baselineNormalization
   )
-  const baselineNormalizedFinal = normalizeForComparison(runResult.finalText, baselineNormalization)
+  const baselineNormalizedFinal = normalizeForComparison(finalText, baselineNormalization)
   const baselineCharDistance = levenshteinDistanceByChars(
     baselineNormalizedExpected,
     baselineNormalizedFinal
@@ -498,7 +697,7 @@ function buildRunSummary(runResult, reference) {
   const expectedSentences = Array.isArray(reference.expectedSentences)
     ? reference.expectedSentences
     : []
-  const finalSentences = splitSentences(runResult.finalText)
+  const finalSentences = splitSentences(finalText)
   const sentenceStats =
     expectedSentences.length > 0
       ? {
@@ -511,10 +710,8 @@ function buildRunSummary(runResult, reference) {
   const cerThreshold =
     typeof reference.cerThreshold === 'number' ? reference.cerThreshold : undefined
   const passedByCer = typeof cerThreshold === 'number' ? cer <= cerThreshold : undefined
-  const wordTimingStats = summarizeWordTimingStats(runResult.events)
 
   return {
-    ...runResult,
     comparisonNormalization,
     normalizedExpected,
     normalizedFinal,
@@ -531,8 +728,20 @@ function buildRunSummary(runResult, reference) {
     exactMatch: normalizedExpected === normalizedFinal,
     cerThreshold,
     passedByCer,
-    sentenceStats,
-    wordTimingStats
+    sentenceStats
+  }
+}
+
+function buildRunSummary(runResult, reference) {
+  const comparison = buildTextComparisonSummary(runResult.finalText, reference)
+  const wordTimingStats = summarizeWordTimingStats(runResult.events)
+  const streamingMetrics = summarizeStreamingMetrics(runResult.events, runResult.audioEndedMs)
+
+  return {
+    ...runResult,
+    ...comparison,
+    wordTimingStats,
+    streamingMetrics
   }
 }
 
@@ -597,6 +806,31 @@ function buildAggregateReport(runSummaries) {
       ? runSummaries.filter((run) => run.passedByCer === true).length
       : 0
   const exactMatchCount = runSummaries.filter((run) => run.exactMatch === true).length
+  const finalChunkCountStats = summarizeNumericMetric(
+    runSummaries
+      .map((run) => run.streamingMetrics?.finalChunkCount)
+      .filter((value) => typeof value === 'number')
+  )
+  const avgPreviewLengthStats = summarizeNumericMetric(
+    runSummaries
+      .map((run) => run.streamingMetrics?.avgPreviewLengthChars)
+      .filter((value) => typeof value === 'number')
+  )
+  const maxPreviewRollbackStats = summarizeNumericMetric(
+    runSummaries
+      .map((run) => run.streamingMetrics?.maxPreviewRollbackChars)
+      .filter((value) => typeof value === 'number')
+  )
+  const commitDelayAfterSilenceStats = summarizeNumericMetric(
+    runSummaries
+      .map((run) => run.streamingMetrics?.commitDelayAfterSilenceMs)
+      .filter((value) => typeof value === 'number')
+  )
+  const duplicateRatioStats = summarizeNumericMetric(
+    runSummaries
+      .map((run) => run.streamingMetrics?.duplicateRatioAcrossChunkBoundaries)
+      .filter((value) => typeof value === 'number')
+  )
 
   return {
     runCount: runSummaries.length,
@@ -635,7 +869,38 @@ function buildAggregateReport(runSummaries) {
       p50: percentile(durationList, 0.5),
       p95: percentile(durationList, 0.95),
       avg: durationList.reduce((sum, v) => sum + v, 0) / durationList.length
+    },
+    streaming: {
+      finalChunkCount: finalChunkCountStats,
+      avgPreviewLengthChars: avgPreviewLengthStats,
+      maxPreviewRollbackChars: maxPreviewRollbackStats,
+      commitDelayAfterSilenceMs: commitDelayAfterSilenceStats,
+      duplicateRatioAcrossChunkBoundaries: duplicateRatioStats
     }
+  }
+}
+
+function buildFullContextSummary(fullContextResult, reference, profile) {
+  const finalText = typeof fullContextResult?.text === 'string' ? fullContextResult.text.trim() : ''
+  const comparison = buildTextComparisonSummary(finalText, reference)
+
+  return {
+    profile,
+    success: fullContextResult?.success === true,
+    durationMs:
+      typeof fullContextResult?.durationMs === 'number' ? fullContextResult.durationMs : null,
+    processingTimeMs:
+      typeof fullContextResult?.processing_time === 'number'
+        ? Math.round(fullContextResult.processing_time * 1000)
+        : null,
+    finalText,
+    language: fullContextResult?.language,
+    transcriptionProfile: fullContextResult?.transcription_profile || profile,
+    offlineSegmentCount: Array.isArray(fullContextResult?.offline_segments)
+      ? fullContextResult.offline_segments.length
+      : null,
+    error: fullContextResult?.error,
+    ...comparison
   }
 }
 
@@ -644,17 +909,24 @@ function buildMarkdownReport({
   audioPath,
   referencePath,
   wsUrl,
+  httpUrl,
   outputDir,
   warnings,
   runSummaries,
-  aggregate
+  aggregate,
+  fullContext
 }) {
   const lines = []
+  const singleShot = fullContext?.singleShot || null
+  const offlineSegmented = fullContext?.offlineSegmented || null
   lines.push(`# Meeting Benchmark Report - ${caseId}`)
   lines.push('')
   lines.push(`- Audio: \`${audioPath}\``)
   lines.push(`- Reference: \`${referencePath}\``)
   lines.push(`- WS URL: \`${wsUrl}\``)
+  if (httpUrl) {
+    lines.push(`- HTTP URL: \`${httpUrl}\``)
+  }
   lines.push(`- Runs: ${runSummaries.length}`)
   lines.push(`- Output: \`${outputDir}\``)
   if (Array.isArray(warnings) && warnings.length > 0) {
@@ -663,6 +935,52 @@ function buildMarkdownReport({
   lines.push('')
   lines.push('## Aggregate')
   lines.push('')
+  if (singleShot) {
+    lines.push(
+      `- Full-context single-shot CER: ${(singleShot.cer * 100).toFixed(2)}%${singleShot.success ? '' : ' (failed)'}`
+    )
+    if (typeof singleShot.durationMs === 'number') {
+      lines.push(`- Full-context single-shot request duration ms: ${singleShot.durationMs}`)
+    }
+    if (typeof singleShot.processingTimeMs === 'number') {
+      lines.push(`- Full-context single-shot server processing ms: ${singleShot.processingTimeMs}`)
+    }
+  }
+  if (offlineSegmented) {
+    lines.push(
+      `- Full-context offline-segmented CER: ${(offlineSegmented.cer * 100).toFixed(2)}%${offlineSegmented.success ? '' : ' (failed)'}`
+    )
+    if (typeof offlineSegmented.durationMs === 'number') {
+      lines.push(
+        `- Full-context offline-segmented request duration ms: ${offlineSegmented.durationMs}`
+      )
+    }
+    if (typeof offlineSegmented.processingTimeMs === 'number') {
+      lines.push(
+        `- Full-context offline-segmented server processing ms: ${offlineSegmented.processingTimeMs}`
+      )
+    }
+    if (typeof offlineSegmented.offlineSegmentCount === 'number') {
+      lines.push(
+        `- Full-context offline-segmented segment count: ${offlineSegmented.offlineSegmentCount}`
+      )
+    }
+  }
+  if (singleShot) {
+    lines.push(
+      `- Streaming vs full-context single-shot CER gap: ${((aggregate.cer.avg - singleShot.cer) * 100).toFixed(2)} pp`
+    )
+  }
+  if (offlineSegmented) {
+    lines.push(
+      `- Streaming vs full-context offline-segmented CER gap: ${((aggregate.cer.avg - offlineSegmented.cer) * 100).toFixed(2)} pp`
+    )
+  }
+  if (singleShot && offlineSegmented) {
+    lines.push(
+      `- Offline-segmented vs single-shot CER delta: ${((offlineSegmented.cer - singleShot.cer) * 100).toFixed(2)} pp`
+    )
+  }
   lines.push(
     `- CER avg/p50/p95: ${(aggregate.cer.avg * 100).toFixed(2)}% / ${(aggregate.cer.p50 * 100).toFixed(2)}% / ${(aggregate.cer.p95 * 100).toFixed(2)}%`
   )
@@ -690,6 +1008,31 @@ function buildMarkdownReport({
   lines.push(
     `- Run duration ms avg/p50/p95: ${aggregate.durationMs.avg.toFixed(0)} / ${aggregate.durationMs.p50} / ${aggregate.durationMs.p95}`
   )
+  if (aggregate.streaming.finalChunkCount) {
+    lines.push(
+      `- Final chunk count avg/p50/p95: ${aggregate.streaming.finalChunkCount.avg.toFixed(2)} / ${aggregate.streaming.finalChunkCount.p50} / ${aggregate.streaming.finalChunkCount.p95}`
+    )
+  }
+  if (aggregate.streaming.avgPreviewLengthChars) {
+    lines.push(
+      `- Avg preview chars avg/p50/p95: ${aggregate.streaming.avgPreviewLengthChars.avg.toFixed(2)} / ${aggregate.streaming.avgPreviewLengthChars.p50} / ${aggregate.streaming.avgPreviewLengthChars.p95}`
+    )
+  }
+  if (aggregate.streaming.maxPreviewRollbackChars) {
+    lines.push(
+      `- Max preview rollback chars avg/p50/p95: ${aggregate.streaming.maxPreviewRollbackChars.avg.toFixed(2)} / ${aggregate.streaming.maxPreviewRollbackChars.p50} / ${aggregate.streaming.maxPreviewRollbackChars.p95}`
+    )
+  }
+  if (aggregate.streaming.commitDelayAfterSilenceMs) {
+    lines.push(
+      `- Commit delay after silence ms avg/p50/p95: ${aggregate.streaming.commitDelayAfterSilenceMs.avg.toFixed(0)} / ${aggregate.streaming.commitDelayAfterSilenceMs.p50} / ${aggregate.streaming.commitDelayAfterSilenceMs.p95}`
+    )
+  }
+  if (aggregate.streaming.duplicateRatioAcrossChunkBoundaries) {
+    lines.push(
+      `- Duplicate ratio across chunk boundaries avg/p50/p95: ${(aggregate.streaming.duplicateRatioAcrossChunkBoundaries.avg * 100).toFixed(2)}% / ${(aggregate.streaming.duplicateRatioAcrossChunkBoundaries.p50 * 100).toFixed(2)}% / ${(aggregate.streaming.duplicateRatioAcrossChunkBoundaries.p95 * 100).toFixed(2)}%`
+    )
+  }
   lines.push('')
   lines.push('## Run Results')
   lines.push('')
@@ -708,6 +1051,11 @@ function buildMarkdownReport({
     if (run.wordTimingStats) {
       lines.push(
         `Word timings: events=${run.wordTimingStats.timedEventCount}, avgItems=${run.wordTimingStats.avgItemsPerTimedEvent}, maxItems=${run.wordTimingStats.maxItemsPerEvent}, byType(interim/final_chunk/final)=${timedInterim}/${timedFinalChunk}/${timedFinal}`
+      )
+    }
+    if (run.streamingMetrics) {
+      lines.push(
+        `Streaming: finalChunks=${run.streamingMetrics.finalChunkCount}, avgPreviewChars=${run.streamingMetrics.avgPreviewLengthChars ?? '-'}, maxRollback=${run.streamingMetrics.maxPreviewRollbackChars}, silenceCommitMs=${run.streamingMetrics.commitDelayAfterSilenceMs ?? '-'}, duplicateRatio=${(run.streamingMetrics.duplicateRatioAcrossChunkBoundaries * 100).toFixed(2)}%`
       )
     }
   }
@@ -774,6 +1122,8 @@ async function main() {
   const flushWaitMs = resolveNumber(rawArgs['flush-wait-ms'], DEFAULTS.flushWaitMs, 0)
   const closeTimeoutMs = resolveNumber(rawArgs['close-timeout-ms'], DEFAULTS.closeTimeoutMs, 1000)
   const wsBaseUrl = rawArgs['ws-url'] || DEFAULTS.wsUrl
+  const httpUrl = rawArgs['http-url'] || DEFAULTS.httpUrl
+  const shouldRunFullContext = rawArgs['skip-full-context'] !== true
 
   const refWsParams =
     typeof reference.wsParams === 'object' && reference.wsParams ? reference.wsParams : {}
@@ -829,6 +1179,67 @@ async function main() {
 
   const wsUrl = buildWsUrl(wsBaseUrl, mergedWsParams)
   const audioDurationMs = Math.round((pcmMono.length / 2 / wavSampleRate) * 1000)
+  let fullContext = null
+
+  if (shouldRunFullContext) {
+    console.log(`[Bench] Full-context single-shot baseline started: http=${httpUrl}`)
+    const singleShotResult = await transcribeFullContext({
+      httpUrl,
+      wavBuffer,
+      queryParams: mergedWsParams
+    })
+    const singleShot = buildFullContextSummary(singleShotResult, reference, 'single_shot')
+    await fs.writeFile(
+      path.join(outputDir, 'full-context.single-shot.summary.json'),
+      `${JSON.stringify(singleShot, null, 2)}\n`,
+      'utf-8'
+    )
+    await fs.writeFile(
+      path.join(outputDir, 'full-context.single-shot.final.txt'),
+      `${singleShot.finalText}\n`,
+      'utf-8'
+    )
+    console.log(
+      `[Bench] Full-context single-shot done: CER=${(singleShot.cer * 100).toFixed(2)}%, duration=${singleShot.durationMs ?? '-'}ms`
+    )
+
+    console.log(`[Bench] Full-context offline-segmented baseline started: http=${httpUrl}`)
+    const offlineSegmentedResult = await transcribeFullContext({
+      httpUrl,
+      wavBuffer,
+      queryParams: {
+        ...mergedWsParams,
+        offline_segmented: 'true'
+      }
+    })
+    const offlineSegmented = buildFullContextSummary(
+      offlineSegmentedResult,
+      reference,
+      'offline_segmented'
+    )
+    fullContext = {
+      singleShot,
+      offlineSegmented
+    }
+    await fs.writeFile(
+      path.join(outputDir, 'full-context.offline-segmented.summary.json'),
+      `${JSON.stringify(offlineSegmented, null, 2)}\n`,
+      'utf-8'
+    )
+    await fs.writeFile(
+      path.join(outputDir, 'full-context.offline-segmented.final.txt'),
+      `${offlineSegmented.finalText}\n`,
+      'utf-8'
+    )
+    await fs.writeFile(
+      path.join(outputDir, 'full-context.summary.json'),
+      `${JSON.stringify(fullContext, null, 2)}\n`,
+      'utf-8'
+    )
+    console.log(
+      `[Bench] Full-context offline-segmented done: CER=${(offlineSegmented.cer * 100).toFixed(2)}%, duration=${offlineSegmented.durationMs ?? '-'}ms, segments=${offlineSegmented.offlineSegmentCount ?? '-'}`
+    )
+  }
 
   console.log(
     `[Bench] case=${caseId}, runs=${runs}, audio=${audioPath}, duration=${audioDurationMs}ms, ws=${wsUrl}`
@@ -865,7 +1276,7 @@ async function main() {
     )
 
     console.log(
-      `[Bench] Run ${runIndex}/${runs} done: CER=${(runSummary.cer * 100).toFixed(2)}%, firstVisible=${runSummary.firstVisibleMs ?? '-'}ms`
+      `[Bench] Run ${runIndex}/${runs} done: CER=${(runSummary.cer * 100).toFixed(2)}%, firstVisible=${runSummary.firstVisibleMs ?? '-'}ms, rollback=${runSummary.streamingMetrics.maxPreviewRollbackChars}, duplicateRatio=${(runSummary.streamingMetrics.duplicateRatioAcrossChunkBoundaries * 100).toFixed(2)}%`
     )
   }
 
@@ -878,6 +1289,7 @@ async function main() {
     outputDir,
     warnings,
     wsUrl,
+    httpUrl,
     config: {
       runs,
       chunkMs,
@@ -885,8 +1297,11 @@ async function main() {
       flushWaitMs,
       closeTimeoutMs,
       sampleRate: Number(mergedWsParams.sample_rate) || wavSampleRate,
-      audioDurationMs
+      audioDurationMs,
+      fullContextEnabled: shouldRunFullContext,
+      fullContextProfiles: shouldRunFullContext ? ['single_shot', 'offline_segmented'] : []
     },
+    fullContext,
     aggregate,
     runs: runSummaries.map((run) => {
       const runWithoutEvents = { ...run }
@@ -907,10 +1322,12 @@ async function main() {
       audioPath,
       referencePath,
       wsUrl,
+      httpUrl,
       outputDir,
       warnings,
       runSummaries,
-      aggregate
+      aggregate,
+      fullContext
     })}\n`,
     'utf-8'
   )

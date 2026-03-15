@@ -8,10 +8,13 @@ JustSay - Local ASR HTTP Server
 """
 
 import argparse
+import array
 import base64
 import glob
+import io
 import json
 import logging
+import math
 import os
 import re
 import struct
@@ -21,6 +24,7 @@ import threading
 import time
 import traceback
 import unicodedata
+import wave
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 from websockets.exceptions import ConnectionClosed, InvalidUpgrade
@@ -480,6 +484,172 @@ def build_word_timings(words, timestamps):
     return word_timings or None
 
 
+def decode_wav_to_mono_pcm16(audio_data: bytes) -> dict | None:
+    try:
+        with wave.open(io.BytesIO(audio_data), "rb") as wav_file:
+            channel_count = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            sample_rate = wav_file.getframerate()
+            frame_count = wav_file.getnframes()
+            if channel_count <= 0 or sample_width != 2 or sample_rate <= 0 or frame_count <= 0:
+                return None
+            raw_frames = wav_file.readframes(frame_count)
+    except wave.Error:
+        return None
+
+    if not raw_frames:
+        return None
+
+    samples = array.array("h")
+    samples.frombytes(raw_frames)
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    if channel_count > 1:
+        mono_samples = array.array("h")
+        for index in range(0, len(samples), channel_count):
+            frame = samples[index : index + channel_count]
+            if len(frame) < channel_count:
+                break
+            mono_value = int(sum(frame) / len(frame))
+            mono_samples.append(max(-32768, min(32767, mono_value)))
+        samples = mono_samples
+
+    if not samples:
+        return None
+
+    pcm_mono = array.array("h", samples)
+    if sys.byteorder != "little":
+        pcm_mono.byteswap()
+
+    return {
+        "sample_rate": sample_rate,
+        "pcm_mono": pcm_mono.tobytes(),
+    }
+
+
+def encode_wav_pcm16_mono(pcm_mono: bytes, sample_rate: int) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm_mono)
+    return buffer.getvalue()
+
+
+def detect_offline_segments(
+    pcm_mono: bytes,
+    sample_rate: int,
+    *,
+    silence_ms: int = 1200,
+    min_speech_rms: int = 360,
+    analysis_window_ms: int = 30,
+    padding_ms: int = 480,
+    max_segment_ms: int = 30000,
+    overlap_ms: int = 640,
+) -> list[tuple[int, int]]:
+    if not pcm_mono or sample_rate <= 0:
+        return []
+
+    samples = array.array("h")
+    samples.frombytes(pcm_mono)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    if not samples:
+        return []
+
+    window_samples = max(1, int(sample_rate * max(10, analysis_window_ms) / 1000))
+    silence_windows = max(1, int(math.ceil(max(60, silence_ms) / max(10, analysis_window_ms))))
+    padding_windows = max(0, int(math.ceil(max(0, padding_ms) / max(10, analysis_window_ms))))
+    overlap_windows = max(0, int(math.ceil(max(0, overlap_ms) / max(10, analysis_window_ms))))
+    max_segment_windows = max(
+        silence_windows + 1,
+        int(math.ceil(max(1000, max_segment_ms) / max(10, analysis_window_ms))),
+    )
+
+    rms_values: list[float] = []
+    for offset in range(0, len(samples), window_samples):
+        chunk = samples[offset : offset + window_samples]
+        if not chunk:
+            continue
+        mean_square = sum(sample * sample for sample in chunk) / len(chunk)
+        rms_values.append(math.sqrt(mean_square))
+
+    if not rms_values:
+        return []
+
+    raw_segments: list[tuple[int, int]] = []
+    segment_start = None
+    last_speech = None
+    for index, rms in enumerate(rms_values):
+        is_speech = rms >= min_speech_rms
+        if is_speech:
+            if segment_start is None:
+                segment_start = index
+            last_speech = index
+            continue
+
+        if segment_start is None or last_speech is None:
+            continue
+
+        if index - last_speech >= silence_windows:
+            raw_segments.append((segment_start, last_speech + 1))
+            segment_start = None
+            last_speech = None
+
+    if segment_start is not None and last_speech is not None:
+        raw_segments.append((segment_start, last_speech + 1))
+
+    if not raw_segments:
+        return [(0, len(samples))]
+
+    total_windows = len(rms_values)
+    expanded_segments: list[tuple[int, int]] = []
+    for start_window, end_window in raw_segments:
+        expanded_start = max(0, start_window - padding_windows)
+        expanded_end = min(total_windows, end_window + padding_windows)
+        expanded_segments.append((expanded_start, expanded_end))
+
+    sample_segments: list[tuple[int, int]] = []
+    for start_window, end_window in expanded_segments:
+        chunk_start = start_window
+        while chunk_start < end_window:
+            chunk_end = min(end_window, chunk_start + max_segment_windows)
+            start_sample = min(len(samples), chunk_start * window_samples)
+            end_sample = min(len(samples), chunk_end * window_samples)
+            if end_sample > start_sample:
+                sample_segments.append((start_sample, end_sample))
+            if chunk_end >= end_window:
+                break
+            chunk_start = max(start_window, chunk_end - overlap_windows)
+
+    return sample_segments or [(0, len(samples))]
+
+
+def offset_word_timings(word_timings: list[dict] | None, offset_ms: int) -> list[dict] | None:
+    if not isinstance(word_timings, list) or not word_timings:
+        return None
+
+    shifted = []
+    for item in word_timings:
+        text = item.get("text")
+        start_ms = item.get("startMs")
+        end_ms = item.get("endMs")
+        if not isinstance(text, str) or not isinstance(start_ms, (int, float)) or not isinstance(
+            end_ms, (int, float)
+        ):
+            continue
+        shifted.append(
+            {
+                "text": text,
+                "startMs": int(start_ms + offset_ms),
+                "endMs": int(end_ms + offset_ms),
+            }
+        )
+    return shifted or None
+
+
 def transcribe_with_sensevoice(
     model,
     temp_path: str,
@@ -527,6 +697,155 @@ def transcribe_with_sensevoice(
     }
 
 
+def transcribe_temp_path(
+    model,
+    *,
+    engine: str,
+    temp_path: str,
+    language: str | None,
+    sensevoice_use_itn: bool,
+    output_word_timestamps: bool,
+) -> dict:
+    if engine == "sensevoice":
+        return transcribe_with_sensevoice(
+            model,
+            temp_path,
+            language,
+            sensevoice_use_itn,
+            output_word_timestamps,
+        )
+    return transcribe_with_faster_whisper(model, temp_path, language)
+
+
+def transcribe_audio_bytes(
+    model,
+    *,
+    engine: str,
+    audio_data: bytes,
+    language: str | None,
+    sensevoice_use_itn: bool,
+    output_word_timestamps: bool,
+) -> dict:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+        tmp_file.write(audio_data)
+        temp_path = tmp_file.name
+
+    try:
+        return transcribe_temp_path(
+            model,
+            engine=engine,
+            temp_path=temp_path,
+            language=language,
+            sensevoice_use_itn=sensevoice_use_itn,
+            output_word_timestamps=output_word_timestamps,
+        )
+    finally:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+
+
+def transcribe_audio_offline_segmented(
+    model,
+    *,
+    engine: str,
+    audio_data: bytes,
+    language: str | None,
+    sensevoice_use_itn: bool,
+    output_word_timestamps: bool,
+    silence_ms: int,
+    min_speech_rms: int,
+    analysis_window_ms: int,
+    padding_ms: int,
+    max_segment_ms: int,
+    overlap_ms: int,
+) -> dict:
+    decoded = decode_wav_to_mono_pcm16(audio_data)
+    if not decoded:
+        return {
+            "success": False,
+            "error": "offline_segmented_requires_pcm16_wav",
+            "text": "",
+        }
+
+    sample_rate = decoded["sample_rate"]
+    pcm_mono = decoded["pcm_mono"]
+    segments = detect_offline_segments(
+        pcm_mono,
+        sample_rate,
+        silence_ms=silence_ms,
+        min_speech_rms=min_speech_rms,
+        analysis_window_ms=analysis_window_ms,
+        padding_ms=padding_ms,
+        max_segment_ms=max_segment_ms,
+        overlap_ms=overlap_ms,
+    )
+
+    if not segments:
+        return {
+            "success": False,
+            "error": "offline_segmented_detected_no_segments",
+            "text": "",
+        }
+
+    merged_text = ""
+    merged_language = language
+    merged_word_timings = []
+    segment_reports = []
+    bytes_per_sample = 2
+
+    for start_sample, end_sample in segments:
+        segment_pcm = pcm_mono[start_sample * bytes_per_sample : end_sample * bytes_per_sample]
+        if not segment_pcm:
+            continue
+
+        segment_payload = transcribe_audio_bytes(
+            model,
+            engine=engine,
+            audio_data=encode_wav_pcm16_mono(segment_pcm, sample_rate),
+            language=language,
+            sensevoice_use_itn=sensevoice_use_itn,
+            output_word_timestamps=output_word_timestamps,
+        )
+        segment_text = str(segment_payload.get("text") or "").strip()
+        segment_word_timings = offset_word_timings(
+            segment_payload.get("word_timings"),
+            int(round((start_sample / sample_rate) * 1000)),
+        )
+        if merged_text and segment_text:
+            overlap = find_text_overlap(merged_text, segment_text, 240)
+            if overlap > 0:
+                segment_word_timings = drop_word_timing_prefix(segment_word_timings, segment_text[:overlap])
+                segment_text = segment_text[overlap:].lstrip()
+
+        if segment_text:
+            merged_text = merge_text(merged_text, segment_text)
+        if isinstance(segment_word_timings, list) and segment_word_timings:
+            merged_word_timings.extend(segment_word_timings)
+        if segment_payload.get("language"):
+            merged_language = segment_payload.get("language")
+
+        segment_reports.append(
+            {
+                "startMs": int(round((start_sample / sample_rate) * 1000)),
+                "endMs": int(round((end_sample / sample_rate) * 1000)),
+                "text": segment_text,
+            }
+        )
+
+    return {
+        "success": True,
+        "text": merged_text.strip(),
+        "language": merged_language,
+        "language_probability": None,
+        "duration": round(len(pcm_mono) / 2 / sample_rate, 3),
+        "word_timings": merged_word_timings or None,
+        "transcription_profile": "offline_segmented",
+        "offline_segments": segment_reports,
+    }
+
+
 def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     start_time = time.time()
 
@@ -551,6 +870,17 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     requested_language = params.get("language", [default_language])[0]
     download_root = params.get("download_root", [default_download_root])[0]
     output_word_timestamps = parse_bool(params.get("return_word_timestamps", ["false"])[0], False)
+    offline_segmented = parse_bool(params.get("offline_segmented", ["false"])[0], False)
+    offline_segment_silence_ms = int(params.get("offline_segment_silence_ms", ["1200"])[0] or 1200)
+    offline_segment_min_speech_rms = int(
+        params.get("offline_segment_min_speech_rms", ["360"])[0] or 360
+    )
+    offline_segment_window_ms = int(params.get("offline_segment_window_ms", ["30"])[0] or 30)
+    offline_segment_padding_ms = int(params.get("offline_segment_padding_ms", ["480"])[0] or 480)
+    offline_segment_max_segment_ms = int(
+        params.get("offline_segment_max_segment_ms", ["30000"])[0] or 30000
+    )
+    offline_segment_overlap_ms = int(params.get("offline_segment_overlap_ms", ["640"])[0] or 640)
     text_corrections = parse_text_corrections(params.get("text_corrections", [None])[0])
 
     if _runtime_policy["lock_model"]:
@@ -583,10 +913,6 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
 
     ensure_download_env(download_root)
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-        tmp_file.write(audio_data)
-        temp_path = tmp_file.name
-
     try:
         model, model_reused, reload_reason = get_model(
             engine=engine,
@@ -597,16 +923,33 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
             download_root=download_root,
         )
 
-        if engine == "sensevoice":
-            payload = transcribe_with_sensevoice(
+        if offline_segmented:
+            payload = transcribe_audio_offline_segmented(
                 model,
-                temp_path,
-                language,
-                sensevoice_use_itn,
-                output_word_timestamps,
+                engine=engine,
+                audio_data=audio_data,
+                language=language,
+                sensevoice_use_itn=sensevoice_use_itn,
+                output_word_timestamps=output_word_timestamps,
+                silence_ms=max(60, offline_segment_silence_ms),
+                min_speech_rms=max(50, offline_segment_min_speech_rms),
+                analysis_window_ms=max(10, offline_segment_window_ms),
+                padding_ms=max(0, offline_segment_padding_ms),
+                max_segment_ms=max(1000, offline_segment_max_segment_ms),
+                overlap_ms=max(0, offline_segment_overlap_ms),
             )
         else:
-            payload = transcribe_with_faster_whisper(model, temp_path, language)
+            payload = transcribe_audio_bytes(
+                model,
+                engine=engine,
+                audio_data=audio_data,
+                language=language,
+                sensevoice_use_itn=sensevoice_use_itn,
+                output_word_timestamps=output_word_timestamps,
+            )
+
+        if payload.get("success") is False:
+            raise RuntimeError(payload.get("error") or "transcription_failed")
 
         corrected_text, corrected = apply_text_corrections(payload["text"], text_corrections)
         return {
@@ -622,6 +965,8 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
             "compute_type": compute_type,
             "model_reused": model_reused,
             "reload_reason": reload_reason,
+            "transcription_profile": payload.get("transcription_profile", "single_shot"),
+            "offline_segments": payload.get("offline_segments"),
             "word_timings": None if corrected else payload.get("word_timings"),
         }
     except Exception as exc:
@@ -645,11 +990,6 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
             "model_reused": False,
             "reload_reason": "transcribe_failed",
         }
-    finally:
-        try:
-            os.unlink(temp_path)
-        except Exception:
-            pass
 
 
 def build_wav_from_pcm(pcm_data: bytes, sample_rate: int) -> bytes:
@@ -1049,6 +1389,22 @@ WEAK_BOUNDARY_SUFFIX_CHARS = {
     "も",
     "の",
 }
+WEAK_ENGLISH_SUFFIX_RE = re.compile(
+    r"\b(?:and|or|to|of|for|with|the|a|an|but|so|if|that|this|these|those|my|your|our|their|his|her|its|you|we|they|he|she|it|is|are|was|were|be|been|being|do|did|does|have|has|had)$",
+    re.IGNORECASE,
+)
+LATIN_CHAR_RE = re.compile(r"[A-Za-z]")
+CJK_CHAR_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+ENGLISH_SENTENCE_MIN_FLUSH_CHARS = 14
+ENGLISH_SENTENCE_SOFT_FLUSH_CHARS = 28
+ENGLISH_SENTENCE_FORCE_FLUSH_CHARS = 48
+ENGLISH_STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
+ENGLISH_PREVIEW_STABILITY_WINDOW = 4
+ENGLISH_PREVIEW_STABLE_TAIL_CHARS = 6
+ENGLISH_PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 4
+ENGLISH_SILENCE_THRESHOLD_MULTIPLIER = 1.5
+ENGLISH_SILENCE_THRESHOLD_MIN_MS = 900
 
 
 def count_meaningful_chars(text: str) -> int:
@@ -1057,6 +1413,18 @@ def count_meaningful_chars(text: str) -> int:
         if ch.isalnum() or "\u3040" <= ch <= "\u30ff" or "\u31f0" <= ch <= "\u31ff" or "\u3400" <= ch <= "\u9fff":
             count += 1
     return count
+
+
+def is_latin_dominant_text(text: str) -> bool:
+    latin_count = 0
+    cjk_count = 0
+    for ch in text:
+        if LATIN_CHAR_RE.search(ch):
+            latin_count += 1
+            continue
+        if CJK_CHAR_RE.search(ch):
+            cjk_count += 1
+    return latin_count >= 6 and latin_count >= cjk_count * 2
 
 
 def trim_loose_prefix(text: str, prefix: str) -> str | None:
@@ -1343,6 +1711,52 @@ def trim_stable_prefix(text: str, keep_tail_meaningful_chars: int) -> str:
     return normalized[:index].rstrip()
 
 
+def trim_latin_stable_prefix(prefix: str, full_text: str) -> str:
+    normalized_prefix = (prefix or "").rstrip()
+    normalized_full = (full_text or "").strip()
+    if not normalized_prefix or not normalized_full or not is_latin_dominant_text(normalized_full):
+        return normalized_prefix
+
+    candidate = normalized_prefix
+    while candidate:
+        next_char = normalized_full[len(candidate)] if len(candidate) < len(normalized_full) else ""
+        if candidate[-1].isalnum() and next_char and next_char.isalnum():
+            boundary_index = max(
+                candidate.rfind(" "),
+                candidate.rfind("\t"),
+                candidate.rfind("\r"),
+                candidate.rfind("\n"),
+                candidate.rfind(","),
+                candidate.rfind(";"),
+                candidate.rfind(":"),
+                candidate.rfind("-"),
+                candidate.rfind("("),
+            )
+            if boundary_index < 0:
+                return ""
+            candidate = candidate[:boundary_index].rstrip()
+            continue
+        if is_weak_boundary_suffix(candidate):
+            boundary_index = max(
+                candidate.rfind(" "),
+                candidate.rfind("\t"),
+                candidate.rfind("\r"),
+                candidate.rfind("\n"),
+                candidate.rfind(","),
+                candidate.rfind(";"),
+                candidate.rfind(":"),
+                candidate.rfind("-"),
+                candidate.rfind("("),
+            )
+            if boundary_index < 0:
+                return ""
+            candidate = candidate[:boundary_index].rstrip()
+            continue
+        break
+
+    return candidate
+
+
 def get_common_prefix_for_many(texts: list[str]) -> str:
     if not texts:
         return ""
@@ -1368,15 +1782,64 @@ def shrink_stable_prefix(previous_stable: str, next_stable: str, max_rollback_ch
     return previous_stable
 
 
+def should_guard_preview_reset(
+    previous_preview: str,
+    incoming_preview: str,
+    accumulated_preview: str,
+    stable_prefix: str,
+) -> bool:
+    normalized_previous = (previous_preview or "").strip()
+    normalized_incoming = (incoming_preview or "").strip()
+    normalized_accumulated = (accumulated_preview or "").strip()
+    normalized_stable = (stable_prefix or "").strip()
+    if not normalized_previous or not normalized_incoming or not normalized_stable:
+        return False
+    if normalized_accumulated != normalized_incoming:
+        return False
+    if not normalized_previous.startswith(normalized_stable):
+        return False
+    if not is_latin_dominant_text(normalized_previous) and not is_latin_dominant_text(normalized_incoming):
+        return False
+
+    previous_chars = count_meaningful_chars(normalized_previous)
+    incoming_chars = count_meaningful_chars(normalized_incoming)
+    stable_chars = count_meaningful_chars(normalized_stable)
+    if previous_chars < 18 or incoming_chars < 4 or stable_chars < 8:
+        return False
+    if incoming_chars > max(12, int(previous_chars * 0.72)):
+        return False
+
+    common_prefix_chars = count_meaningful_chars(get_common_prefix(normalized_previous, normalized_incoming))
+    if common_prefix_chars >= min(8, stable_chars):
+        return False
+    if normalized_incoming.startswith(normalized_stable):
+        return False
+    return True
+
+
+def guard_preview_reset_with_stable_prefix(stable_prefix: str, incoming_preview: str) -> str:
+    normalized_stable = (stable_prefix or "").strip()
+    normalized_incoming = (incoming_preview or "").strip()
+    if not normalized_stable:
+        return normalized_incoming
+    if not normalized_incoming:
+        return normalized_stable
+    if normalized_incoming.startswith(normalized_stable):
+        return normalized_incoming
+    return merge_streaming_chunk_text(normalized_stable, normalized_incoming)
+
+
 def is_weak_boundary_suffix(text: str) -> bool:
     normalized = (text or "").strip()
     if not normalized:
         return False
 
-    trimmed = normalized.rstrip("。！？!?，、,;；:： \t\r\n")
+    trimmed = normalized.rstrip("。！？!?.，、,;；:： \t\r\n")
     if not trimmed:
         return True
 
+    if WEAK_ENGLISH_SUFFIX_RE.search(trimmed.lower()):
+        return True
     return trimmed[-1] in WEAK_BOUNDARY_SUFFIX_CHARS
 
 
@@ -1392,7 +1855,7 @@ def split_prefix_and_tail(text: str) -> tuple[str, str]:
     if not normalized:
         return "", ""
 
-    without_trailing_boundary = normalized.rstrip("。！？!?")
+    without_trailing_boundary = normalized.rstrip("。！？!?.")
     if not without_trailing_boundary:
         return "", ""
 
@@ -1424,30 +1887,73 @@ def try_extend_candidate_with_preview(candidate: str, preview: str) -> str | Non
         return None
 
     normalized_candidate_tail = normalize_loose_text(
-        candidate_tail.rstrip("。！？!?，、,;；:： \t\r\n")
+        candidate_tail.rstrip("。！？!?.，、,;；:： \t\r\n")
     )
     normalized_preview_tail = normalize_loose_text(
-        preview_tail.rstrip("。！？!?，、,;；:： \t\r\n")
+        preview_tail.rstrip("。！？!?.，、,;；:： \t\r\n")
     )
     if len(normalized_candidate_tail) < 4 or len(normalized_preview_tail) <= len(normalized_candidate_tail):
         return None
     if not normalized_preview_tail.startswith(normalized_candidate_tail):
         return None
 
-    return replace_trailing_tail(candidate, preview_tail.rstrip("。！？!? \t\r\n"))
+    return replace_trailing_tail(candidate, preview_tail.rstrip("。！？!?. \t\r\n"))
 
 
 def has_stable_final_boundary(text: str, min_tail_chars: int = 3) -> bool:
     normalized = (text or "").strip()
-    if not normalized or normalized[-1] not in {"。", "！", "？", "!", "?"}:
+    if not normalized or normalized[-1] not in {"。", "！", "？", "!", "?", "."}:
         return False
 
-    without_punctuation = normalized.rstrip("。！？!?")
+    without_punctuation = normalized.rstrip("。！？!?.")
     if not without_punctuation:
         return False
 
     tail = get_tail_after_last_boundary(without_punctuation)
     return count_meaningful_chars(tail) >= min_tail_chars and not is_weak_boundary_suffix(normalized)
+
+
+def should_flush_sentence_by_boundary(
+    sentence: str,
+    endpoint_triggered: bool,
+    *,
+    sentence_min_flush_chars: int = 14,
+    sentence_soft_flush_chars: int = 28,
+    sentence_force_flush_chars: int = 48,
+    strong_punctuation_min_tail_chars: int = 3,
+) -> bool:
+    normalized = (sentence or "").strip()
+    if not normalized:
+        return False
+
+    if is_latin_dominant_text(normalized):
+        sentence_min_flush_chars = ENGLISH_SENTENCE_MIN_FLUSH_CHARS
+        sentence_soft_flush_chars = ENGLISH_SENTENCE_SOFT_FLUSH_CHARS
+        sentence_force_flush_chars = ENGLISH_SENTENCE_FORCE_FLUSH_CHARS
+        strong_punctuation_min_tail_chars = ENGLISH_STRONG_PUNCTUATION_MIN_TAIL_CHARS
+
+    meaningful_chars = count_meaningful_chars(normalized)
+    if meaningful_chars >= sentence_force_flush_chars:
+        return True
+
+    if normalized.endswith(("。", "！", "？", "!", "?", ".")):
+        without_punctuation = normalized.rstrip("。！？!?.")
+        if without_punctuation:
+            tail = get_tail_after_last_boundary(without_punctuation)
+            if (
+                meaningful_chars >= sentence_min_flush_chars
+                and count_meaningful_chars(tail) >= strong_punctuation_min_tail_chars
+            ):
+                return True
+
+    if normalized.endswith(("，", "、", ",", ";", "；", ":", "：")):
+        if meaningful_chars >= sentence_soft_flush_chars:
+            return True
+
+    if endpoint_triggered and meaningful_chars >= sentence_min_flush_chars and not is_weak_boundary_suffix(normalized):
+        return True
+
+    return False
 
 
 def find_committable_sentence_prefix(
@@ -1478,12 +1984,197 @@ def find_committable_sentence_prefix(
     return best_split
 
 
-class WebSocketStreamingSession:
-    """WS streaming session for local ASR (based on websockets library)."""
+class TranscriptAssembler:
+    """Owns transcript semantics for one streaming session."""
 
     PREVIEW_STABILITY_WINDOW = 3
     PREVIEW_STABLE_TAIL_CHARS = 6
     PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 6
+
+    def __init__(self, normalize_event_text, text_corrections: list[dict]):
+        self.normalize_event_text = normalize_event_text
+        self.text_corrections = text_corrections
+        self.final_text_raw = ""
+        self.final_text = ""
+        self.pending_sentence_text = ""
+        self.pending_final_chunk = ""
+        self.pending_final_word_timings = None
+        self.current_preview_text = ""
+        self.current_preview_stable_text = ""
+        self.current_preview_unstable_text = ""
+        self.preview_history: list[str] = []
+        self.last_preview_text = ""
+
+    def get_visible_text_base(self) -> str:
+        return merge_text(self.final_text_raw, self.pending_final_chunk).strip()
+
+    def reset_preview_state(self):
+        self.current_preview_text = ""
+        self.current_preview_stable_text = ""
+        self.current_preview_unstable_text = ""
+        self.preview_history = []
+        self.last_preview_text = ""
+
+    def build_preview_snapshot(self, text: str) -> tuple[str, str]:
+        normalized = self.normalize_event_text(text).strip()
+        if not normalized:
+            self.preview_history = []
+            self.current_preview_stable_text = ""
+            self.current_preview_unstable_text = ""
+            return "", ""
+
+        self.preview_history.append(normalized)
+        stability_window = self.PREVIEW_STABILITY_WINDOW
+        stable_tail_chars = self.PREVIEW_STABLE_TAIL_CHARS
+        max_stable_rollback_chars = self.PREVIEW_MAX_STABLE_ROLLBACK_CHARS
+        if is_latin_dominant_text(normalized):
+            stability_window = ENGLISH_PREVIEW_STABILITY_WINDOW
+            stable_tail_chars = ENGLISH_PREVIEW_STABLE_TAIL_CHARS
+            max_stable_rollback_chars = ENGLISH_PREVIEW_MAX_STABLE_ROLLBACK_CHARS
+
+        if len(self.preview_history) > stability_window:
+            self.preview_history = self.preview_history[-stability_window:]
+
+        stable_candidate = trim_stable_prefix(
+            get_common_prefix_for_many(self.preview_history),
+            stable_tail_chars,
+        )
+        stable_candidate = trim_latin_stable_prefix(stable_candidate, normalized)
+        next_stable = shrink_stable_prefix(
+            self.current_preview_stable_text,
+            stable_candidate,
+            max_stable_rollback_chars,
+        )
+        if stable_candidate.startswith(next_stable):
+            next_stable = stable_candidate
+
+        if normalized.startswith(next_stable):
+            unstable = normalized[len(next_stable) :].lstrip()
+        else:
+            next_stable = ""
+            unstable = normalized
+
+        self.current_preview_stable_text = next_stable
+        self.current_preview_unstable_text = unstable
+        return next_stable, unstable
+
+    def build_interim_event(
+        self,
+        deduped_preview_text: str,
+        *,
+        word_timings: list[dict] | None,
+    ) -> dict | None:
+        accumulated = accumulate_preview_text(self.current_preview_text, deduped_preview_text)
+        normalized_accumulated = self.normalize_event_text(accumulated)
+        if should_guard_preview_reset(
+            self.current_preview_text,
+            deduped_preview_text,
+            normalized_accumulated,
+            self.current_preview_stable_text,
+        ):
+            normalized_accumulated = self.normalize_event_text(
+                guard_preview_reset_with_stable_prefix(
+                    self.current_preview_stable_text,
+                    deduped_preview_text,
+                )
+            )
+        self.current_preview_text = normalized_accumulated
+        self.last_preview_text = deduped_preview_text
+        if not normalized_accumulated.strip():
+            return None
+
+        stable_text, unstable_text = self.build_preview_snapshot(normalized_accumulated)
+        return {
+            "type": "interim",
+            "text": normalized_accumulated,
+            "stableText": stable_text,
+            "unstableText": unstable_text,
+            "wordTimings": word_timings,
+            "ts": int(time.time() * 1000),
+        }
+
+    def queue_final_chunk(self, text: str, word_timings: list[dict] | None):
+        self.pending_final_chunk = merge_streaming_chunk_text(self.pending_final_chunk, text)
+        self.pending_final_word_timings = word_timings
+
+    def consume_sentence_delta(self, sentence_text: str) -> str:
+        normalized_sentence = self.normalize_event_text(sentence_text).strip()
+        if not normalized_sentence:
+            return ""
+        pending = self.pending_sentence_text.strip()
+        if not pending:
+            return ""
+        if pending.startswith(normalized_sentence):
+            remainder = pending[len(normalized_sentence) :].lstrip()
+            self.pending_sentence_text = remainder
+            return normalized_sentence
+        self.pending_sentence_text = ""
+        return normalized_sentence
+
+    def maybe_emit_sentence_event(self, reason: str, *, force: bool = False) -> list[dict]:
+        normalized = self.pending_sentence_text.strip()
+        if not normalized:
+            self.pending_sentence_text = ""
+            return []
+        endpoint_triggered = reason in {"silence", "max_chunk", "flush", "close"}
+        if not force and not should_flush_sentence_by_boundary(normalized, endpoint_triggered):
+            return []
+        self.pending_sentence_text = ""
+        return [{"type": "sentence", "text": normalized, "ts": int(time.time() * 1000)}]
+
+    def commit_pending_final_chunk(self, reason: str) -> list[dict]:
+        normalized_raw = self.pending_final_chunk.strip()
+        if not normalized_raw:
+            self.pending_final_chunk = ""
+            self.pending_final_word_timings = None
+            self.reset_preview_state()
+            return []
+
+        self.pending_final_chunk = ""
+        word_timings = self.pending_final_word_timings
+        self.pending_final_word_timings = None
+        corrected_text, corrected = apply_text_corrections(normalized_raw, self.text_corrections)
+        if corrected:
+            word_timings = None
+        self.reset_preview_state()
+        self.final_text_raw = merge_text(self.final_text_raw, normalized_raw)
+        self.final_text = merge_text(self.final_text, corrected_text)
+        self.pending_sentence_text = merge_text(self.pending_sentence_text, corrected_text).strip()
+        events = [
+            {
+                "type": "final_chunk",
+                "text": corrected_text,
+                "wordTimings": word_timings,
+                "ts": int(time.time() * 1000),
+            },
+        ]
+        events.extend(self.maybe_emit_sentence_event(reason))
+        events.append({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
+        return events
+
+    def commit_sentence_prefix_if_possible(self, reason: str) -> tuple[bool, list[dict]]:
+        split = find_committable_sentence_prefix(self.pending_final_chunk)
+        if not split:
+            return False, []
+
+        commit_text, remaining_text = split
+        commit_timings, remaining_timings = split_word_timings_by_prefix(
+            self.pending_final_word_timings,
+            commit_text,
+        )
+        if commit_timings is None:
+            return False, []
+
+        self.pending_final_chunk = commit_text
+        self.pending_final_word_timings = commit_timings
+        events = self.commit_pending_final_chunk(reason)
+        self.pending_final_chunk = remaining_text
+        self.pending_final_word_timings = remaining_timings
+        return True, events
+
+
+class WebSocketStreamingSession:
+    """WS streaming session for local ASR (based on websockets library)."""
 
     def __init__(self, websocket, params: dict):
         self.websocket = websocket
@@ -1503,21 +2194,85 @@ class WebSocketStreamingSession:
 
         self.pending_pcm = bytearray()
         self.pending_new_bytes = 0
-        self.final_text_raw = ""
-        self.final_text = ""
-        self.pending_final_chunk = ""
-        self.pending_final_word_timings = None
         self.text_corrections = parse_text_corrections(params.get("text_corrections", [None])[0])
-        self.current_preview_text = ""
-        self.current_preview_stable_text = ""
-        self.current_preview_unstable_text = ""
-        self.preview_history: list[str] = []
-        self.last_preview_text = ""
+        self.assembler = TranscriptAssembler(self.normalize_event_text, self.text_corrections)
         self.last_preview_at = 0.0
         self.last_preview_audio_bytes = 0
         self.buffer_start_at = 0.0
         self.last_audio_at = time.time()
         self.closed = False
+
+    @property
+    def final_text_raw(self):
+        return self.assembler.final_text_raw
+
+    @final_text_raw.setter
+    def final_text_raw(self, value):
+        self.assembler.final_text_raw = value
+
+    @property
+    def final_text(self):
+        return self.assembler.final_text
+
+    @final_text.setter
+    def final_text(self, value):
+        self.assembler.final_text = value
+
+    @property
+    def pending_final_chunk(self):
+        return self.assembler.pending_final_chunk
+
+    @pending_final_chunk.setter
+    def pending_final_chunk(self, value):
+        self.assembler.pending_final_chunk = value
+
+    @property
+    def pending_final_word_timings(self):
+        return self.assembler.pending_final_word_timings
+
+    @pending_final_word_timings.setter
+    def pending_final_word_timings(self, value):
+        self.assembler.pending_final_word_timings = value
+
+    @property
+    def current_preview_text(self):
+        return self.assembler.current_preview_text
+
+    @current_preview_text.setter
+    def current_preview_text(self, value):
+        self.assembler.current_preview_text = value
+
+    @property
+    def current_preview_stable_text(self):
+        return self.assembler.current_preview_stable_text
+
+    @current_preview_stable_text.setter
+    def current_preview_stable_text(self, value):
+        self.assembler.current_preview_stable_text = value
+
+    @property
+    def current_preview_unstable_text(self):
+        return self.assembler.current_preview_unstable_text
+
+    @current_preview_unstable_text.setter
+    def current_preview_unstable_text(self, value):
+        self.assembler.current_preview_unstable_text = value
+
+    @property
+    def preview_history(self):
+        return self.assembler.preview_history
+
+    @preview_history.setter
+    def preview_history(self, value):
+        self.assembler.preview_history = value
+
+    @property
+    def last_preview_text(self):
+        return self.assembler.last_preview_text
+
+    @last_preview_text.setter
+    def last_preview_text(self, value):
+        self.assembler.last_preview_text = value
 
     def normalize_event_text(self, text: str) -> str:
         normalized = text or ""
@@ -1525,6 +2280,18 @@ class WebSocketStreamingSession:
         if language.startswith("ja") or re.search(r"[\u3040-\u30ff\u3400-\u9fff]", normalized):
             normalized = cleanup_japanese_asr_text(normalized)
         return normalized
+
+    def is_english_session(self) -> bool:
+        language = (self.params.get("language", [""])[0] or "").lower()
+        return language.startswith("en")
+
+    def get_effective_silence_threshold_ms(self) -> int:
+        if not self.is_english_session():
+            return self.silence_threshold_ms
+        return max(
+            ENGLISH_SILENCE_THRESHOLD_MIN_MS,
+            int(self.silence_threshold_ms * ENGLISH_SILENCE_THRESHOLD_MULTIPLIER),
+        )
 
     def bytes_for_ms(self, ms: int) -> int:
         if ms <= 0:
@@ -1555,52 +2322,14 @@ class WebSocketStreamingSession:
             self.pending_pcm = bytearray(self.pending_pcm[-overlap_bytes:])
 
     def get_visible_text_base(self) -> str:
-        return merge_text(self.final_text_raw, self.pending_final_chunk).strip()
+        return self.assembler.get_visible_text_base()
 
     def reset_preview_state(self):
-        self.current_preview_text = ""
-        self.current_preview_stable_text = ""
-        self.current_preview_unstable_text = ""
-        self.preview_history = []
-        self.last_preview_text = ""
-
-    def build_preview_snapshot(self, text: str) -> tuple[str, str]:
-        normalized = self.normalize_event_text(text).strip()
-        if not normalized:
-            self.preview_history = []
-            self.current_preview_stable_text = ""
-            self.current_preview_unstable_text = ""
-            return "", ""
-
-        self.preview_history.append(normalized)
-        if len(self.preview_history) > self.PREVIEW_STABILITY_WINDOW:
-            self.preview_history = self.preview_history[-self.PREVIEW_STABILITY_WINDOW :]
-
-        stable_candidate = trim_stable_prefix(
-            get_common_prefix_for_many(self.preview_history),
-            self.PREVIEW_STABLE_TAIL_CHARS,
-        )
-        next_stable = shrink_stable_prefix(
-            self.current_preview_stable_text,
-            stable_candidate,
-            self.PREVIEW_MAX_STABLE_ROLLBACK_CHARS,
-        )
-        if stable_candidate.startswith(next_stable):
-            next_stable = stable_candidate
-
-        if normalized.startswith(next_stable):
-            unstable = normalized[len(next_stable) :].lstrip()
-        else:
-            next_stable = ""
-            unstable = normalized
-
-        self.current_preview_stable_text = next_stable
-        self.current_preview_unstable_text = unstable
-        return next_stable, unstable
+        self.assembler.reset_preview_state()
 
     def emit_json(self, payload: dict):
         text = payload.get("text")
-        if isinstance(text, str) and payload.get("type") in {"interim", "final_chunk", "final"}:
+        if isinstance(text, str) and payload.get("type") in {"interim", "final_chunk", "sentence", "final"}:
             payload = {**payload, "text": self.normalize_event_text(text)}
         self.websocket.send(json.dumps(payload, ensure_ascii=False))
 
@@ -1641,70 +2370,23 @@ class WebSocketStreamingSession:
                 preview_text,
                 preview_word_timings,
             )
-        accumulated = accumulate_preview_text(self.current_preview_text, deduped)
-        normalized_accumulated = self.normalize_event_text(accumulated)
-        self.current_preview_text = normalized_accumulated
-        self.last_preview_text = deduped
-        if not normalized_accumulated.strip():
-            return
-        stable_text, unstable_text = self.build_preview_snapshot(normalized_accumulated)
-        self.emit_json(
-            {
-                "type": "interim",
-                "text": normalized_accumulated,
-                "stableText": stable_text,
-                "unstableText": unstable_text,
-                "wordTimings": preview_word_timings,
-                "ts": int(time.time() * 1000),
-            }
+        payload = self.assembler.build_interim_event(
+            deduped,
+            word_timings=preview_word_timings,
         )
+        if not payload:
+            return
+        self.emit_json(payload)
 
     def commit_pending_final_chunk(self, reason: str):
-        normalized_raw = self.pending_final_chunk.strip()
-        if not normalized_raw:
-            self.pending_final_chunk = ""
-            self.pending_final_word_timings = None
-            self.reset_preview_state()
-            return
-
-        self.pending_final_chunk = ""
-        word_timings = self.pending_final_word_timings
-        self.pending_final_word_timings = None
-        corrected_text, corrected = apply_text_corrections(normalized_raw, self.text_corrections)
-        if corrected:
-            word_timings = None
-        self.reset_preview_state()
-        self.final_text_raw = merge_text(self.final_text_raw, normalized_raw)
-        self.final_text = merge_text(self.final_text, corrected_text)
-        self.emit_json(
-            {
-                "type": "final_chunk",
-                "text": corrected_text,
-                "wordTimings": word_timings,
-                "ts": int(time.time() * 1000),
-            }
-        )
-        self.emit_json({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
+        for event in self.assembler.commit_pending_final_chunk(reason):
+            self.emit_json(event)
 
     def commit_sentence_prefix_if_possible(self, reason: str) -> bool:
-        split = find_committable_sentence_prefix(self.pending_final_chunk)
-        if not split:
-            return False
-
-        commit_text, remaining_text = split
-        commit_timings, remaining_timings = split_word_timings_by_prefix(
-            self.pending_final_word_timings,
-            commit_text,
-        )
-        if commit_timings is None:
-            return False
-
-        self.pending_final_chunk = commit_text
-        self.pending_final_word_timings = commit_timings
-        self.commit_pending_final_chunk(reason)
-        self.pending_final_chunk = remaining_text
-        self.pending_final_word_timings = remaining_timings
-        return True
+        committed, events = self.assembler.commit_sentence_prefix_if_possible(reason)
+        for event in events:
+            self.emit_json(event)
+        return committed
 
     def should_defer_final_chunk(
         self, candidate: str, reason: str, word_timings: list[dict] | None = None
@@ -1712,6 +2394,8 @@ class WebSocketStreamingSession:
         normalized = candidate.strip()
         if not normalized:
             return False
+        if reason == "silence" and is_latin_dominant_text(normalized) and is_weak_boundary_suffix(normalized):
+            return True
         if reason not in {"flush", "close"} and is_abnormal_short_final_chunk(normalized, word_timings):
             return True
         if reason != "max_chunk":
@@ -1762,8 +2446,7 @@ class WebSocketStreamingSession:
                 final_word_timings,
             )
         if deduped.strip():
-            self.pending_final_chunk = merge_streaming_chunk_text(self.pending_final_chunk, deduped)
-            self.pending_final_word_timings = final_word_timings
+            self.assembler.queue_final_chunk(deduped, final_word_timings)
             if reason in {"max_chunk", "silence"} and self.commit_sentence_prefix_if_possible(reason):
                 if self.pending_final_chunk and not self.should_defer_final_chunk(
                     self.pending_final_chunk,
@@ -1797,7 +2480,7 @@ class WebSocketStreamingSession:
                     return
             self.emit_final("max_chunk")
             return
-        if pending_ms >= self.min_chunk_ms and silence_ms >= self.silence_threshold_ms:
+        if pending_ms >= self.min_chunk_ms and silence_ms >= self.get_effective_silence_threshold_ms():
             self.emit_final("silence")
 
     def run(self):
@@ -1814,6 +2497,8 @@ class WebSocketStreamingSession:
                     if msg_type == "flush":
                         self.emit_final("flush")
                         self.commit_pending_final_chunk("flush")
+                        for event in self.assembler.maybe_emit_sentence_event("flush", force=True):
+                            self.emit_json(event)
                         self.emit_json(
                             {
                                 "type": "final",
@@ -1825,6 +2510,8 @@ class WebSocketStreamingSession:
                     elif msg_type == "close":
                         self.emit_final("close")
                         self.commit_pending_final_chunk("close")
+                        for event in self.assembler.maybe_emit_sentence_event("close", force=True):
+                            self.emit_json(event)
                         self.closed = True
                         break
                     elif msg_type == "ping":
@@ -1916,16 +2603,23 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 {
                     "streaming_asr": True,
                     "transport": ["http", "websocket"],
-                    "events": ["interim", "final_chunk", "endpoint", "final", "error"],
+                    "events": ["interim", "final_chunk", "sentence", "endpoint", "final", "error"],
                     "audio_format": "pcm_s16le",
                     "sample_rate": 16000,
                     "ws_path": "/stream",
                     "ws_port": _runtime_policy["ws_port"],
                     "interim_schema": {
-                        "text": "Current chunk full snapshot",
-                        "stableText": "Stable prefix for current chunk",
-                        "unstableText": "Tail still allowed to change",
+                        "text": "Current uncommitted preview snapshot",
+                        "stableText": "Stable prefix within the current uncommitted preview",
+                        "unstableText": "Unstable tail still allowed to change",
                         "wordTimings": "Optional per-word timings when return_word_timestamps=true and engine supports it",
+                    },
+                    "final_chunk_schema": {
+                        "text": "Newly committed text delta emitted once",
+                        "wordTimings": "Optional per-word timings for the committed delta",
+                    },
+                    "sentence_schema": {
+                        "text": "Newly finalized sentence text for downstream translation or pairing",
                     },
                     "query_options": {
                         "return_word_timestamps": "Set to true to request optional per-word timings when supported",
@@ -1992,6 +2686,13 @@ class WhisperHandler(BaseHTTPRequestHandler):
             "compute_type": [data.get("compute_type", _runtime_policy["compute_type"])],
             "language": [data.get("language")],
             "download_root": [data.get("download_root")],
+            "offline_segmented": [data.get("offline_segmented", False)],
+            "offline_segment_silence_ms": [data.get("offline_segment_silence_ms", 1200)],
+            "offline_segment_min_speech_rms": [data.get("offline_segment_min_speech_rms", 360)],
+            "offline_segment_window_ms": [data.get("offline_segment_window_ms", 30)],
+            "offline_segment_padding_ms": [data.get("offline_segment_padding_ms", 480)],
+            "offline_segment_max_segment_ms": [data.get("offline_segment_max_segment_ms", 30000)],
+            "offline_segment_overlap_ms": [data.get("offline_segment_overlap_ms", 640)],
         }
         return self.transcribe_audio(audio_data, params)
 
@@ -2267,3 +2968,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
