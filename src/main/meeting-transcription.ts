@@ -12,6 +12,12 @@ import { profiler } from './utils/profiler'
 
 export type MeetingBackend = 'local' | 'soniox' | 'groq'
 
+type Recognizer =
+  | StreamingSonioxRecognizer
+  | StreamingGroqRecognizer
+  | StreamingLocalRecognizer
+  | StreamingLocalWsRecognizer
+
 export interface SystemAudioSource {
   id: string
   name: string
@@ -55,22 +61,13 @@ export class MeetingTranscriptionManager extends EventEmitter {
   private static readonly PRECONNECT_WAIT_TIMEOUT_MS = 2500
 
   private pendingPartialDispatch: {
-    recognizer:
-      | StreamingSonioxRecognizer
-      | StreamingGroqRecognizer
-      | StreamingLocalRecognizer
-      | StreamingLocalWsRecognizer
+    recognizer: Recognizer
     result: PartialResult
   } | null = null
   private partialDispatchScheduled = false
   private preConnectAttemptId = 0
 
-  private recognizer:
-    | StreamingSonioxRecognizer
-    | StreamingGroqRecognizer
-    | StreamingLocalRecognizer
-    | StreamingLocalWsRecognizer
-    | null = null
+  private recognizer: Recognizer | null = null
   private backend: MeetingBackend
   private sonioxConfig?: StreamingSonioxConfig
   private groqConfig?: StreamingGroqConfig
@@ -143,6 +140,29 @@ export class MeetingTranscriptionManager extends EventEmitter {
     await promise
   }
 
+  private async createLocalRecognizerWithFallback(
+    localConfig: StreamingLocalConfig | undefined,
+    wsConfig: StreamingLocalWsConfig
+  ): Promise<{ recognizer: StreamingLocalWsRecognizer | StreamingLocalRecognizer; preConnected: boolean }> {
+    const mode = localConfig?.mode || 'auto'
+    if (mode !== 'http_chunk') {
+      const wsRecognizer = new StreamingLocalWsRecognizer(wsConfig)
+      try {
+        await wsRecognizer.preConnect()
+        return { recognizer: wsRecognizer, preConnected: true }
+      } catch (error) {
+        if (mode === 'streaming') {
+          throw error
+        }
+        console.warn(
+          '[MeetingTranscription] WS pre-connect unavailable, fallback to HTTP chunk mode:',
+          error
+        )
+      }
+    }
+    return { recognizer: new StreamingLocalRecognizer(localConfig), preConnected: false }
+  }
+
   private async doPreConnect(attemptId: number): Promise<void> {
     if (this.recognizer?.isPreConnected()) {
       return
@@ -151,36 +171,17 @@ export class MeetingTranscriptionManager extends EventEmitter {
     console.log(`[MeetingTranscription] Pre-connecting to ${this.backend} recognition service...`)
 
     // Create appropriate recognizer based on backend
-    let recognizer:
-      | StreamingSonioxRecognizer
-      | StreamingGroqRecognizer
-      | StreamingLocalRecognizer
-      | StreamingLocalWsRecognizer
+    let recognizer: Recognizer
     let alreadyPreConnected = false
     if (this.backend === 'groq') {
       recognizer = new StreamingGroqRecognizer(this.groqConfig)
     } else if (this.backend === 'local') {
-      const mode = this.localConfig?.mode || 'http_chunk'
-      const wsConfig: StreamingLocalWsConfig = { ...this.localConfig }
-      if (mode !== 'http_chunk') {
-        const wsRecognizer = new StreamingLocalWsRecognizer(wsConfig)
-        try {
-          await wsRecognizer.preConnect()
-          recognizer = wsRecognizer
-          alreadyPreConnected = true
-        } catch (error) {
-          if (mode === 'streaming') {
-            throw error
-          }
-          console.warn(
-            '[MeetingTranscription] WS pre-connect unavailable, fallback to HTTP chunk mode:',
-            error
-          )
-          recognizer = new StreamingLocalRecognizer(this.localConfig)
-        }
-      } else {
-        recognizer = new StreamingLocalRecognizer(this.localConfig)
-      }
+      const result = await this.createLocalRecognizerWithFallback(
+        this.localConfig,
+        { ...this.localConfig }
+      )
+      recognizer = result.recognizer
+      alreadyPreConnected = result.preConnected
     } else {
       recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
     }
@@ -361,45 +362,24 @@ export class MeetingTranscriptionManager extends EventEmitter {
               }
             : undefined
         }
-        const localMode = recognizerConfig.mode || 'http_chunk'
         const wsConfig: StreamingLocalWsConfig = {
           ...recognizerConfig,
           translation: recognizerConfig.translation
         }
-        if (localMode !== 'http_chunk') {
-          let wsRecognizer: StreamingLocalWsRecognizer | null = null
-          if (
-            this.recognizer instanceof StreamingLocalWsRecognizer &&
-            this.recognizer.isPreConnected()
-          ) {
-            this.recognizer.updateConfig(wsConfig)
-            wsRecognizer = this.recognizer
-          } else {
-            const candidate = new StreamingLocalWsRecognizer(wsConfig)
-            try {
-              await candidate.preConnect()
-              wsRecognizer = candidate
-            } catch (error) {
-              if (localMode === 'streaming') {
-                throw error
-              }
-              console.warn(
-                '[MeetingTranscription] WS mode unavailable, fallback to HTTP chunk mode:',
-                error
-              )
-              this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
-            }
-          }
-          if (wsRecognizer) {
-            this.recognizer = wsRecognizer
-          }
+        if (
+          this.recognizer instanceof StreamingLocalWsRecognizer &&
+          this.recognizer.isPreConnected()
+        ) {
+          this.recognizer.updateConfig(wsConfig)
         } else if (
+          recognizerConfig.mode === 'http_chunk' &&
           this.recognizer instanceof StreamingLocalRecognizer &&
           this.recognizer.isPreConnected()
         ) {
           this.recognizer.updateConfig(recognizerConfig)
         } else {
-          this.recognizer = new StreamingLocalRecognizer(recognizerConfig)
+          const result = await this.createLocalRecognizerWithFallback(recognizerConfig, wsConfig)
+          this.recognizer = result.recognizer
         }
       } else {
         const recognizerConfig: StreamingSonioxConfig = {
