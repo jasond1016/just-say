@@ -17,15 +17,11 @@ import {
   normalizeJapaneseSpacing
 } from './text-utils'
 import { TextCorrectionConfig } from './text-corrections'
-
-interface LocalTranslationConfig {
-  enabled: boolean
-  targetLanguage: string
-  translator?: (text: string, targetLanguage: string) => Promise<string>
-  batchTranslator?: (texts: string[], targetLanguage: string) => Promise<string[]>
-  batchWindowMs?: number
-  maxBatchItems?: number
-}
+import {
+  LocalTranslationConfig,
+  LocalTranslationCoordinator,
+  cloneSpeakerSegment
+} from './streaming-local-shared'
 
 interface StreamingSegmentationConfig {
   previewIntervalMs?: number
@@ -80,7 +76,6 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private wsPort: number | undefined
   private isActive = false
   private startTime = 0
-  private translationQueue: Promise<void> = Promise.resolve()
 
   private confirmedText = ''
   private previewText = ''
@@ -88,16 +83,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private previewUnstableText = ''
   private currentWordTimings: WordTiming[] = []
   private completedSegments: SpeakerSegment[] = []
+  private readonly translationCoordinator: LocalTranslationCoordinator
   private liveSentenceTail = ''
   private endpointReason = ''
   private sentencePairs: SentencePair[] = []
   private sentencePairSegmentIndices: number[] = []
   private pendingSentenceStartIndex = 0
-  private pendingTranslationPairIndices: number[] = []
-  private translationBatchTimer: NodeJS.Timeout | null = null
-
-  private readonly DEFAULT_TRANSLATION_BATCH_WINDOW_MS = 450
-  private readonly DEFAULT_TRANSLATION_MAX_BATCH_ITEMS = 6
 
   constructor(config?: StreamingLocalWsConfig) {
     super()
@@ -126,6 +117,32 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         useItn: config?.sensevoice?.useItn ?? defaults.sensevoice.useItn
       }
     }
+    this.translationCoordinator = new LocalTranslationCoordinator({
+      getConfig: () => this.config.translation,
+      isActive: () => this.isActive,
+      getSentencePairs: () => this.sentencePairs,
+      applyTranslation: (pairIndex, originalText, translated) => {
+        if (this.sentencePairs[pairIndex]?.original !== originalText) {
+          return false
+        }
+        this.sentencePairs[pairIndex] = {
+          ...this.sentencePairs[pairIndex],
+          translated
+        }
+        const segmentIndex = this.sentencePairSegmentIndices[pairIndex]
+        if (typeof segmentIndex === 'number' && this.completedSegments[segmentIndex]) {
+          this.completedSegments[segmentIndex] = {
+            ...this.completedSegments[segmentIndex],
+            translatedText: translated,
+            sentencePairs: [{ original: originalText, translated }]
+          }
+        }
+        return true
+      },
+      emitPartialResult: () => this.emitPartialResult(),
+      emitTranslationError: (error) => this.emit('translationError', error),
+      logPrefix: 'StreamingLocalWs'
+    })
   }
 
   updateConfig(config?: StreamingLocalWsConfig): void {
@@ -138,8 +155,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         useItn: config.sensevoice?.useItn ?? this.config.sensevoice.useItn
       }
     }
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
+    this.translationCoordinator.reset()
     this.preConnected = false
   }
 
@@ -195,7 +211,6 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
     this.isActive = true
     this.startTime = Date.now()
-    this.translationQueue = Promise.resolve()
     this.confirmedText = ''
     this.previewText = ''
     this.previewStableText = ''
@@ -207,8 +222,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.sentencePairs = []
     this.sentencePairSegmentIndices = []
     this.pendingSentenceStartIndex = 0
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
+    this.translationCoordinator.reset()
 
     const server = this.getServerClient()
     const wsUrl = server.getStreamWsUrl({
@@ -309,7 +323,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.liveSentenceTail = ''
     this.endpointReason = ''
     this.flushPendingTranslationBatch()
-    await this.translationQueue
+    await this.translationCoordinator.waitForIdle()
     this.isActive = false
 
     const finalText = this.confirmedText.trim()
@@ -336,15 +350,13 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.completedSegments = []
     this.liveSentenceTail = ''
     this.endpointReason = ''
-    this.pendingTranslationPairIndices = []
     this.sentencePairSegmentIndices = []
     this.pendingSentenceStartIndex = 0
-    this.clearTranslationBatchTimer()
+    this.translationCoordinator.reset()
     if (this.ws) {
       this.ws.close()
       this.ws = null
     }
-    this.translationQueue = Promise.resolve()
   }
 
   private handleMessage(raw: string): void {
@@ -550,166 +562,12 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return startIndex
   }
 
-  private translatePairAsync(pairIndex: number): void {
-    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
-      return
-    }
-
-    const originalText = this.sentencePairs[pairIndex]?.original?.trim()
-    if (!originalText || !this.shouldTranslateText(originalText)) {
-      return
-    }
-
-    if (this.config.translation.batchTranslator) {
-      this.pendingTranslationPairIndices.push(pairIndex)
-      if (this.pendingTranslationPairIndices.length >= this.getTranslationMaxBatchItems()) {
-        this.flushPendingTranslationBatch()
-      } else {
-        this.scheduleTranslationBatchFlush()
-      }
-      return
-    }
-
-    const translator = this.config.translation.translator
-    if (!translator) {
-      return
-    }
-
-    this.translationQueue = this.translationQueue
-      .then(async () => {
-        const translated = (
-          await translator(originalText, this.config.translation!.targetLanguage)
-        )?.trim()
-        if (!translated || !this.isActive) {
-          return
-        }
-        if (this.sentencePairs[pairIndex]?.original !== originalText) {
-          return
-        }
-        this.sentencePairs[pairIndex] = {
-          ...this.sentencePairs[pairIndex],
-          translated
-        }
-        const segmentIndex = this.sentencePairSegmentIndices[pairIndex]
-        if (typeof segmentIndex === 'number' && this.completedSegments[segmentIndex]) {
-          this.completedSegments[segmentIndex] = {
-            ...this.completedSegments[segmentIndex],
-            translatedText: translated,
-            sentencePairs: [{ original: originalText, translated }]
-          }
-        }
-        this.emitPartialResult()
-      })
-      .catch((error) => {
-        const err = error instanceof Error ? error : new Error(String(error))
-        console.warn('[StreamingLocalWs] Translation failed:', err.message)
-        this.emit('translationError', err)
-      })
-  }
-
-  private getTranslationBatchWindowMs(): number {
-    const configured = this.config.translation?.batchWindowMs
-    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-      return Math.floor(configured)
-    }
-    return this.DEFAULT_TRANSLATION_BATCH_WINDOW_MS
-  }
-
-  private getTranslationMaxBatchItems(): number {
-    const configured = this.config.translation?.maxBatchItems
-    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-      return Math.floor(configured)
-    }
-    return this.DEFAULT_TRANSLATION_MAX_BATCH_ITEMS
-  }
-
-  private scheduleTranslationBatchFlush(): void {
-    if (this.translationBatchTimer || this.pendingTranslationPairIndices.length === 0) {
-      return
-    }
-    this.translationBatchTimer = setTimeout(() => {
-      this.translationBatchTimer = null
-      this.flushPendingTranslationBatch()
-    }, this.getTranslationBatchWindowMs())
-  }
-
-  private clearTranslationBatchTimer(): void {
-    if (this.translationBatchTimer) {
-      clearTimeout(this.translationBatchTimer)
-      this.translationBatchTimer = null
-    }
-  }
-
   private flushPendingTranslationBatch(): void {
-    this.clearTranslationBatchTimer()
-    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
-      this.pendingTranslationPairIndices = []
-      return
-    }
-    const batchTranslator = this.config.translation.batchTranslator
-    if (!batchTranslator || this.pendingTranslationPairIndices.length === 0) {
-      return
-    }
-
-    const indices = [...this.pendingTranslationPairIndices]
-    this.pendingTranslationPairIndices = []
-    const items = indices
-      .map((index) => ({
-        index,
-        original: this.sentencePairs[index]?.original?.trim() || ''
-      }))
-      .filter((item) => item.original && this.shouldTranslateText(item.original))
-
-    if (items.length === 0) {
-      return
-    }
-
-    this.translationQueue = this.translationQueue
-      .then(async () => {
-        const translatedBatch = await batchTranslator(
-          items.map((item) => item.original),
-          this.config.translation!.targetLanguage
-        )
-        if (!this.isActive || translatedBatch.length === 0) {
-          return
-        }
-        let changed = false
-        for (let i = 0; i < items.length; i += 1) {
-          const translated = (translatedBatch[i] || '').trim()
-          if (!translated) continue
-          const item = items[i]
-          if (this.sentencePairs[item.index]?.original !== item.original) {
-            continue
-          }
-          this.sentencePairs[item.index] = {
-            ...this.sentencePairs[item.index],
-            translated
-          }
-          const segmentIndex = this.sentencePairSegmentIndices[item.index]
-          if (typeof segmentIndex === 'number' && this.completedSegments[segmentIndex]) {
-            this.completedSegments[segmentIndex] = {
-              ...this.completedSegments[segmentIndex],
-              translatedText: translated,
-              sentencePairs: [{ original: item.original, translated }]
-            }
-          }
-          changed = true
-        }
-        if (changed) {
-          this.emitPartialResult()
-        }
-      })
-      .catch((error) => {
-        const err = error instanceof Error ? error : new Error(String(error))
-        console.warn('[StreamingLocalWs] Batch translation failed:', err.message)
-        this.emit('translationError', err)
-      })
+    this.translationCoordinator.flushPendingBatch()
   }
 
-  private shouldTranslateText(text: string): boolean {
-    const normalized = text.trim()
-    if (!normalized) return false
-    return Array.from(normalized).some((ch) => /[\p{L}\p{N}]/u.test(ch))
+  private translatePairAsync(pairIndex: number): void {
+    this.translationCoordinator.translatePairAsync(pairIndex)
   }
 
   private debugStreamState(eventType: string): void {
@@ -756,11 +614,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   }
 
   private buildCommittedSegments(): SpeakerSegment[] {
-    return this.completedSegments.map((segment) => ({
-      ...segment,
-      sentencePairs: segment.sentencePairs ? [...segment.sentencePairs] : undefined,
-      wordTimings: segment.wordTimings ? [...segment.wordTimings] : undefined
-    }))
+    return this.completedSegments.map((segment) => cloneSpeakerSegment(segment))
   }
 
   private buildCurrentLiveSegment(): SpeakerSegment | null {
