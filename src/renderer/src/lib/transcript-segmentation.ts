@@ -15,18 +15,13 @@ interface LiveSegmentLike {
   unstableText?: string
   previewText?: string
   translatedText?: string
-  sentencePairs?: Array<{ original: string; translated?: string }>
+  sentencePairs?: Array<{ original: string; translated?: string | null }>
 }
 
 function getPreviewLiveText(segment: LiveSegmentLike): string {
-  const previewText = segment.previewText || ''
+  const previewText = segment.unstableText || segment.previewText || ''
   if (previewText.trim()) {
     return previewText
-  }
-
-  const unstableText = segment.unstableText || ''
-  if (unstableText.trim()) {
-    return unstableText
   }
 
   return ''

@@ -356,8 +356,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     switch (data.type) {
       case 'interim': {
         this.endpointReason = ''
-        const preview = this.normalizePreviewText(data.text || '')
-        this.previewText = this.deduplicatePreviewFromCommitted(preview)
+        this.previewText = this.normalizePreviewText(data.text || '')
         const stablePreview = this.normalizePreviewText(data.stableText || '')
         const unstablePreview = this.normalizeUnstablePreviewText(data.unstableText || '')
         this.applyPreviewStateFromServer(stablePreview, unstablePreview)
@@ -458,17 +457,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     this.previewStableText = stablePreview
-      ? this.deduplicatePreviewFromCommitted(stablePreview)
-      : ''
-    this.previewUnstableText =
-      unstablePreview || (!this.previewStableText.trim() ? this.previewText : '')
-  }
-
-  private deduplicatePreviewFromCommitted(text: string): string {
-    const base = this.getVisibleBaseText()
-    if (!text || !base) return text
-    const overlap = findTextOverlap(base, text, 200)
-    return overlap > 0 ? text.slice(overlap) : text
+    this.previewUnstableText = unstablePreview
   }
 
   private appendConfirmed(text: string): string {

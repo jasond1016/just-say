@@ -196,7 +196,6 @@ describe('StreamingLocalWsRecognizer', () => {
       { text: '今日は日本の夏に', isFinal: true },
       { text: 'よく食べるものをご紹介します。', isFinal: true }
     ])
-
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'sentence',
@@ -280,6 +279,42 @@ describe('StreamingLocalWsRecognizer', () => {
       text: "I'm Adam.",
       stableText: "I'm",
       unstableText: ' Adam.'
+    })
+  })
+
+  it('trusts full preview text from the server after committed chunks exist', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'Hello'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'interim',
+        text: 'Hello world',
+        stableText: 'Hello',
+        unstableText: ' world'
+      })
+    )
+
+    expect(partials.at(-1)?.segments).toMatchObject([
+      {
+        text: 'Hello',
+        isFinal: true
+      }
+    ])
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: 'Hello world',
+      stableText: 'Hello',
+      unstableText: ' world'
     })
   })
 

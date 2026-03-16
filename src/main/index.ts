@@ -560,7 +560,7 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
         translated_text: segment.translatedText,
         sentence_pairs: segment.sentencePairs?.map((pair) => ({
           original: pair.original,
-          translated: pair.translated
+          translated: pair.translated ?? undefined
         }))
       }))
   }
@@ -577,7 +577,7 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
       translated_text: segment.translatedText,
       sentence_pairs: segment.sentencePairs?.map((pair) => ({
         original: pair.original,
-        translated: pair.translated
+        translated: pair.translated ?? undefined
       }))
     }))
   }

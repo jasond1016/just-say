@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { MeetingTranscriptEvent } from '../shared/transcription-types'
 
 // Desktop capturer API for system audio capture (via IPC to main process)
 const desktopCapturerAPI = {
@@ -85,48 +86,7 @@ const api = {
   getPttRuntimeState: (): Promise<{ recording: boolean; processing: boolean }> =>
     ipcRenderer.invoke('get-ptt-runtime-state'),
 
-  onMeetingTranscript: (
-    callback: (segment: {
-      text: string
-      timestamp: number
-      isFinal: boolean
-      currentWordTimings?: Array<{
-        text: string
-        startMs: number
-        endMs: number
-      }>
-      speakerSegments?: Array<{
-        speaker: number
-        text: string
-        stableText?: string
-        unstableText?: string
-        previewText?: string
-        endpointReason?: string
-        translatedText?: string
-        wordTimings?: Array<{
-          text: string
-          startMs: number
-          endMs: number
-        }>
-        sentencePairs?: Array<{ original: string; translated?: string }>
-      }>
-      currentSpeakerSegment?: {
-        speaker: number
-        text: string
-        stableText?: string
-        unstableText?: string
-        previewText?: string
-        endpointReason?: string
-        translatedText?: string
-        wordTimings?: Array<{
-          text: string
-          startMs: number
-          endMs: number
-        }>
-        sentencePairs?: Array<{ original: string; translated?: string }>
-      }
-    }) => void
-  ): void => {
+  onMeetingTranscript: (callback: (segment: MeetingTranscriptEvent) => void): void => {
     ipcRenderer.on('meeting-transcript', (_event, segment) => callback(segment))
   },
 

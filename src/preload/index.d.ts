@@ -1,55 +1,9 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import { DesktopCapturerSource, SourcesOptions } from 'electron'
+import type { MeetingTranscriptEvent } from '../shared/transcription-types'
 
 interface DesktopCapturerAPI {
   getSources: (options: SourcesOptions) => Promise<DesktopCapturerSource[]>
-}
-
-interface MeetingTranscriptSegment {
-  text: string
-  timestamp: number
-  isFinal: boolean
-  currentWordTimings?: Array<{
-    text: string
-    startMs: number
-    endMs: number
-  }>
-  speakerSegments?: Array<{
-    speaker: number
-    text: string
-    stableText?: string
-    unstableText?: string
-    previewText?: string
-    endpointReason?: string
-    translatedText?: string
-    wordTimings?: Array<{
-      text: string
-      startMs: number
-      endMs: number
-    }>
-    sentencePairs?: Array<{
-      original: string
-      translated?: string
-    }>
-  }>
-  currentSpeakerSegment?: {
-    speaker: number
-    text: string
-    stableText?: string
-    unstableText?: string
-    previewText?: string
-    endpointReason?: string
-    translatedText?: string
-    wordTimings?: Array<{
-      text: string
-      startMs: number
-      endMs: number
-    }>
-    sentencePairs?: Array<{
-      original: string
-      translated?: string
-    }>
-  }
 }
 
 interface JustSayAPI {
@@ -94,7 +48,7 @@ interface JustSayAPI {
   getSystemAudioSources: () => Promise<Array<{ id: string; name: string; isDefault?: boolean }>>
   getMeetingRuntimeState: () => Promise<{ status: string; startedAt: number | null }>
   getPttRuntimeState: () => Promise<{ recording: boolean; processing: boolean }>
-  onMeetingTranscript: (callback: (segment: MeetingTranscriptSegment) => void) => void
+  onMeetingTranscript: (callback: (segment: MeetingTranscriptEvent) => void) => void
   onMeetingStatus: (callback: (status: string) => void) => void
 
   // System audio capture (renderer-side)

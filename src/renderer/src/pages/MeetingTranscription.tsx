@@ -1,38 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Headphones, Play, Settings2, Square } from 'lucide-react'
+import type { SpeakerSegment } from '../../../shared/transcription-types'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
-import { WordTimingTrail } from '@/components/transcript/WordTimingTrail'
 import {
   toSentencePairsFromCurrentLive,
   toSentencePairsFromLive
 } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
 import { useI18n } from '@/i18n/useI18n'
-
-export interface SentencePair {
-  original: string
-  translated?: string
-}
-
-export interface WordTiming {
-  text: string
-  startMs: number
-  endMs: number
-}
-
-export interface SpeakerSegment {
-  speaker: number
-  text: string
-  translatedText?: string
-  sentencePairs?: SentencePair[]
-  stableText?: string
-  unstableText?: string
-  previewText?: string
-  wordTimings?: WordTiming[]
-  endpointReason?: string
-  timestamp?: number
-}
 
 export type TranscriptionStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
 
@@ -70,17 +46,14 @@ function isNearBottom(element: HTMLDivElement, thresholdPx = BOTTOM_FOLLOW_THRES
 }
 
 function getInlinePreviewText(segment: SpeakerSegment): string | undefined {
-  const previewText = segment.previewText || segment.unstableText || ''
+  const previewText = segment.unstableText || segment.previewText || ''
   if (!previewText.trim()) {
     return undefined
   }
 
-  return segment.text.endsWith(previewText) && segment.text !== previewText ? previewText : undefined
-}
-
-function getTimingPreviewText(segment: SpeakerSegment): string | undefined {
-  const previewText = segment.previewText || segment.unstableText || ''
-  return previewText.trim() ? previewText : undefined
+  return segment.text.endsWith(previewText) && segment.text !== previewText
+    ? previewText
+    : undefined
 }
 
 export function MeetingTranscription({
@@ -99,9 +72,6 @@ export function MeetingTranscription({
   const hasContent = state.segments.length > 0 || state.currentSegment
   const currentInlinePreviewText = state.currentSegment
     ? getInlinePreviewText(state.currentSegment)
-    : undefined
-  const currentTimingPreviewText = state.currentSegment
-    ? getTimingPreviewText(state.currentSegment)
     : undefined
 
   const formatSegmentTime = useMemo(
@@ -249,11 +219,15 @@ export function MeetingTranscription({
           </div>
         ) : (
           <div className="space-y-5">
-            {state.segments.map((segment, index) => {
+            {state.segments.map((segment) => {
               const speakerColor = speakerColors[segment.speaker % speakerColors.length]
+              const segmentKey =
+                typeof segment.timestamp === 'number'
+                  ? `${segment.speaker}-${segment.timestamp}`
+                  : `${segment.speaker}-${segment.text}`
 
               return (
-                <div key={`${segment.speaker}-${index}`} className="flex gap-3 text-sm">
+                <div key={segmentKey} className="flex gap-3 text-sm">
                   <span className="w-10 shrink-0 pt-0.5 text-xs text-muted-foreground">
                     {formatSegmentTime(segment.timestamp)}
                   </span>
@@ -290,12 +264,12 @@ export function MeetingTranscription({
                     pairs={toSentencePairsFromCurrentLive(state.currentSegment)}
                     previewText={currentInlinePreviewText}
                   />
-                  <WordTimingTrail
+                  {/* <WordTimingTrail
                     wordTimings={state.currentSegment.wordTimings}
-                    previewText={currentTimingPreviewText}
+                    previewText={state.currentSegment.unstableText || state.currentSegment.previewText}
                     label={m.meeting.liveWordTimings}
                     previewLabel={m.meeting.previewTail}
-                  />
+                  /> */}
                 </div>
               </div>
             )}

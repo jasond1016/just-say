@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  MeetingTranscription,
-  MeetingSessionState,
-  SpeakerSegment
-} from './pages/MeetingTranscription'
+import type { MeetingTranscriptEvent, SpeakerSegment } from '../../shared/transcription-types'
+import { MeetingTranscription, MeetingSessionState } from './pages/MeetingTranscription'
 import { TranscriptHistory } from './pages/TranscriptHistory'
 import { TranscriptDetail } from './pages/TranscriptDetail'
 import { DashboardHome } from './pages/DashboardHome'
@@ -38,13 +35,6 @@ interface AppConfig {
   }
 }
 
-interface MeetingTranscriptEvent {
-  isFinal: boolean
-  currentWordTimings?: SpeakerSegment['wordTimings']
-  speakerSegments?: SpeakerSegment[]
-  currentSpeakerSegment?: SpeakerSegment
-}
-
 const INITIAL_MEETING_STATE: MeetingSessionState = {
   status: 'idle',
   isPreconnecting: false,
@@ -64,14 +54,36 @@ function mergeSpeakerSegments(
   prevSegments: SpeakerSegment[],
   incoming: SpeakerSegment[]
 ): SpeakerSegment[] {
+  const previousByIdentity = new Map<string, SpeakerSegment>()
+  const previousIdentityCounts = new Map<string, number>()
+  for (const segment of prevSegments) {
+    if (!segment.text.trim()) {
+      continue
+    }
+    const baseIdentity =
+      typeof segment.timestamp === 'number'
+        ? `timestamp:${segment.timestamp}`
+        : `speaker:${segment.speaker}|text:${segment.text}`
+    const occurrence = (previousIdentityCounts.get(baseIdentity) || 0) + 1
+    previousIdentityCounts.set(baseIdentity, occurrence)
+    previousByIdentity.set(`${baseIdentity}|occurrence:${occurrence}`, segment)
+  }
+
   const nextSegments: SpeakerSegment[] = []
+  const incomingIdentityCounts = new Map<string, number>()
   for (let i = 0; i < incoming.length; i += 1) {
     const incomingSegment = incoming[i]
     if (!incomingSegment.text.trim()) {
       continue
     }
 
-    const existing = prevSegments[i]
+    const baseIdentity =
+      typeof incomingSegment.timestamp === 'number'
+        ? `timestamp:${incomingSegment.timestamp}`
+        : `speaker:${incomingSegment.speaker}|text:${incomingSegment.text}`
+    const occurrence = (incomingIdentityCounts.get(baseIdentity) || 0) + 1
+    incomingIdentityCounts.set(baseIdentity, occurrence)
+    const existing = previousByIdentity.get(`${baseIdentity}|occurrence:${occurrence}`)
     nextSegments.push({
       ...existing,
       ...incomingSegment,
@@ -166,9 +178,7 @@ function App(): React.JSX.Element {
         nextCurrentSegment = {
           ...segment.currentSpeakerSegment,
           wordTimings:
-            segment.currentSpeakerSegment.wordTimings ??
-            segment.currentWordTimings ??
-            undefined,
+            segment.currentSpeakerSegment.wordTimings ?? segment.currentWordTimings ?? undefined,
           timestamp:
             previousCurrentSegment?.timestamp ??
             segment.currentSpeakerSegment.timestamp ??

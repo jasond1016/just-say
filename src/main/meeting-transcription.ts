@@ -1,11 +1,6 @@
 import { EventEmitter } from 'events'
-import {
-  StreamingSonioxRecognizer,
-  StreamingSonioxConfig,
-  SpeakerSegment,
-  PartialResult,
-  WordTiming
-} from './recognition/streaming-soniox'
+import type { MeetingTranscriptEvent, PartialResult } from '../shared/transcription-types'
+import { StreamingSonioxRecognizer, StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingGroqRecognizer, StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingLocalRecognizer, StreamingLocalConfig } from './recognition/streaming-local'
 import {
@@ -31,22 +26,8 @@ export interface MeetingTranscriptionOptions {
   targetLanguage?: string // Target language for translation (e.g., 'en', 'zh', 'ja')
 }
 
-export interface TranscriptSegment {
-  text: string
-  translatedText?: string // Translated text (when translation enabled)
-  timestamp: number
-  isFinal: boolean
+export interface TranscriptSegment extends MeetingTranscriptEvent {
   source?: 'system' | 'microphone' | 'mixed'
-  /** Current speaker number from diarization (if enabled) */
-  speaker?: number
-  /** All completed speaker segments (for multi-speaker display) */
-  speakerSegments?: SpeakerSegment[]
-  /** Current active segment being transcribed */
-  currentSpeakerSegment?: SpeakerSegment | null
-  /** Optional per-word timings for the current live result */
-  currentWordTimings?: WordTiming[]
-  /** Whether translation is enabled */
-  translationEnabled?: boolean
 }
 
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
@@ -72,6 +53,17 @@ interface LocalTranslationBatchConfig {
  */
 export class MeetingTranscriptionManager extends EventEmitter {
   private static readonly PRECONNECT_WAIT_TIMEOUT_MS = 2500
+
+  private pendingPartialDispatch: {
+    recognizer:
+      | StreamingSonioxRecognizer
+      | StreamingGroqRecognizer
+      | StreamingLocalRecognizer
+      | StreamingLocalWsRecognizer
+    result: PartialResult
+  } | null = null
+  private partialDispatchScheduled = false
+  private preConnectAttemptId = 0
 
   private recognizer:
     | StreamingSonioxRecognizer
@@ -141,13 +133,17 @@ export class MeetingTranscriptionManager extends EventEmitter {
       return
     }
 
-    this.preConnectPromise = this.doPreConnect().finally(() => {
-      this.preConnectPromise = null
+    const attemptId = ++this.preConnectAttemptId
+    const promise = this.doPreConnect(attemptId).finally(() => {
+      if (this.preConnectPromise === promise) {
+        this.preConnectPromise = null
+      }
     })
-    await this.preConnectPromise
+    this.preConnectPromise = promise
+    await promise
   }
 
-  private async doPreConnect(): Promise<void> {
+  private async doPreConnect(attemptId: number): Promise<void> {
     if (this.recognizer?.isPreConnected()) {
       return
     }
@@ -160,6 +156,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
       | StreamingGroqRecognizer
       | StreamingLocalRecognizer
       | StreamingLocalWsRecognizer
+    let alreadyPreConnected = false
     if (this.backend === 'groq') {
       recognizer = new StreamingGroqRecognizer(this.groqConfig)
     } else if (this.backend === 'local') {
@@ -170,6 +167,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
         try {
           await wsRecognizer.preConnect()
           recognizer = wsRecognizer
+          alreadyPreConnected = true
         } catch (error) {
           if (mode === 'streaming') {
             throw error
@@ -194,17 +192,25 @@ export class MeetingTranscriptionManager extends EventEmitter {
     })
 
     try {
-      await recognizer.preConnect()
-      if (this.recognizer === recognizer) {
+      if (!alreadyPreConnected) {
+        await recognizer.preConnect()
+      }
+      const canAdoptRecognizer =
+        attemptId === this.preConnectAttemptId &&
+        this.status === 'idle' &&
+        (!this.recognizer || !this.recognizer.isSessionActive())
+
+      if (canAdoptRecognizer) {
+        this.recognizer?.close()
+        this.recognizer = recognizer
         console.log('[MeetingTranscription] Pre-connected successfully')
       } else {
+        recognizer.close()
         console.log('[MeetingTranscription] Pre-connect finished for stale recognizer')
       }
     } catch (err) {
       console.error('[MeetingTranscription] Pre-connect failed:', err)
-      if (this.recognizer === recognizer) {
-        this.recognizer = null
-      }
+      recognizer.close()
       throw err
     }
   }
@@ -299,6 +305,8 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
     this.setStatus('starting')
     this.transcriptHistory = []
+    this.pendingPartialDispatch = null
+    this.partialDispatchScheduled = false
     this.lastTextLength = 0
     this.lastTranslatedTextLength = 0
     this.maxSentencePairsSeen = 0
@@ -422,53 +430,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
       recognizer.removeAllListeners('error')
 
       recognizer.on('partial', (result: PartialResult) => {
-        // Track response for profiling (use combined length for latency tracking)
-        const translatedLength = result.currentSegment?.translatedText?.length || 0
-        const responseType =
-          result.combined.length > this.lastTextLength
-            ? 'asr'
-            : translatedLength > this.lastTranslatedTextLength
-              ? 'translation'
-              : 'other'
-        profiler.markResponseReceived(result.combined.length, this.lastTextLength, responseType)
-        this.lastTextLength = result.combined.length
-        this.lastTranslatedTextLength = translatedLength
-        const sentencePairs = result.currentSegment?.sentencePairs || []
-        if (sentencePairs.length > this.maxSentencePairsSeen) {
-          this.maxSentencePairsSeen = sentencePairs.length
-        }
-        const translatedSentencePairs = sentencePairs.filter((pair) => !!pair.translated).length
-        if (translatedSentencePairs > this.maxTranslatedSentencePairsSeen) {
-          this.maxTranslatedSentencePairsSeen = translatedSentencePairs
-        }
-
-        const segment: TranscriptSegment = {
-          text: result.combined, // Legacy: combined text for backward compatibility
-          translatedText: result.currentSegment?.translatedText,
-          timestamp: Date.now(),
-          isFinal: false,
-          source: 'mixed',
-          speaker: result.currentSpeaker,
-          speakerSegments: result.segments,
-          currentSpeakerSegment: result.currentSegment,
-          currentWordTimings: result.currentWordTimings,
-          translationEnabled: result.translationEnabled
-        }
-        if (recognizer instanceof StreamingLocalWsRecognizer) {
-          console.log(
-            '[MeetingTranscription][Debug]',
-            JSON.stringify({
-              segments: result.segments.length,
-              segmentTexts: result.segments.map((item) => item.text),
-              currentText: result.currentSegment?.text || '',
-              currentStableText: result.currentSegment?.stableText || '',
-              currentPreviewText:
-                result.currentSegment?.previewText || result.currentSegment?.unstableText || '',
-              combined: result.combined
-            })
-          )
-        }
-        this.emit('transcript', segment)
+        this.queuePartialDispatch(recognizer, result)
       })
 
       recognizer.on('error', (err: Error) => {
@@ -654,5 +616,89 @@ export class MeetingTranscriptionManager extends EventEmitter {
     }
 
     this.mixBuffer = []
+  }
+
+  private queuePartialDispatch(
+    recognizer:
+      | StreamingSonioxRecognizer
+      | StreamingGroqRecognizer
+      | StreamingLocalRecognizer
+      | StreamingLocalWsRecognizer,
+    result: PartialResult
+  ): void {
+    this.pendingPartialDispatch = { recognizer, result }
+    if (this.partialDispatchScheduled) {
+      return
+    }
+
+    this.partialDispatchScheduled = true
+    queueMicrotask(() => {
+      this.partialDispatchScheduled = false
+      const pending = this.pendingPartialDispatch
+      this.pendingPartialDispatch = null
+      if (!pending || pending.recognizer !== this.recognizer) {
+        return
+      }
+      this.emitPartialTranscript(pending.recognizer, pending.result)
+    })
+  }
+
+  private emitPartialTranscript(
+    recognizer:
+      | StreamingSonioxRecognizer
+      | StreamingGroqRecognizer
+      | StreamingLocalRecognizer
+      | StreamingLocalWsRecognizer,
+    result: PartialResult
+  ): void {
+    const translatedLength = result.currentSegment?.translatedText?.length || 0
+    const responseType =
+      result.combined.length > this.lastTextLength
+        ? 'asr'
+        : translatedLength > this.lastTranslatedTextLength
+          ? 'translation'
+          : 'other'
+    profiler.markResponseReceived(result.combined.length, this.lastTextLength, responseType)
+    this.lastTextLength = result.combined.length
+    this.lastTranslatedTextLength = translatedLength
+
+    const sentencePairs = result.currentSegment?.sentencePairs || []
+    if (sentencePairs.length > this.maxSentencePairsSeen) {
+      this.maxSentencePairsSeen = sentencePairs.length
+    }
+    const translatedSentencePairs = sentencePairs.filter((pair) => !!pair.translated).length
+    if (translatedSentencePairs > this.maxTranslatedSentencePairsSeen) {
+      this.maxTranslatedSentencePairsSeen = translatedSentencePairs
+    }
+
+    const segment: TranscriptSegment = {
+      text: result.combined,
+      translatedText: result.currentSegment?.translatedText,
+      timestamp: Date.now(),
+      isFinal: false,
+      source: 'mixed',
+      speaker: result.currentSpeaker,
+      speakerSegments: result.segments,
+      currentSpeakerSegment: result.currentSegment,
+      currentWordTimings: result.currentWordTimings,
+      translationEnabled: result.translationEnabled
+    }
+
+    if (recognizer instanceof StreamingLocalWsRecognizer) {
+      console.log(
+        '[MeetingTranscription][Debug]',
+        JSON.stringify({
+          segments: result.segments.length,
+          segmentTexts: result.segments.map((item) => item.text),
+          currentText: result.currentSegment?.text || '',
+          currentStableText: result.currentSegment?.stableText || '',
+          currentPreviewText:
+            result.currentSegment?.unstableText || result.currentSegment?.previewText || '',
+          combined: result.combined
+        })
+      )
+    }
+
+    this.emit('transcript', segment)
   }
 }
