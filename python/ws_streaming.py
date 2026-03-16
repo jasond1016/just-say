@@ -13,15 +13,9 @@ from text_processing import (
     deduplicate_timed_prefix_from_base,
     drop_word_timing_prefix,
     find_text_overlap,
-    has_min_stable_preview_coverage,
     has_stable_final_boundary,
-    has_unstable_timing_tail,
-    is_abnormal_short_final_chunk,
-    is_latin_dominant_text,
-    is_weak_boundary_suffix,
     parse_positive_int,
     parse_text_corrections,
-    try_extend_candidate_with_preview,
     ENGLISH_SILENCE_THRESHOLD_MIN_MS,
     ENGLISH_SILENCE_THRESHOLD_MULTIPLIER,
 )
@@ -252,38 +246,6 @@ class WebSocketStreamingSession:
             self.emit_json(event)
         return committed
 
-    def should_defer_final_chunk(
-        self, candidate: str, reason: str, word_timings: list[dict] | None = None
-    ) -> bool:
-        return False
-        normalized = candidate.strip()
-        if not normalized:
-            return False
-        if reason == "silence" and is_latin_dominant_text(normalized) and is_weak_boundary_suffix(normalized):
-            return True
-        if reason not in {"flush", "close"} and is_abnormal_short_final_chunk(normalized, word_timings):
-            return True
-        if reason != "max_chunk":
-            return False
-        preview_extension = try_extend_candidate_with_preview(normalized, self.last_preview_text)
-        if preview_extension:
-            self.pending_final_chunk = preview_extension
-            return True
-        pending_audio_ms = self.duration_ms_from_bytes(len(self.pending_pcm))
-        if has_unstable_timing_tail(
-            word_timings,
-            pending_audio_ms,
-            self.current_preview_unstable_text,
-        ):
-            return True
-        if not has_min_stable_preview_coverage(
-            normalized,
-            self.current_preview_stable_text,
-            self.current_preview_unstable_text,
-        ):
-            return True
-        return not has_stable_final_boundary(normalized)
-
     def emit_final(self, reason: str):
         if self.closed or self.pending_new_bytes <= 0:
             return
@@ -317,19 +279,7 @@ class WebSocketStreamingSession:
                 committed_prefix = self.commit_sentence_prefix_if_possible(reason)
             if not committed_prefix and reason == "max_chunk" and self.is_english_session():
                 committed_prefix = self.commit_stable_preview_prefix_if_possible(reason)
-            if committed_prefix:
-                if self.pending_final_chunk and not self.should_defer_final_chunk(
-                    self.pending_final_chunk,
-                    reason,
-                    self.pending_final_word_timings,
-                ):
-                    self.commit_pending_final_chunk(reason)
-            elif not self.should_defer_final_chunk(
-                self.pending_final_chunk,
-                reason,
-                self.pending_final_word_timings,
-            ):
-                self.commit_pending_final_chunk(reason)
+            self.commit_pending_final_chunk(reason)
 
         self.pending_new_bytes = 0
         self.reset_preview_state()

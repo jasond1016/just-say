@@ -435,29 +435,6 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["text"], "And so I did what one did in those days when.")
 
-    def test_emit_final_defers_max_chunk_without_preview_stability_evidence(self):
-        websocket = DummyWebSocket()
-        session = WebSocketStreamingSession(websocket, {})
-        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
-        session.pending_pcm = bytearray(max_chunk_pcm)
-        session.pending_new_bytes = len(max_chunk_pcm)
-        session.buffer_start_at = 1.0
-        session.transcribe_pcm = lambda _pcm: {
-            "success": True,
-            "text": "Hello world.",
-            "word_timings": [
-                {"text": "Hello", "startMs": 0, "endMs": 300},
-                {"text": "world", "startMs": 300, "endMs": 600},
-                {"text": ".", "startMs": 600, "endMs": 720},
-            ],
-        }
-
-        session.emit_final("max_chunk")
-
-        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(final_chunks, [])
-        self.assertEqual(session.pending_final_chunk, "Hello world.")
-
     def test_emit_final_commits_on_silence_without_stable_boundary(self):
         websocket = DummyWebSocket()
         session = WebSocketStreamingSession(websocket, {})
@@ -486,25 +463,6 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
         self.assertEqual(len(final_chunks), 1)
         self.assertEqual(final_chunks[0]["text"], "Hello and welcome to Co recursive")
-
-    def test_emit_final_defers_english_silence_chunk_with_weak_suffix(self):
-        websocket = DummyWebSocket()
-        session = WebSocketStreamingSession(websocket, {"language": ["en"]})
-        pcm = b"\x00\x00" * (session.bytes_for_ms(2400) // 2)
-        session.pending_pcm = bytearray(pcm)
-        session.pending_new_bytes = len(pcm)
-        session.buffer_start_at = 1.0
-        session.transcribe_pcm = lambda _pcm: {
-            "success": True,
-            "text": "It's such a crazy story you.",
-            "word_timings": None,
-        }
-
-        session.emit_final("silence")
-
-        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(final_chunks, [])
-        self.assertEqual(session.pending_final_chunk, "It's such a crazy story you.")
 
     def test_emit_preview_skips_empty_text_after_cleanup(self):
         websocket = DummyWebSocket()
@@ -557,31 +515,7 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         )
         self.assertEqual(session.final_text_raw, "シロップも売っています赤福氷も人気です。")
 
-    def test_emit_final_defers_max_chunk_when_timing_tail_is_unstable(self):
-        websocket = DummyWebSocket()
-        session = WebSocketStreamingSession(websocket, {})
-        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
-        session.pending_pcm = bytearray(max_chunk_pcm)
-        session.pending_new_bytes = len(max_chunk_pcm)
-        session.buffer_start_at = 1.0
-        session.current_preview_unstable_text = "売っています"
-        session.transcribe_pcm = lambda _pcm: {
-            "success": True,
-            "text": "かき氷を売っています。",
-            "word_timings": [
-                {"text": "かき氷を", "startMs": 3600, "endMs": 4150},
-                {"text": "売っ", "startMs": 4300, "endMs": 4490},
-                {"text": "ています", "startMs": 4490, "endMs": 4860},
-            ],
-        }
-
-        session.emit_final("max_chunk")
-
-        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(final_chunks, [])
-        self.assertEqual(session.pending_final_chunk, "かき氷を売っています。")
-
-    def test_emit_final_commits_sentence_prefix_and_keeps_unfinished_tail(self):
+    def test_emit_final_commits_sentence_prefix_and_remaining_tail(self):
         websocket = DummyWebSocket()
         session = WebSocketStreamingSession(websocket, {})
         max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
@@ -605,55 +539,15 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         session.emit_final("max_chunk")
 
         final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(len(final_chunks), 2)
         self.assertEqual(final_chunks[0]["text"], "Hello world.")
         self.assertEqual(
             [item["text"] for item in final_chunks[0]["wordTimings"]],
             ["Hello", "world", "."],
         )
-        self.assertEqual(session.final_text_raw, "Hello world.")
-        self.assertEqual(session.pending_final_chunk, "This is still going")
-        self.assertEqual(
-            [item["text"] for item in session.pending_final_word_timings],
-            ["This", "is", "still", "going"],
-        )
-
-    def test_emit_final_defers_max_chunk_when_stable_preview_coverage_is_too_short(self):
-        websocket = DummyWebSocket()
-        session = WebSocketStreamingSession(websocket, {})
-        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
-        session.pending_pcm = bytearray(max_chunk_pcm)
-        session.pending_new_bytes = len(max_chunk_pcm)
-        session.buffer_start_at = 1.0
-        session.current_preview_stable_text = "部はイチゴやメロ"
-        session.current_preview_unstable_text = "ンが定番です。"
-        session.transcribe_pcm = lambda _pcm: {
-            "success": True,
-            "text": "プはイチゴやメロンが定番です。",
-            "word_timings": [
-                {"text": "プ", "startMs": 0, "endMs": 270},
-                {"text": "は", "startMs": 270, "endMs": 510},
-                {"text": "イ", "startMs": 510, "endMs": 690},
-                {"text": "チ", "startMs": 690, "endMs": 810},
-                {"text": "ゴ", "startMs": 810, "endMs": 930},
-                {"text": "や", "startMs": 930, "endMs": 1050},
-                {"text": "メ", "startMs": 1110, "endMs": 1230},
-                {"text": "ロ", "startMs": 1230, "endMs": 1290},
-                {"text": "ン", "startMs": 1290, "endMs": 1410},
-                {"text": "が", "startMs": 1470, "endMs": 1530},
-                {"text": "定", "startMs": 1650, "endMs": 1770},
-                {"text": "番", "startMs": 1770, "endMs": 2009},
-                {"text": "で", "startMs": 2009, "endMs": 2250},
-                {"text": "す", "startMs": 2250, "endMs": 2490},
-                {"text": "。", "startMs": 2490, "endMs": 4290},
-            ],
-        }
-
-        session.emit_final("max_chunk")
-
-        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(final_chunks, [])
-        self.assertEqual(session.pending_final_chunk, "プはイチゴやメロンが定番です。")
+        self.assertEqual(final_chunks[1]["text"], "This is still going")
+        self.assertEqual(session.final_text_raw, "Hello world. This is still going")
+        self.assertEqual(session.pending_final_chunk, "")
 
     def test_emit_final_commits_english_stable_preview_prefix_on_max_chunk(self):
         websocket = DummyWebSocket()
@@ -675,34 +569,15 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         session.emit_final("max_chunk")
 
         final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(len(final_chunks), 2)
         self.assertEqual(final_chunks[0]["text"], "Hello and welcome to the streaming benchmark")
         self.assertIsNone(final_chunks[0]["wordTimings"])
-        self.assertEqual(session.final_text_raw, "Hello and welcome to the streaming benchmark")
-        self.assertEqual(session.pending_final_chunk, "today")
-        self.assertIsNone(session.pending_final_word_timings)
-
-    def test_emit_final_defers_short_silence_chunk_until_more_context_arrives(self):
-        websocket = DummyWebSocket()
-        session = WebSocketStreamingSession(websocket, {})
-        short_pcm = b"\x00\x00" * (session.bytes_for_ms(1200) // 2)
-        session.pending_pcm = bytearray(short_pcm)
-        session.pending_new_bytes = len(short_pcm)
-        session.buffer_start_at = 1.0
-        session.transcribe_pcm = lambda _pcm: {
-            "success": True,
-            "text": "う。",
-            "word_timings": [
-                {"text": "う", "startMs": 0, "endMs": 750},
-                {"text": "。", "startMs": 750, "endMs": 870},
-            ],
-        }
-
-        session.emit_final("silence")
-
-        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
-        self.assertEqual(final_chunks, [])
-        self.assertEqual(session.pending_final_chunk, "う。")
+        self.assertEqual(final_chunks[1]["text"], "today")
+        self.assertEqual(
+            session.final_text_raw,
+            "Hello and welcome to the streaming benchmark today",
+        )
+        self.assertEqual(session.pending_final_chunk, "")
 
     def test_commit_pending_final_chunk_emits_corrected_visible_text_but_keeps_raw_base(self):
         websocket = DummyWebSocket()
