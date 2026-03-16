@@ -3,25 +3,26 @@ import unittest
 from array import array
 from unittest.mock import patch
 
-from whisper_server import (
-    TranscriptAssembler,
-    WebSocketStreamingSession,
-    apply_text_corrections,
+from asr_engine import (
+    transcribe_audio_offline_segmented,
+    transcribe_audio_payload,
+)
+from audio_utils import build_wav_from_pcm, detect_offline_segments
+from text_processing import (
     accumulate_preview_text,
-    build_wav_from_pcm,
+    apply_text_corrections,
     deduplicate_timed_prefix_from_base,
-    detect_offline_segments,
     guard_preview_reset_with_stable_prefix,
-    has_unstable_timing_tail,
     has_min_stable_preview_coverage,
+    has_unstable_timing_tail,
     is_abnormal_short_final_chunk,
     is_weak_boundary_suffix,
-    should_guard_preview_reset,
     should_flush_sentence_by_boundary,
+    should_guard_preview_reset,
     trim_latin_stable_prefix,
-    transcribe_audio_payload,
-    transcribe_audio_offline_segmented,
 )
+from transcript_assembler import TranscriptAssembler
+from ws_streaming import WebSocketStreamingSession
 
 
 class DummyWebSocket:
@@ -67,9 +68,9 @@ class AccumulatePreviewTextTests(unittest.TestCase):
 class SenseVoiceVadConfigTests(unittest.TestCase):
     def test_transcribe_audio_payload_forwards_sensevoice_vad_options(self):
         with (
-            patch("whisper_server.get_model", return_value=(object(), True, "cache_hit")) as mock_get_model,
+            patch("asr_engine.get_model", return_value=(object(), True, "cache_hit")) as mock_get_model,
             patch(
-                "whisper_server.transcribe_audio_bytes",
+                "asr_engine.transcribe_audio_bytes",
                 return_value={"success": True, "text": "hello", "language": "en", "word_timings": None},
             ) as mock_transcribe_audio_bytes,
         ):
@@ -105,9 +106,9 @@ class SenseVoiceVadConfigTests(unittest.TestCase):
 
     def test_transcribe_audio_payload_disables_sensevoice_vad_merge_when_vad_model_is_missing(self):
         with (
-            patch("whisper_server.get_model", return_value=(object(), True, "cache_hit")),
+            patch("asr_engine.get_model", return_value=(object(), True, "cache_hit")),
             patch(
-                "whisper_server.transcribe_audio_bytes",
+                "asr_engine.transcribe_audio_bytes",
                 return_value={"success": True, "text": "hello", "language": "en", "word_timings": None},
             ) as mock_transcribe_audio_bytes,
         ):
@@ -272,7 +273,7 @@ class OfflineSegmentedTranscribeTests(unittest.TestCase):
         wav_audio = build_wav_from_pcm(samples.tobytes(), 1000)
 
         with patch(
-            "whisper_server.transcribe_audio_bytes",
+            "asr_engine.transcribe_audio_bytes",
             side_effect=[
                 {"text": "Hello and welcome to", "language": "en", "word_timings": None},
                 {"text": "welcome to Co recursive", "language": "en", "word_timings": None},
