@@ -46,7 +46,7 @@ function isNearBottom(element: HTMLDivElement, thresholdPx = BOTTOM_FOLLOW_THRES
 }
 
 function getInlinePreviewText(segment: SpeakerSegment): string | undefined {
-  const previewText = segment.unstableText || segment.previewText || ''
+  const previewText = segment.unstableText || ''
   if (!previewText.trim()) {
     return undefined
   }
@@ -266,7 +266,7 @@ export function MeetingTranscription({
                   />
                   {/* <WordTimingTrail
                     wordTimings={state.currentSegment.wordTimings}
-                    previewText={state.currentSegment.unstableText || state.currentSegment.previewText}
+                    previewText={state.currentSegment.unstableText}
                     label={m.meeting.liveWordTimings}
                     previewLabel={m.meeting.previewTail}
                   /> */}

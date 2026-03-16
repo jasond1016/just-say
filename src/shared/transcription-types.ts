@@ -14,8 +14,6 @@ export interface SpeakerSegment {
   text: string
   stableText?: string
   unstableText?: string
-  /** Deprecated alias for unstableText. Prefer unstableText for new code. */
-  previewText?: string
   wordTimings?: WordTiming[]
   endpointReason?: string
   translatedText?: string

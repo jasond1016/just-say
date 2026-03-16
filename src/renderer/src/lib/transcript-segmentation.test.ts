@@ -88,7 +88,7 @@ describe('transcript-segmentation', () => {
     const pairs = toSentencePairsFromCurrentLive({
       text: 'かき氷はイチゴ味です',
       stableText: 'かき氷は',
-      previewText: 'イチゴ味です',
+      unstableText: 'イチゴ味です',
       sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
     })
 
@@ -99,7 +99,7 @@ describe('transcript-segmentation', () => {
     const pairs = toSentencePairsFromCurrentLive({
       text: 'かき氷はイチゴ味です',
       stableText: 'かき氷はイチゴ',
-      previewText: '味です',
+      unstableText: '味です',
       sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
     })
 

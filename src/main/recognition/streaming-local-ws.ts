@@ -629,7 +629,6 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       text: liveText,
       stableText: liveStableText || undefined,
       unstableText: this.previewUnstableText || undefined,
-      previewText: this.previewUnstableText || undefined,
       endpointReason: this.endpointReason || undefined,
       wordTimings: this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
       isFinal: false

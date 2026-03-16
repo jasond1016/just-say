@@ -184,7 +184,6 @@ export class MeetingTranscriptionManager extends EventEmitter {
     } else {
       recognizer = new StreamingSonioxRecognizer(this.sonioxConfig)
     }
-    this.recognizer = recognizer
 
     // Set up error handler for pre-connection
     recognizer.on('error', (err: Error) => {
@@ -692,8 +691,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
           segmentTexts: result.segments.map((item) => item.text),
           currentText: result.currentSegment?.text || '',
           currentStableText: result.currentSegment?.stableText || '',
-          currentPreviewText:
-            result.currentSegment?.unstableText || result.currentSegment?.previewText || '',
+          currentPreviewText: result.currentSegment?.unstableText || '',
           combined: result.combined
         })
       )
