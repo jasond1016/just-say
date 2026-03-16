@@ -50,6 +50,10 @@ WS Query（会覆盖 ref.json 的 wsParams）:
   --model <value>
   --sensevoice-model-id <value>
   --sensevoice-use-itn <true|false>
+  --sensevoice-vad-model <value>
+  --sensevoice-vad-merge <true|false>
+  --sensevoice-vad-merge-length-s <n>
+  --sensevoice-vad-max-single-segment-time-ms <n>
   --device <value>
   --compute-type <value>
   --language <value>
@@ -90,6 +94,10 @@ function parseArgs(argv) {
     model: 'model',
     'sensevoice-model-id': 'sensevoice_model_id',
     'sensevoice-use-itn': 'sensevoice_use_itn',
+    'sensevoice-vad-model': 'sensevoice_vad_model',
+    'sensevoice-vad-merge': 'sensevoice_vad_merge',
+    'sensevoice-vad-merge-length-s': 'sensevoice_vad_merge_length_s',
+    'sensevoice-vad-max-single-segment-time-ms': 'sensevoice_vad_max_single_segment_time_ms',
     device: 'device',
     'compute-type': 'compute_type',
     language: 'language',
@@ -190,6 +198,10 @@ function buildHttpTranscribeParams(params) {
     'model',
     'sensevoice_model_id',
     'sensevoice_use_itn',
+    'sensevoice_vad_model',
+    'sensevoice_vad_merge',
+    'sensevoice_vad_merge_length_s',
+    'sensevoice_vad_max_single_segment_time_ms',
     'device',
     'compute_type',
     'language',
@@ -1144,6 +1156,35 @@ async function main() {
     mergedWsParams.sensevoice_use_itn = mergedWsParams.sensevoiceUseItn
     delete mergedWsParams.sensevoiceUseItn
   }
+  if (
+    mergedWsParams.sensevoiceVadModel !== undefined &&
+    mergedWsParams.sensevoice_vad_model === undefined
+  ) {
+    mergedWsParams.sensevoice_vad_model = mergedWsParams.sensevoiceVadModel
+    delete mergedWsParams.sensevoiceVadModel
+  }
+  if (
+    mergedWsParams.sensevoiceVadMerge !== undefined &&
+    mergedWsParams.sensevoice_vad_merge === undefined
+  ) {
+    mergedWsParams.sensevoice_vad_merge = mergedWsParams.sensevoiceVadMerge
+    delete mergedWsParams.sensevoiceVadMerge
+  }
+  if (
+    mergedWsParams.sensevoiceVadMergeLengthS !== undefined &&
+    mergedWsParams.sensevoice_vad_merge_length_s === undefined
+  ) {
+    mergedWsParams.sensevoice_vad_merge_length_s = mergedWsParams.sensevoiceVadMergeLengthS
+    delete mergedWsParams.sensevoiceVadMergeLengthS
+  }
+  if (
+    mergedWsParams.sensevoiceVadMaxSingleSegmentTimeMs !== undefined &&
+    mergedWsParams.sensevoice_vad_max_single_segment_time_ms === undefined
+  ) {
+    mergedWsParams.sensevoice_vad_max_single_segment_time_ms =
+      mergedWsParams.sensevoiceVadMaxSingleSegmentTimeMs
+    delete mergedWsParams.sensevoiceVadMaxSingleSegmentTimeMs
+  }
   if (mergedWsParams.computeType !== undefined && mergedWsParams.compute_type === undefined) {
     mergedWsParams.compute_type = mergedWsParams.computeType
     delete mergedWsParams.computeType
@@ -1174,6 +1215,11 @@ async function main() {
   if (mergedWsParams.sensevoice_use_itn !== undefined) {
     mergedWsParams.sensevoice_use_itn = normalizeBoolString(
       String(mergedWsParams.sensevoice_use_itn)
+    )
+  }
+  if (mergedWsParams.sensevoice_vad_merge !== undefined) {
+    mergedWsParams.sensevoice_vad_merge = normalizeBoolString(
+      String(mergedWsParams.sensevoice_vad_merge)
     )
   }
 

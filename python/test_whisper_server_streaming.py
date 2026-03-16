@@ -19,6 +19,7 @@ from whisper_server import (
     should_guard_preview_reset,
     should_flush_sentence_by_boundary,
     trim_latin_stable_prefix,
+    transcribe_audio_payload,
     transcribe_audio_offline_segmented,
 )
 
@@ -61,6 +62,69 @@ class AccumulatePreviewTextTests(unittest.TestCase):
         )
 
         self.assertEqual(result, "Hello and welcome to Co recursive, I'm Adam Gordon.")
+
+
+class SenseVoiceVadConfigTests(unittest.TestCase):
+    def test_transcribe_audio_payload_forwards_sensevoice_vad_options(self):
+        with (
+            patch("whisper_server.get_model", return_value=(object(), True, "cache_hit")) as mock_get_model,
+            patch(
+                "whisper_server.transcribe_audio_bytes",
+                return_value={"success": True, "text": "hello", "language": "en", "word_timings": None},
+            ) as mock_transcribe_audio_bytes,
+        ):
+            result = transcribe_audio_payload(
+                b"fake-wav",
+                {
+                    "engine": ["sensevoice"],
+                    "sensevoice_model_id": ["FunAudioLLM/SenseVoiceSmall"],
+                    "sensevoice_use_itn": ["true"],
+                    "sensevoice_vad_model": ["fsmn-vad"],
+                    "sensevoice_vad_merge": ["true"],
+                    "sensevoice_vad_merge_length_s": ["12.5"],
+                    "sensevoice_vad_max_single_segment_time_ms": ["42000"],
+                    "language": ["en"],
+                },
+            )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["sensevoice_vad_model"], "fsmn-vad")
+        self.assertTrue(result["sensevoice_vad_merge"])
+        self.assertEqual(result["sensevoice_vad_merge_length_s"], 12.5)
+        self.assertEqual(result["sensevoice_vad_max_single_segment_time_ms"], 42000)
+        self.assertEqual(mock_get_model.call_args.kwargs["sensevoice_vad_model"], "fsmn-vad")
+        self.assertEqual(
+            mock_get_model.call_args.kwargs["sensevoice_vad_max_single_segment_time_ms"],
+            42000,
+        )
+        self.assertTrue(mock_transcribe_audio_bytes.call_args.kwargs["sensevoice_vad_merge"])
+        self.assertEqual(
+            mock_transcribe_audio_bytes.call_args.kwargs["sensevoice_vad_merge_length_s"],
+            12.5,
+        )
+
+    def test_transcribe_audio_payload_disables_sensevoice_vad_merge_when_vad_model_is_missing(self):
+        with (
+            patch("whisper_server.get_model", return_value=(object(), True, "cache_hit")),
+            patch(
+                "whisper_server.transcribe_audio_bytes",
+                return_value={"success": True, "text": "hello", "language": "en", "word_timings": None},
+            ) as mock_transcribe_audio_bytes,
+        ):
+            result = transcribe_audio_payload(
+                b"fake-wav",
+                {
+                    "engine": ["sensevoice"],
+                    "sensevoice_use_itn": ["true"],
+                    "sensevoice_vad_merge": ["true"],
+                    "language": ["en"],
+                },
+            )
+
+        self.assertTrue(result["success"])
+        self.assertIsNone(result["sensevoice_vad_model"])
+        self.assertFalse(result["sensevoice_vad_merge"])
+        self.assertFalse(mock_transcribe_audio_bytes.call_args.kwargs["sensevoice_vad_merge"])
 
 
 class WordTimingHeuristicsTests(unittest.TestCase):
@@ -359,6 +423,17 @@ class StreamingSessionPreviewTests(unittest.TestCase):
             "5ive minutes of noodling around with it, it was obvious to me that this was years ahead.",
         )
 
+    def test_emit_preview_keeps_previous_english_context_for_short_rolling_tail(self):
+        assembler = TranscriptAssembler(lambda text: text, [])
+        assembler.current_preview_text = "And so I did what one did in those days."
+        assembler.current_preview_stable_text = "And so I"
+        assembler.current_preview_unstable_text = "did what one did in those days."
+
+        event = assembler.build_interim_event("when.", word_timings=None)
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["text"], "And so I did what one did in those days when.")
+
     def test_emit_final_defers_max_chunk_without_preview_stability_evidence(self):
         websocket = DummyWebSocket()
         session = WebSocketStreamingSession(websocket, {})
@@ -579,6 +654,33 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         self.assertEqual(final_chunks, [])
         self.assertEqual(session.pending_final_chunk, "プはイチゴやメロンが定番です。")
 
+    def test_emit_final_commits_english_stable_preview_prefix_on_max_chunk(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {"language": ["en"]})
+        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(max_chunk_pcm)
+        session.pending_new_bytes = len(max_chunk_pcm)
+        session.buffer_start_at = 1.0
+        session.current_preview_stable_text = "Hello and welcome to the streaming benchmark"
+        session.current_preview_unstable_text = "today"
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "Hello and welcome to the streaming benchmark today",
+            "word_timings": [
+                {"text": "today", "startMs": 0, "endMs": 420},
+            ],
+        }
+
+        session.emit_final("max_chunk")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(final_chunks[0]["text"], "Hello and welcome to the streaming benchmark")
+        self.assertIsNone(final_chunks[0]["wordTimings"])
+        self.assertEqual(session.final_text_raw, "Hello and welcome to the streaming benchmark")
+        self.assertEqual(session.pending_final_chunk, "today")
+        self.assertIsNone(session.pending_final_word_timings)
+
     def test_emit_final_defers_short_silence_chunk_until_more_context_arrives(self):
         websocket = DummyWebSocket()
         session = WebSocketStreamingSession(websocket, {})
@@ -676,4 +778,3 @@ class StreamingSessionPreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

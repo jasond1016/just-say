@@ -31,6 +31,7 @@ from websockets.exceptions import ConnectionClosed, InvalidUpgrade
 from websockets.sync.server import serve
 
 DEFAULT_SENSEVOICE_MODEL_ID = "FunAudioLLM/SenseVoiceSmall"
+DEFAULT_SENSEVOICE_VAD_MODEL = "fsmn-vad"
 
 
 def add_nvidia_paths():
@@ -70,6 +71,8 @@ _model_info = {
     "engine": None,
     "model_type": None,
     "sensevoice_model_id": None,
+    "sensevoice_vad_model": None,
+    "sensevoice_vad_max_single_segment_time_ms": None,
     "device": None,
     "compute_type": None,
     "download_root": None,
@@ -83,6 +86,10 @@ _runtime_policy = {
     "default_language": None,
     "sensevoice_model_id": DEFAULT_SENSEVOICE_MODEL_ID,
     "sensevoice_use_itn": True,
+    "sensevoice_vad_model": None,
+    "sensevoice_vad_merge": True,
+    "sensevoice_vad_merge_length_s": 15.0,
+    "sensevoice_vad_max_single_segment_time_ms": 30000,
     "device": "cpu",
     "compute_type": "int8",
     "download_root": None,
@@ -226,16 +233,35 @@ def load_faster_whisper_model(model_type: str, device: str, compute_type: str, d
     )
 
 
-def load_sensevoice_model(sensevoice_model_id: str, device: str, download_root: str | None):
+def load_sensevoice_model(
+    sensevoice_model_id: str,
+    device: str,
+    download_root: str | None,
+    *,
+    sensevoice_vad_model: str | None = None,
+    sensevoice_vad_max_single_segment_time_ms: int | None = None,
+):
     from funasr import AutoModel
 
     ensure_download_env(download_root)
     resolved_device = resolve_sensevoice_device(device)
+    options = {
+        "model": sensevoice_model_id,
+        "device": resolved_device,
+        "hub": "hf",
+        "disable_update": True,
+    }
+    if sensevoice_vad_model:
+        options["vad_model"] = sensevoice_vad_model
+        if (
+            isinstance(sensevoice_vad_max_single_segment_time_ms, int)
+            and sensevoice_vad_max_single_segment_time_ms > 0
+        ):
+            options["vad_kwargs"] = {
+                "max_single_segment_time": sensevoice_vad_max_single_segment_time_ms
+            }
     return AutoModel(
-        model=sensevoice_model_id,
-        device=resolved_device,
-        hub="hf",
-        disable_update=True,
+        **options,
     )
 
 
@@ -270,6 +296,8 @@ def get_model(
     engine: str,
     model_type: str | None,
     sensevoice_model_id: str,
+    sensevoice_vad_model: str | None,
+    sensevoice_vad_max_single_segment_time_ms: int | None,
     device: str,
     compute_type: str,
     download_root: str | None,
@@ -289,6 +317,13 @@ def get_model(
             reload_reasons.append("model_type_changed")
         if _model_info["sensevoice_model_id"] != sensevoice_model_id:
             reload_reasons.append("sensevoice_model_id_changed")
+        if _model_info["sensevoice_vad_model"] != sensevoice_vad_model:
+            reload_reasons.append("sensevoice_vad_model_changed")
+        if (
+            _model_info["sensevoice_vad_max_single_segment_time_ms"]
+            != sensevoice_vad_max_single_segment_time_ms
+        ):
+            reload_reasons.append("sensevoice_vad_max_single_segment_time_ms_changed")
         if _model_info["device"] != device:
             reload_reasons.append("device_changed")
         if _model_info["compute_type"] != compute_type:
@@ -303,10 +338,18 @@ def get_model(
             if engine == "sensevoice":
                 print(
                     f"[Server] Loading model: engine={engine}, model={sensevoice_model_id}, "
+                    f"vad_model={sensevoice_vad_model or 'off'}, "
+                    f"vad_max_single_segment_time_ms={sensevoice_vad_max_single_segment_time_ms or '-'}, "
                     f"device={device}, compute={compute_type}",
                     flush=True,
                 )
-                _model = load_sensevoice_model(sensevoice_model_id, device, download_root)
+                _model = load_sensevoice_model(
+                    sensevoice_model_id,
+                    device,
+                    download_root,
+                    sensevoice_vad_model=sensevoice_vad_model,
+                    sensevoice_vad_max_single_segment_time_ms=sensevoice_vad_max_single_segment_time_ms,
+                )
             else:
                 print(
                     f"[Server] Loading model: engine={engine}, model={model_type}, "
@@ -320,6 +363,10 @@ def get_model(
                     "engine": engine,
                     "model_type": normalized_model_type,
                     "sensevoice_model_id": sensevoice_model_id,
+                    "sensevoice_vad_model": sensevoice_vad_model,
+                    "sensevoice_vad_max_single_segment_time_ms": (
+                        sensevoice_vad_max_single_segment_time_ms
+                    ),
                     "device": device,
                     "compute_type": compute_type,
                     "download_root": download_root,
@@ -655,18 +702,27 @@ def transcribe_with_sensevoice(
     temp_path: str,
     language: str | None,
     sensevoice_use_itn: bool,
+    sensevoice_vad_merge: bool,
+    sensevoice_vad_merge_length_s: float,
     output_word_timestamps: bool,
 ):
     from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
     final_language = language if language and language != "auto" else "auto"
+    options = {
+        "input": temp_path,
+        "cache": {},
+        "language": final_language,
+        "use_itn": sensevoice_use_itn,
+        "batch_size_s": 60,
+        "output_timestamp": output_word_timestamps,
+    }
+    if sensevoice_vad_merge:
+        options["merge_vad"] = True
+        if isinstance(sensevoice_vad_merge_length_s, (int, float)) and sensevoice_vad_merge_length_s > 0:
+            options["merge_length_s"] = float(sensevoice_vad_merge_length_s)
     result = model.generate(
-        input=temp_path,
-        cache={},
-        language=final_language,
-        use_itn=sensevoice_use_itn,
-        batch_size_s=60,
-        output_timestamp=output_word_timestamps,
+        **options,
     )
 
     item = None
@@ -704,6 +760,8 @@ def transcribe_temp_path(
     temp_path: str,
     language: str | None,
     sensevoice_use_itn: bool,
+    sensevoice_vad_merge: bool,
+    sensevoice_vad_merge_length_s: float,
     output_word_timestamps: bool,
 ) -> dict:
     if engine == "sensevoice":
@@ -712,6 +770,8 @@ def transcribe_temp_path(
             temp_path,
             language,
             sensevoice_use_itn,
+            sensevoice_vad_merge,
+            sensevoice_vad_merge_length_s,
             output_word_timestamps,
         )
     return transcribe_with_faster_whisper(model, temp_path, language)
@@ -724,6 +784,8 @@ def transcribe_audio_bytes(
     audio_data: bytes,
     language: str | None,
     sensevoice_use_itn: bool,
+    sensevoice_vad_merge: bool,
+    sensevoice_vad_merge_length_s: float,
     output_word_timestamps: bool,
 ) -> dict:
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
@@ -737,6 +799,8 @@ def transcribe_audio_bytes(
             temp_path=temp_path,
             language=language,
             sensevoice_use_itn=sensevoice_use_itn,
+            sensevoice_vad_merge=sensevoice_vad_merge,
+            sensevoice_vad_merge_length_s=sensevoice_vad_merge_length_s,
             output_word_timestamps=output_word_timestamps,
         )
     finally:
@@ -753,6 +817,8 @@ def transcribe_audio_offline_segmented(
     audio_data: bytes,
     language: str | None,
     sensevoice_use_itn: bool,
+    sensevoice_vad_merge: bool,
+    sensevoice_vad_merge_length_s: float,
     output_word_timestamps: bool,
     silence_ms: int,
     min_speech_rms: int,
@@ -806,6 +872,8 @@ def transcribe_audio_offline_segmented(
             audio_data=encode_wav_pcm16_mono(segment_pcm, sample_rate),
             language=language,
             sensevoice_use_itn=sensevoice_use_itn,
+            sensevoice_vad_merge=sensevoice_vad_merge,
+            sensevoice_vad_merge_length_s=sensevoice_vad_merge_length_s,
             output_word_timestamps=output_word_timestamps,
         )
         segment_text = str(segment_payload.get("text") or "").strip()
@@ -852,10 +920,19 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     default_engine = _model_info["engine"] or _runtime_policy["engine"] or "faster-whisper"
     default_model_type = _model_info["model_type"] or _runtime_policy["default_model_type"] or "tiny"
     default_sensevoice_model_id = _model_info["sensevoice_model_id"] or _runtime_policy["sensevoice_model_id"]
+    default_sensevoice_vad_model = (
+        _model_info["sensevoice_vad_model"] or _runtime_policy["sensevoice_vad_model"]
+    )
+    default_sensevoice_vad_max_single_segment_time_ms = (
+        _model_info["sensevoice_vad_max_single_segment_time_ms"]
+        or _runtime_policy["sensevoice_vad_max_single_segment_time_ms"]
+    )
     default_device = _model_info["device"] or _runtime_policy["device"] or "cpu"
     default_compute_type = _model_info["compute_type"] or _runtime_policy["compute_type"] or "int8"
     default_language = _runtime_policy["default_language"]
     default_sensevoice_use_itn = _runtime_policy["sensevoice_use_itn"]
+    default_sensevoice_vad_merge = _runtime_policy["sensevoice_vad_merge"]
+    default_sensevoice_vad_merge_length_s = _runtime_policy["sensevoice_vad_merge_length_s"]
     default_download_root = _model_info["download_root"] or _runtime_policy["download_root"]
 
     requested_engine = params.get("engine", [default_engine])[0]
@@ -864,6 +941,24 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
     requested_sensevoice_use_itn = parse_bool(
         params.get("sensevoice_use_itn", [default_sensevoice_use_itn])[0],
         default_sensevoice_use_itn,
+    )
+    requested_sensevoice_vad_model = (
+        params.get("sensevoice_vad_model", [default_sensevoice_vad_model])[0] or None
+    )
+    requested_sensevoice_vad_merge = parse_bool(
+        params.get("sensevoice_vad_merge", [default_sensevoice_vad_merge])[0],
+        default_sensevoice_vad_merge,
+    )
+    requested_sensevoice_vad_merge_length_s = float(
+        params.get("sensevoice_vad_merge_length_s", [default_sensevoice_vad_merge_length_s])[0]
+        or default_sensevoice_vad_merge_length_s
+    )
+    requested_sensevoice_vad_max_single_segment_time_ms = parse_positive_int(
+        params.get(
+            "sensevoice_vad_max_single_segment_time_ms",
+            [default_sensevoice_vad_max_single_segment_time_ms],
+        )[0],
+        default_sensevoice_vad_max_single_segment_time_ms,
     )
     requested_device = params.get("device", [default_device])[0]
     requested_compute_type = params.get("compute_type", [default_compute_type])[0]
@@ -888,16 +983,27 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
         model_type = default_model_type if default_engine == "faster-whisper" else None
         sensevoice_model_id = default_sensevoice_model_id
         sensevoice_use_itn = default_sensevoice_use_itn
+        sensevoice_vad_model = default_sensevoice_vad_model
+        sensevoice_vad_merge = default_sensevoice_vad_merge
+        sensevoice_vad_merge_length_s = default_sensevoice_vad_merge_length_s
+        sensevoice_vad_max_single_segment_time_ms = default_sensevoice_vad_max_single_segment_time_ms
     else:
         engine = requested_engine
         model_type = requested_model_type if engine == "faster-whisper" else None
         sensevoice_model_id = requested_sensevoice_model_id
         sensevoice_use_itn = requested_sensevoice_use_itn
+        sensevoice_vad_model = requested_sensevoice_vad_model
+        sensevoice_vad_merge = requested_sensevoice_vad_merge
+        sensevoice_vad_merge_length_s = requested_sensevoice_vad_merge_length_s
+        sensevoice_vad_max_single_segment_time_ms = requested_sensevoice_vad_max_single_segment_time_ms
 
     if _runtime_policy["lock_language"]:
         language = default_language
     else:
         language = requested_language
+
+    if not sensevoice_vad_model:
+        sensevoice_vad_merge = False
 
     if _runtime_policy["lock_device_compute"]:
         requested_device = _runtime_policy["device"]
@@ -918,6 +1024,8 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
             engine=engine,
             model_type=model_type,
             sensevoice_model_id=sensevoice_model_id,
+            sensevoice_vad_model=sensevoice_vad_model,
+            sensevoice_vad_max_single_segment_time_ms=sensevoice_vad_max_single_segment_time_ms,
             device=device,
             compute_type=compute_type,
             download_root=download_root,
@@ -930,6 +1038,8 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
                 audio_data=audio_data,
                 language=language,
                 sensevoice_use_itn=sensevoice_use_itn,
+                sensevoice_vad_merge=sensevoice_vad_merge,
+                sensevoice_vad_merge_length_s=sensevoice_vad_merge_length_s,
                 output_word_timestamps=output_word_timestamps,
                 silence_ms=max(60, offline_segment_silence_ms),
                 min_speech_rms=max(50, offline_segment_min_speech_rms),
@@ -945,6 +1055,8 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
                 audio_data=audio_data,
                 language=language,
                 sensevoice_use_itn=sensevoice_use_itn,
+                sensevoice_vad_merge=sensevoice_vad_merge,
+                sensevoice_vad_merge_length_s=sensevoice_vad_merge_length_s,
                 output_word_timestamps=output_word_timestamps,
             )
 
@@ -961,6 +1073,10 @@ def transcribe_audio_payload(audio_data: bytes, params: dict) -> dict:
             "processing_time": time.time() - start_time,
             "engine": engine,
             "model": model_type if engine == "faster-whisper" else sensevoice_model_id,
+            "sensevoice_vad_model": sensevoice_vad_model,
+            "sensevoice_vad_merge": sensevoice_vad_merge,
+            "sensevoice_vad_merge_length_s": sensevoice_vad_merge_length_s,
+            "sensevoice_vad_max_single_segment_time_ms": sensevoice_vad_max_single_segment_time_ms,
             "device": device,
             "compute_type": compute_type,
             "model_reused": model_reused,
@@ -1289,6 +1405,32 @@ def accumulate_preview_text(previous: str, incoming: str) -> str:
     return normalized_incoming
 
 
+def try_preserve_previous_preview(previous_preview: str, incoming_preview: str) -> str | None:
+    normalized_previous = (previous_preview or "").strip()
+    normalized_incoming = (incoming_preview or "").strip()
+    if not normalized_previous or not normalized_incoming:
+        return None
+    if not is_latin_dominant_text(normalized_previous) and not is_latin_dominant_text(normalized_incoming):
+        return None
+
+    previous_chars = count_meaningful_chars(normalized_previous)
+    incoming_chars = count_meaningful_chars(normalized_incoming)
+    if previous_chars < 18 or incoming_chars < 2:
+        return None
+    if incoming_chars > ENGLISH_PREVIEW_RESET_MAX_INCOMING_CHARS:
+        return None
+
+    trimmed_previous = normalized_previous.rstrip("。！？!?.，、,;；:： \t\r\n")
+    if not trimmed_previous:
+        return None
+
+    overlap = find_text_overlap(trimmed_previous, normalized_incoming, 200)
+    if overlap > 0:
+        return merge_text(trimmed_previous, normalized_incoming[overlap:])
+
+    return merge_text(trimmed_previous, normalized_incoming)
+
+
 def normalize_japanese_spacing(text: str) -> str:
     if not text:
         return text
@@ -1403,6 +1545,10 @@ ENGLISH_STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
 ENGLISH_PREVIEW_STABILITY_WINDOW = 4
 ENGLISH_PREVIEW_STABLE_TAIL_CHARS = 6
 ENGLISH_PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 4
+ENGLISH_PREVIEW_RESET_MIN_STABLE_CHARS = 6
+ENGLISH_PREVIEW_RESET_MAX_INCOMING_CHARS = 12
+ENGLISH_COMMIT_STABLE_PREFIX_MIN_CHARS = 18
+ENGLISH_COMMIT_STABLE_PREFIX_MIN_REMAINING_CHARS = 2
 ENGLISH_SILENCE_THRESHOLD_MULTIPLIER = 1.5
 ENGLISH_SILENCE_THRESHOLD_MIN_MS = 900
 
@@ -1804,7 +1950,10 @@ def should_guard_preview_reset(
     previous_chars = count_meaningful_chars(normalized_previous)
     incoming_chars = count_meaningful_chars(normalized_incoming)
     stable_chars = count_meaningful_chars(normalized_stable)
-    if previous_chars < 18 or incoming_chars < 4 or stable_chars < 8:
+    min_stable_chars = 8
+    if is_latin_dominant_text(normalized_previous) or is_latin_dominant_text(normalized_incoming):
+        min_stable_chars = ENGLISH_PREVIEW_RESET_MIN_STABLE_CHARS
+    if previous_chars < 18 or incoming_chars < 4 or stable_chars < min_stable_chars:
         return False
     if incoming_chars > max(12, int(previous_chars * 0.72)):
         return False
@@ -1817,9 +1966,16 @@ def should_guard_preview_reset(
     return True
 
 
-def guard_preview_reset_with_stable_prefix(stable_prefix: str, incoming_preview: str) -> str:
+def guard_preview_reset_with_stable_prefix(
+    stable_prefix: str,
+    incoming_preview: str,
+    previous_preview: str = "",
+) -> str:
     normalized_stable = (stable_prefix or "").strip()
     normalized_incoming = (incoming_preview or "").strip()
+    preserved_preview = try_preserve_previous_preview(previous_preview, normalized_incoming)
+    if preserved_preview:
+        return preserved_preview
     if not normalized_stable:
         return normalized_incoming
     if not normalized_incoming:
@@ -1984,6 +2140,32 @@ def find_committable_sentence_prefix(
     return best_split
 
 
+def find_committable_stable_preview_prefix(
+    text: str,
+    stable_preview: str,
+    *,
+    min_prefix_chars: int = ENGLISH_COMMIT_STABLE_PREFIX_MIN_CHARS,
+    min_remaining_chars: int = ENGLISH_COMMIT_STABLE_PREFIX_MIN_REMAINING_CHARS,
+) -> tuple[str, str] | None:
+    normalized = (text or "").strip()
+    normalized_stable = (stable_preview or "").strip()
+    if not normalized or not normalized_stable:
+        return None
+    if not normalized.startswith(normalized_stable):
+        return None
+
+    prefix = normalized_stable.rstrip(" \t\r\n,;:：，、-")
+    if not prefix or prefix == normalized:
+        return None
+    if count_meaningful_chars(prefix) < min_prefix_chars:
+        return None
+
+    remaining = normalized[len(prefix) :].lstrip()
+    if count_meaningful_chars(remaining) < min_remaining_chars:
+        return None
+    return prefix, remaining
+
+
 class TranscriptAssembler:
     """Owns transcript semantics for one streaming session."""
 
@@ -2076,6 +2258,7 @@ class TranscriptAssembler:
                 guard_preview_reset_with_stable_prefix(
                     self.current_preview_stable_text,
                     deduped_preview_text,
+                    self.current_preview_text,
                 )
             )
         self.current_preview_text = normalized_accumulated
@@ -2164,6 +2347,32 @@ class TranscriptAssembler:
         )
         if commit_timings is None:
             return False, []
+
+        self.pending_final_chunk = commit_text
+        self.pending_final_word_timings = commit_timings
+        events = self.commit_pending_final_chunk(reason)
+        self.pending_final_chunk = remaining_text
+        self.pending_final_word_timings = remaining_timings
+        return True, events
+
+    def commit_stable_preview_prefix_if_possible(
+        self,
+        stable_preview: str,
+        reason: str,
+    ) -> tuple[bool, list[dict]]:
+        split = find_committable_stable_preview_prefix(self.pending_final_chunk, stable_preview)
+        if not split:
+            return False, []
+
+        commit_text, remaining_text = split
+        commit_timings, remaining_timings = split_word_timings_by_prefix(
+            self.pending_final_word_timings,
+            commit_text,
+        )
+        if commit_timings is None:
+            if not is_latin_dominant_text(commit_text):
+                return False, []
+            remaining_timings = None
 
         self.pending_final_chunk = commit_text
         self.pending_final_word_timings = commit_timings
@@ -2388,9 +2597,19 @@ class WebSocketStreamingSession:
             self.emit_json(event)
         return committed
 
+    def commit_stable_preview_prefix_if_possible(self, reason: str) -> bool:
+        committed, events = self.assembler.commit_stable_preview_prefix_if_possible(
+            self.current_preview_stable_text,
+            reason,
+        )
+        for event in events:
+            self.emit_json(event)
+        return committed
+
     def should_defer_final_chunk(
         self, candidate: str, reason: str, word_timings: list[dict] | None = None
     ) -> bool:
+        return False
         normalized = candidate.strip()
         if not normalized:
             return False
@@ -2447,7 +2666,12 @@ class WebSocketStreamingSession:
             )
         if deduped.strip():
             self.assembler.queue_final_chunk(deduped, final_word_timings)
-            if reason in {"max_chunk", "silence"} and self.commit_sentence_prefix_if_possible(reason):
+            committed_prefix = False
+            if reason in {"max_chunk", "silence"}:
+                committed_prefix = self.commit_sentence_prefix_if_possible(reason)
+            if not committed_prefix and reason == "max_chunk" and self.is_english_session():
+                committed_prefix = self.commit_stable_preview_prefix_if_possible(reason)
+            if committed_prefix:
                 if self.pending_final_chunk and not self.should_defer_final_chunk(
                     self.pending_final_chunk,
                     reason,
@@ -2593,6 +2817,12 @@ class WhisperHandler(BaseHTTPRequestHandler):
                         "default_language": _runtime_policy["default_language"],
                         "sensevoice_model_id": _runtime_policy["sensevoice_model_id"],
                         "sensevoice_use_itn": _runtime_policy["sensevoice_use_itn"],
+                        "sensevoice_vad_model": _runtime_policy["sensevoice_vad_model"],
+                        "sensevoice_vad_merge": _runtime_policy["sensevoice_vad_merge"],
+                        "sensevoice_vad_merge_length_s": _runtime_policy["sensevoice_vad_merge_length_s"],
+                        "sensevoice_vad_max_single_segment_time_ms": _runtime_policy[
+                            "sensevoice_vad_max_single_segment_time_ms"
+                        ],
                         "device": _runtime_policy["device"],
                         "compute_type": _runtime_policy["compute_type"],
                     },
@@ -2624,6 +2854,10 @@ class WhisperHandler(BaseHTTPRequestHandler):
                     "query_options": {
                         "return_word_timestamps": "Set to true to request optional per-word timings when supported",
                         "text_corrections": "Optional JSON object with user-configurable text correction entries",
+                        "sensevoice_vad_model": "Optional FunASR VAD model id for SenseVoice, for example fsmn-vad",
+                        "sensevoice_vad_merge": "Set to true to merge VAD segments in SenseVoice output",
+                        "sensevoice_vad_merge_length_s": "Optional SenseVoice VAD merge length in seconds",
+                        "sensevoice_vad_max_single_segment_time_ms": "Optional SenseVoice VAD max single segment time in milliseconds",
                     },
                 }
             )
@@ -2682,6 +2916,17 @@ class WhisperHandler(BaseHTTPRequestHandler):
             "model": [data.get("model", _runtime_policy["default_model_type"])],
             "sensevoice_model_id": [data.get("sensevoice_model_id", _runtime_policy["sensevoice_model_id"])],
             "sensevoice_use_itn": [data.get("sensevoice_use_itn", _runtime_policy["sensevoice_use_itn"])],
+            "sensevoice_vad_model": [data.get("sensevoice_vad_model", _runtime_policy["sensevoice_vad_model"])],
+            "sensevoice_vad_merge": [data.get("sensevoice_vad_merge", _runtime_policy["sensevoice_vad_merge"])],
+            "sensevoice_vad_merge_length_s": [
+                data.get("sensevoice_vad_merge_length_s", _runtime_policy["sensevoice_vad_merge_length_s"])
+            ],
+            "sensevoice_vad_max_single_segment_time_ms": [
+                data.get(
+                    "sensevoice_vad_max_single_segment_time_ms",
+                    _runtime_policy["sensevoice_vad_max_single_segment_time_ms"],
+                )
+            ],
             "device": [data.get("device", _runtime_policy["device"])],
             "compute_type": [data.get("compute_type", _runtime_policy["compute_type"])],
             "language": [data.get("language")],
@@ -2746,6 +2991,24 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 data.get("sensevoice_use_itn", _runtime_policy["sensevoice_use_itn"]),
                 _runtime_policy["sensevoice_use_itn"],
             )
+            sensevoice_vad_model = data.get("sensevoice_vad_model", _runtime_policy["sensevoice_vad_model"])
+            sensevoice_vad_merge = parse_bool(
+                data.get("sensevoice_vad_merge", _runtime_policy["sensevoice_vad_merge"]),
+                _runtime_policy["sensevoice_vad_merge"],
+            )
+            sensevoice_vad_merge_length_s = float(
+                data.get(
+                    "sensevoice_vad_merge_length_s",
+                    _runtime_policy["sensevoice_vad_merge_length_s"],
+                )
+            )
+            sensevoice_vad_max_single_segment_time_ms = parse_positive_int(
+                data.get(
+                    "sensevoice_vad_max_single_segment_time_ms",
+                    _runtime_policy["sensevoice_vad_max_single_segment_time_ms"],
+                ),
+                _runtime_policy["sensevoice_vad_max_single_segment_time_ms"],
+            )
             device = data.get("device", _runtime_policy["device"])
             compute_type = data.get("compute_type", _runtime_policy["compute_type"])
             download_root = data.get("download_root")
@@ -2759,6 +3022,8 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 engine=engine,
                 model_type=model_type,
                 sensevoice_model_id=sensevoice_model_id,
+                sensevoice_vad_model=sensevoice_vad_model,
+                sensevoice_vad_max_single_segment_time_ms=sensevoice_vad_max_single_segment_time_ms,
                 device=device,
                 compute_type=compute_type,
                 download_root=download_root,
@@ -2770,6 +3035,12 @@ class WhisperHandler(BaseHTTPRequestHandler):
                     "engine": engine,
                     "model": model_type if engine == "faster-whisper" else sensevoice_model_id,
                     "sensevoice_use_itn": sensevoice_use_itn,
+                    "sensevoice_vad_model": sensevoice_vad_model,
+                    "sensevoice_vad_merge": sensevoice_vad_merge,
+                    "sensevoice_vad_merge_length_s": sensevoice_vad_merge_length_s,
+                    "sensevoice_vad_max_single_segment_time_ms": (
+                        sensevoice_vad_max_single_segment_time_ms
+                    ),
                     "model_reused": model_reused,
                     "reload_reason": reload_reason,
                 }
@@ -2786,6 +3057,8 @@ class WhisperHandler(BaseHTTPRequestHandler):
                 "engine": None,
                 "model_type": None,
                 "sensevoice_model_id": None,
+                "sensevoice_vad_model": None,
+                "sensevoice_vad_max_single_segment_time_ms": None,
                 "device": None,
                 "compute_type": None,
                 "download_root": None,
@@ -2874,6 +3147,28 @@ def main():
         help="SenseVoice inverse text normalization (true/false)",
     )
     parser.add_argument(
+        "--sensevoice-vad-model",
+        default=None,
+        help="Optional SenseVoice/FunASR VAD model id, for example fsmn-vad",
+    )
+    parser.add_argument(
+        "--sensevoice-vad-merge",
+        default="true",
+        help="Whether SenseVoice should merge VAD segments (true/false)",
+    )
+    parser.add_argument(
+        "--sensevoice-vad-merge-length-s",
+        type=float,
+        default=15.0,
+        help="SenseVoice VAD merge length in seconds",
+    )
+    parser.add_argument(
+        "--sensevoice-vad-max-single-segment-time-ms",
+        type=int,
+        default=30000,
+        help="SenseVoice VAD max single segment time in milliseconds",
+    )
+    parser.add_argument(
         "--lock-model",
         action="store_true",
         help="Ignore request engine/model and always use startup values",
@@ -2902,6 +3197,12 @@ def main():
     _runtime_policy["default_language"] = args.default_language
     _runtime_policy["sensevoice_model_id"] = args.sensevoice_model_id
     _runtime_policy["sensevoice_use_itn"] = parse_bool(args.sensevoice_use_itn, True)
+    _runtime_policy["sensevoice_vad_model"] = args.sensevoice_vad_model or None
+    _runtime_policy["sensevoice_vad_merge"] = parse_bool(args.sensevoice_vad_merge, True)
+    _runtime_policy["sensevoice_vad_merge_length_s"] = args.sensevoice_vad_merge_length_s
+    _runtime_policy["sensevoice_vad_max_single_segment_time_ms"] = (
+        args.sensevoice_vad_max_single_segment_time_ms
+    )
     _runtime_policy["device"] = args.device
     _runtime_policy["compute_type"] = args.compute_type
     _runtime_policy["download_root"] = args.download_root
@@ -2927,6 +3228,10 @@ def main():
                 engine=args.engine,
                 model_type=preload_model_type,
                 sensevoice_model_id=args.sensevoice_model_id,
+                sensevoice_vad_model=args.sensevoice_vad_model or None,
+                sensevoice_vad_max_single_segment_time_ms=(
+                    args.sensevoice_vad_max_single_segment_time_ms
+                ),
                 device=preload_device,
                 compute_type=args.compute_type,
                 download_root=args.download_root,
@@ -2968,5 +3273,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

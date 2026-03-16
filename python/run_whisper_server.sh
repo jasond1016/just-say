@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+LISTEN_HOST="${LISTEN_HOST:-127.0.0.1}"
+PORT="${PORT:-8765}"
+WS_PORT="${WS_PORT:-8766}"
+SENSEVOICE_MODEL_ID="${SENSEVOICE_MODEL_ID:-FunAudioLLM/SenseVoiceSmall}"
+#SENSEVOICE_VAD_MODEL="${SENSEVOICE_VAD_MODEL:-fsmn-vad}"
+SENSEVOICE_VAD_MERGE="${SENSEVOICE_VAD_MERGE:-true}"
+SENSEVOICE_VAD_MERGE_LENGTH_S="${SENSEVOICE_VAD_MERGE_LENGTH_S:-15}"
+SENSEVOICE_VAD_MAX_SINGLE_SEGMENT_TIME_MS="${SENSEVOICE_VAD_MAX_SINGLE_SEGMENT_TIME_MS:-30000}"
+DISABLE_SENSEVOICE_VAD="${DISABLE_SENSEVOICE_VAD:-false}"
+DOWNLOAD_ROOT="${DOWNLOAD_ROOT:-./.cache/models}"
+COMPUTE_TYPE="${COMPUTE_TYPE:-float16}"
+LOCK_MODEL="${LOCK_MODEL:-false}"
+NO_LOCK_DEVICE_COMPUTE="${NO_LOCK_DEVICE_COMPUTE:-false}"
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="${VENV_DIR:-$SCRIPT_DIR/.venv}"
 PYTHON_BIN="${PYTHON_BIN:-$VENV_DIR/bin/python}"
@@ -16,6 +30,8 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "[Wrapper] Hint: run 'cd $SCRIPT_DIR && uv sync' first, or set PYTHON_BIN" >&2
   exit 1
 fi
+
+RESOLVED_DOWNLOAD_ROOT="$("$PYTHON_BIN" -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$SCRIPT_DIR/$DOWNLOAD_ROOT")"
 
 mapfile -t NVIDIA_LIB_DIRS < <("$PYTHON_BIN" - <<'PY'
 import os
@@ -72,5 +88,70 @@ fi
 
 echo "[Wrapper] Python: $PYTHON_BIN"
 echo "[Wrapper] LD_LIBRARY_PATH: ${LD_LIBRARY_PATH:-}"
+echo "[Wrapper] Download root: $RESOLVED_DOWNLOAD_ROOT"
+if [[ "$DISABLE_SENSEVOICE_VAD" == "true" ]]; then
+  echo "[Wrapper] SenseVoice VAD: disabled"
+else
+  echo "[Wrapper] SenseVoice VAD: ${SENSEVOICE_VAD_MODEL:-off}"
+fi
 
-exec "$PYTHON_BIN" "$SERVER_SCRIPT" "$@"
+ORIGINAL_ARGS=("$@")
+ARGS=("$SERVER_SCRIPT")
+
+has_arg() {
+  local key="$1"
+  for arg in "${ORIGINAL_ARGS[@]}"; do
+    if [[ "$arg" == "$key" || "$arg" == "$key="* ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+add_default_option() {
+  local key="$1"
+  local value="$2"
+  if ! has_arg "$key"; then
+    ARGS+=("$key" "$value")
+  fi
+}
+
+add_default_flag() {
+  local key="$1"
+  if ! has_arg "$key"; then
+    ARGS+=("$key")
+  fi
+}
+
+add_default_option "--host" "$LISTEN_HOST"
+add_default_option "--port" "$PORT"
+add_default_option "--ws-port" "$WS_PORT"
+add_default_option "--engine" "sensevoice"
+add_default_option "--sensevoice-model-id" "$SENSEVOICE_MODEL_ID"
+add_default_option "--sensevoice-use-itn" "true"
+add_default_option "--device" "cuda"
+add_default_option "--compute-type" "$COMPUTE_TYPE"
+add_default_option "--download-root" "$RESOLVED_DOWNLOAD_ROOT"
+
+if [[ "$DISABLE_SENSEVOICE_VAD" != "true" ]]; then
+  if [[ -n "${SENSEVOICE_VAD_MODEL:-}" ]]; then
+    add_default_option "--sensevoice-vad-model" "$SENSEVOICE_VAD_MODEL"
+  fi
+  add_default_option "--sensevoice-vad-merge" "$SENSEVOICE_VAD_MERGE"
+  add_default_option "--sensevoice-vad-merge-length-s" "$SENSEVOICE_VAD_MERGE_LENGTH_S"
+  add_default_option "--sensevoice-vad-max-single-segment-time-ms" "$SENSEVOICE_VAD_MAX_SINGLE_SEGMENT_TIME_MS"
+fi
+
+if [[ "$LOCK_MODEL" == "true" ]]; then
+  add_default_flag "--lock-model"
+fi
+
+if [[ "$NO_LOCK_DEVICE_COMPUTE" != "true" ]]; then
+  add_default_flag "--lock-device-compute"
+fi
+
+ARGS+=("${ORIGINAL_ARGS[@]}")
+
+echo "[Wrapper] Starting whisper_server.py"
+
+exec "$PYTHON_BIN" "${ARGS[@]}"
