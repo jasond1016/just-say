@@ -107,13 +107,16 @@ class WhisperHandler(BaseHTTPRequestHandler):
                     "ws_path": "/stream",
                     "ws_port": asr_engine._runtime_policy["ws_port"],
                     "interim_schema": {
-                        "text": "Current uncommitted preview snapshot",
-                        "stableText": "Stable prefix within the current uncommitted preview",
-                        "unstableText": "Unstable tail still allowed to change",
-                        "wordTimings": "Optional per-word timings when return_word_timestamps=true and engine supports it",
+                        "previewText": "Current sliding-window preview guess; may be rewritten between revisions",
+                        "pendingText": "Current uncommitted buffer snapshot after preview accumulation",
+                        "commitReadyText": "Conservative prefix within pendingText that is safe to commit",
+                        "unstableTailText": "Tail of pendingText that remains unstable",
+                        "revision": "Monotonic revision number within the current live buffer",
+                        "wordTimings": "Optional per-word timings for the current preview window when return_word_timestamps=true and engine supports it",
                     },
                     "final_chunk_schema": {
                         "text": "Newly committed text delta emitted once",
+                        "reason": "Commit trigger such as silence, max_chunk, stable_prefix, flush, or close",
                         "wordTimings": "Optional per-word timings for the committed delta",
                     },
                     "sentence_schema": {

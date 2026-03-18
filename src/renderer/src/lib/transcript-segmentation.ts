@@ -11,14 +11,14 @@ interface StoredSegmentLike {
 
 interface LiveSegmentLike {
   text: string
-  stableText?: string
-  unstableText?: string
+  commitReadyText?: string
+  unstableTailText?: string
   translatedText?: string
   sentencePairs?: Array<{ original: string; translated?: string | null }>
 }
 
 function getPreviewLiveText(segment: LiveSegmentLike): string {
-  const previewText = segment.unstableText || ''
+  const previewText = segment.unstableTailText || ''
   if (previewText.trim()) {
     return previewText
   }
@@ -27,9 +27,9 @@ function getPreviewLiveText(segment: LiveSegmentLike): string {
 }
 
 function getStableLiveText(segment: LiveSegmentLike): string {
-  const stableText = segment.stableText || ''
-  if (stableText.trim()) {
-    return stableText
+  const commitReadyText = segment.commitReadyText || ''
+  if (commitReadyText.trim()) {
+    return commitReadyText
   }
 
   const fullText = segment.text || ''

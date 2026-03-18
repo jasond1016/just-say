@@ -1,4 +1,5 @@
 import json
+import time
 import unittest
 from array import array
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from text_processing import (
     accumulate_preview_text,
     apply_text_corrections,
     deduplicate_timed_prefix_from_base,
+    find_committable_stable_preview_prefix,
     guard_preview_reset_with_stable_prefix,
     has_min_stable_preview_coverage,
     has_unstable_timing_tail,
@@ -241,6 +243,33 @@ class WordTimingHeuristicsTests(unittest.TestCase):
             "5ive minutes of noodling around with it, it was obvious to me that this was years ahead.",
         )
 
+    def test_find_committable_stable_preview_prefix_keeps_safe_english_prefix(self):
+        split = find_committable_stable_preview_prefix(
+            "Hello and welcome to the streaming benchmark today",
+            "Hello and welcome to the streaming benchmark",
+        )
+
+        self.assertEqual(
+            split,
+            ("Hello and welcome to the streaming benchmark", "today"),
+        )
+
+    def test_find_committable_stable_preview_prefix_rejects_incomplete_negative_phrase(self):
+        split = find_committable_stable_preview_prefix(
+            "But they wouldn't take no for an answer. They leaned on me hard.",
+            "But they wouldn't take no",
+        )
+
+        self.assertIsNone(split)
+
+    def test_find_committable_stable_preview_prefix_rejects_relative_clause_stub(self):
+        split = find_committable_stable_preview_prefix(
+            "And you can go back and that is what ultimately convinced me.",
+            "And you can go back and that is what",
+        )
+
+        self.assertIsNone(split)
+
 
 class OfflineSegmentedTranscribeTests(unittest.TestCase):
     def test_detect_offline_segments_splits_two_speech_regions(self):
@@ -323,10 +352,16 @@ class StreamingSessionPreviewTests(unittest.TestCase):
 
         interim_messages = [message for message in websocket.messages if message["type"] == "interim"]
         self.assertEqual(len(interim_messages), 2)
-        self.assertEqual(interim_messages[0]["text"], "今日は日本の夏によく食べるもの。")
-        self.assertEqual(interim_messages[1]["text"], "今日は日本の夏によく食べるものをご紹。")
+        self.assertEqual(interim_messages[0]["previewText"], "今日は日本の夏によく食べるもの。")
+        self.assertEqual(interim_messages[0]["pendingText"], "今日は日本の夏によく食べるもの。")
+        self.assertEqual(interim_messages[0]["revision"], 1)
+        self.assertEqual(interim_messages[1]["previewText"], "日本の夏によく食べるものをご紹。")
+        self.assertEqual(interim_messages[1]["pendingText"], "今日は日本の夏によく食べるものをご紹。")
+        self.assertEqual(interim_messages[1]["revision"], 2)
+        self.assertNotIn("text", interim_messages[0])
+        self.assertNotIn("text", interim_messages[1])
 
-    def test_emit_preview_includes_stable_and_unstable_text(self):
+    def test_emit_preview_includes_commit_ready_and_unstable_tail_text(self):
         websocket = DummyWebSocket()
         session = WebSocketStreamingSession(websocket, {})
         preview_pcm = b"\x00\x00" * 32000
@@ -351,12 +386,14 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         session.emit_preview()
 
         interim_messages = [message for message in websocket.messages if message["type"] == "interim"]
-        self.assertTrue(interim_messages[-1]["stableText"])
+        self.assertTrue(interim_messages[-1]["commitReadyText"])
         self.assertEqual(
-            interim_messages[-1]["stableText"] + interim_messages[-1]["unstableText"],
-            interim_messages[-1]["text"],
+            interim_messages[-1]["commitReadyText"] + interim_messages[-1]["unstableTailText"],
+            interim_messages[-1]["pendingText"],
         )
-        self.assertTrue(interim_messages[-1]["unstableText"])
+        self.assertTrue(interim_messages[-1]["unstableTailText"])
+        self.assertNotIn("stableText", interim_messages[-1])
+        self.assertNotIn("unstableText", interim_messages[-1])
 
     def test_emit_preview_fields_cover_current_uncommitted_region_only(self):
         websocket = DummyWebSocket()
@@ -375,10 +412,12 @@ class StreamingSessionPreviewTests(unittest.TestCase):
 
         interim_messages = [message for message in websocket.messages if message["type"] == "interim"]
         self.assertEqual(len(interim_messages), 1)
-        self.assertEqual(interim_messages[0]["text"], "I'm Adam Gordon.")
-        self.assertEqual(interim_messages[0]["stableText"], "I'm Adam")
-        self.assertTrue(interim_messages[0]["unstableText"])
+        self.assertEqual(interim_messages[0]["previewText"], "I'm Adam Gordon.")
+        self.assertEqual(interim_messages[0]["pendingText"], "I'm Adam Gordon.")
+        self.assertEqual(interim_messages[0]["commitReadyText"], "I'm Adam")
+        self.assertTrue(interim_messages[0]["unstableTailText"])
         self.assertNotIn("visibleText", interim_messages[0])
+        self.assertNotIn("text", interim_messages[0])
 
     def test_emit_preview_trims_english_stable_text_to_word_boundary(self):
         websocket = DummyWebSocket()
@@ -403,8 +442,8 @@ class StreamingSessionPreviewTests(unittest.TestCase):
             session.last_preview_at = 0.0
 
         interim_messages = [message for message in websocket.messages if message["type"] == "interim"]
-        self.assertEqual(interim_messages[-1]["stableText"], "Recursive, I'm Adam")
-        self.assertFalse(interim_messages[-1]["stableText"].endswith("Go"))
+        self.assertEqual(interim_messages[-1]["commitReadyText"], "Recursive, I'm Adam")
+        self.assertFalse(interim_messages[-1]["commitReadyText"].endswith("Go"))
 
     def test_emit_preview_guards_abrupt_english_reset_with_stable_prefix(self):
         assembler = TranscriptAssembler(lambda text: text, [])
@@ -420,7 +459,7 @@ class StreamingSessionPreviewTests(unittest.TestCase):
 
         self.assertIsNotNone(event)
         self.assertEqual(
-            event["text"],
+            event["pendingText"],
             "5ive minutes of noodling around with it, it was obvious to me that this was years ahead.",
         )
 
@@ -433,7 +472,53 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         event = assembler.build_interim_event("when.", word_timings=None)
 
         self.assertIsNotNone(event)
-        self.assertEqual(event["text"], "And so I did what one did in those days when.")
+        self.assertEqual(event["pendingText"], "And so I did what one did in those days when.")
+
+    def test_build_interim_event_exposes_commit_ready_text_for_long_english_prefix(self):
+        assembler = TranscriptAssembler(lambda text: text, [])
+        event = assembler.build_interim_event(
+            "Hello and welcome to the streaming benchmark today",
+            word_timings=None,
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["previewText"], "Hello and welcome to the streaming benchmark today")
+        self.assertEqual(event["pendingText"], "Hello and welcome to the streaming benchmark today")
+        self.assertEqual(event["commitReadyText"], "")
+
+        assembler.preview_history = [
+            "Hello and welcome to the streaming benchmark today",
+            "Hello and welcome to the streaming benchmark tomorrow",
+            "Hello and welcome to the streaming benchmark tonight",
+        ]
+        stable_text, _unstable = assembler.build_preview_snapshot(
+            "Hello and welcome to the streaming benchmark tonight"
+        )
+        commit_ready = assembler.build_commit_ready_prefix(
+            "Hello and welcome to the streaming benchmark tonight",
+            stable_text,
+        )
+
+        self.assertTrue(commit_ready)
+        self.assertTrue("Hello and welcome to the streaming benchmark tonight".startswith(commit_ready))
+
+    def test_build_interim_event_keeps_commit_ready_empty_for_unsafe_english_boundary(self):
+        assembler = TranscriptAssembler(lambda text: text, [])
+        assembler.preview_history = [
+            "And you can go back and that is what ultimately can in.",
+            "And you can go back and that is what ultimately convinced me.",
+            "And you can go back and that is what ultimately convinced me.",
+        ]
+
+        stable_text, _unstable = assembler.build_preview_snapshot(
+            "And you can go back and that is what ultimately convinced me."
+        )
+        commit_ready = assembler.build_commit_ready_prefix(
+            "And you can go back and that is what ultimately convinced me.",
+            stable_text,
+        )
+
+        self.assertEqual(commit_ready, "")
 
     def test_emit_final_commits_on_silence_without_stable_boundary(self):
         websocket = DummyWebSocket()
@@ -558,6 +643,7 @@ class StreamingSessionPreviewTests(unittest.TestCase):
         session.buffer_start_at = 1.0
         session.current_preview_stable_text = "Hello and welcome to the streaming benchmark"
         session.current_preview_unstable_text = "today"
+        session.current_commit_ready_text = "Hello and welcome to the streaming benchmark"
         session.transcribe_pcm = lambda _pcm: {
             "success": True,
             "text": "Hello and welcome to the streaming benchmark today",
@@ -578,6 +664,80 @@ class StreamingSessionPreviewTests(unittest.TestCase):
             "Hello and welcome to the streaming benchmark today",
         )
         self.assertEqual(session.pending_final_chunk, "")
+
+    def test_emit_final_does_not_fallback_to_preview_stable_text_when_commit_ready_is_empty(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {"language": ["en"]})
+        max_chunk_pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(max_chunk_pcm)
+        session.pending_new_bytes = len(max_chunk_pcm)
+        session.buffer_start_at = 1.0
+        session.current_preview_stable_text = "But they wouldn't take no"
+        session.current_preview_unstable_text = "for an answer. They leaned on me hard."
+        session.current_commit_ready_text = ""
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "But they wouldn't take no for an answer. They leaned on me hard.",
+            "word_timings": None,
+        }
+
+        session.emit_final("max_chunk")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(
+            final_chunks[0]["text"],
+            "But they wouldn't take no for an answer. They leaned on me hard.",
+        )
+        self.assertEqual(final_chunks[0]["reason"], "max_chunk")
+
+    def test_emit_final_stable_prefix_commits_only_prefix_without_endpoint(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {"language": ["en"]})
+        pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(pcm)
+        session.pending_new_bytes = len(pcm)
+        session.buffer_start_at = 1.0
+        session.current_commit_ready_text = "Hello and welcome to the streaming benchmark"
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "Hello and welcome to the streaming benchmark tonight and we're live",
+            "word_timings": None,
+        }
+
+        session.emit_final("stable_prefix")
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        endpoints = [message for message in websocket.messages if message["type"] == "endpoint"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(final_chunks[0]["text"], "Hello and welcome to the streaming benchmark")
+        self.assertEqual(final_chunks[0]["reason"], "stable_prefix")
+        self.assertEqual(endpoints, [])
+        self.assertEqual(session.final_text_raw, "Hello and welcome to the streaming benchmark")
+        self.assertEqual(session.pending_new_bytes, 0)
+        self.assertGreater(len(session.pending_pcm), 0)
+
+    def test_maybe_emit_final_by_timing_uses_stable_prefix_at_max_chunk(self):
+        websocket = DummyWebSocket()
+        session = WebSocketStreamingSession(websocket, {"language": ["en"]})
+        pcm = b"\x00\x00" * (session.bytes_for_ms(5000) // 2)
+        session.pending_pcm = bytearray(pcm)
+        session.pending_new_bytes = len(pcm)
+        session.buffer_start_at = time.time()
+        session.last_audio_at = time.time()
+        session.last_preview_text = "Hello and welcome to the streaming benchmark tonight"
+        session.current_commit_ready_text = "Hello and welcome to the streaming benchmark"
+        session.transcribe_pcm = lambda _pcm: {
+            "success": True,
+            "text": "Hello and welcome to the streaming benchmark tonight and we're live",
+            "word_timings": None,
+        }
+
+        session.maybe_emit_final_by_timing()
+
+        final_chunks = [message for message in websocket.messages if message["type"] == "final_chunk"]
+        self.assertEqual(len(final_chunks), 1)
+        self.assertEqual(final_chunks[0]["reason"], "stable_prefix")
 
     def test_commit_pending_final_chunk_emits_corrected_visible_text_but_keeps_raw_base(self):
         websocket = DummyWebSocket()

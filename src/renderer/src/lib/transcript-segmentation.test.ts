@@ -84,11 +84,11 @@ describe('transcript-segmentation', () => {
     ])
   })
 
-  it('uses stableText for current live segment instead of unstable preview tail', () => {
+  it('uses commitReadyText for current live segment instead of unstable preview tail', () => {
     const pairs = toSentencePairsFromCurrentLive({
       text: 'かき氷はイチゴ味です',
-      stableText: 'かき氷は',
-      unstableText: 'イチゴ味です',
+      commitReadyText: 'かき氷は',
+      unstableTailText: 'イチゴ味です',
       sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
     })
 
@@ -98,8 +98,8 @@ describe('transcript-segmentation', () => {
   it('appends only stable tail beyond translated sentencePairs for current live segment', () => {
     const pairs = toSentencePairsFromCurrentLive({
       text: 'かき氷はイチゴ味です',
-      stableText: 'かき氷はイチゴ',
-      unstableText: '味です',
+      commitReadyText: 'かき氷はイチゴ',
+      unstableTailText: '味です',
       sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
     })
 
@@ -109,11 +109,11 @@ describe('transcript-segmentation', () => {
     ])
   })
 
-  it('uses unstableText as preview fallback for current live segment', () => {
+  it('uses unstableTailText as preview fallback for current live segment', () => {
     const pairs = toSentencePairsFromCurrentLive({
       text: 'Hello world',
-      stableText: 'Hello',
-      unstableText: ' world'
+      commitReadyText: 'Hello',
+      unstableTailText: ' world'
     })
 
     expect(pairs).toEqual([{ original: 'Hello', translated: null }])

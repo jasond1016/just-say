@@ -425,8 +425,8 @@ function findBoundaryOverlap(left, right, maxChars = 200) {
 
 function summarizeStreamingMetrics(events, audioEndedMs) {
   const interimTexts = events
-    .filter((event) => event.type === 'interim' && typeof event.text === 'string')
-    .map((event) => String(event.text || ''))
+    .filter((event) => event.type === 'interim' && typeof event.pendingText === 'string')
+    .map((event) => String(event.pendingText || ''))
     .filter((text) => text.trim().length > 0)
   const previewLengths = interimTexts.map((text) => toMeaningfulCharLength(text))
 
@@ -607,7 +607,14 @@ async function runSingleCase({
       ...data
     })
 
-    const text = typeof data.text === 'string' ? data.text.trim() : ''
+    const text =
+      data.type === 'interim'
+        ? typeof data.pendingText === 'string'
+          ? data.pendingText.trim()
+          : ''
+        : typeof data.text === 'string'
+          ? data.text.trim()
+          : ''
     if (
       firstVisibleMs === null &&
       text &&

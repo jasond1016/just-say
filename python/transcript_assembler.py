@@ -40,8 +40,10 @@ class TranscriptAssembler:
         self.current_preview_text = ""
         self.current_preview_stable_text = ""
         self.current_preview_unstable_text = ""
+        self.current_commit_ready_text = ""
         self.preview_history: list[str] = []
         self.last_preview_text = ""
+        self.preview_revision = 0
 
     def get_visible_text_base(self) -> str:
         return merge_text(self.final_text_raw, self.pending_final_chunk).strip()
@@ -50,8 +52,57 @@ class TranscriptAssembler:
         self.current_preview_text = ""
         self.current_preview_stable_text = ""
         self.current_preview_unstable_text = ""
+        self.current_commit_ready_text = ""
         self.preview_history = []
         self.last_preview_text = ""
+        self.preview_revision = 0
+
+    def _find_complete_sentence_prefix(self, text: str) -> str:
+        normalized = self.normalize_event_text(text).strip()
+        if not normalized:
+            return ""
+
+        best_prefix = ""
+        for index, ch in enumerate(normalized[:-1]):
+            if ch not in {"。", "！", "？", "!", "?", "."}:
+                continue
+
+            prefix = normalized[: index + 1].strip()
+            suffix = normalized[index + 1 :].strip()
+            if not prefix or not suffix:
+                continue
+            if len(prefix) > len(best_prefix):
+                best_prefix = prefix
+
+        return best_prefix
+
+    def build_commit_ready_prefix(self, pending_text: str, stable_text: str) -> str:
+        normalized_pending = self.normalize_event_text(pending_text).strip()
+        normalized_stable = self.normalize_event_text(stable_text).strip()
+        if not normalized_pending or not normalized_stable:
+            self.current_commit_ready_text = ""
+            return ""
+        if len(self.preview_history) < 2:
+            self.current_commit_ready_text = ""
+            return ""
+        if not normalized_pending.startswith(normalized_stable):
+            self.current_commit_ready_text = ""
+            return ""
+
+        complete_sentence_prefix = self._find_complete_sentence_prefix(normalized_stable)
+        if complete_sentence_prefix:
+            self.current_commit_ready_text = complete_sentence_prefix
+            return complete_sentence_prefix
+
+        if is_latin_dominant_text(normalized_pending):
+            split = find_committable_stable_preview_prefix(normalized_pending, normalized_stable)
+            if split:
+                commit_ready, _remaining = split
+                self.current_commit_ready_text = commit_ready
+                return commit_ready
+
+        self.current_commit_ready_text = ""
+        return ""
 
     def build_preview_snapshot(self, text: str) -> tuple[str, str]:
         normalized = self.normalize_event_text(text).strip()
@@ -102,6 +153,7 @@ class TranscriptAssembler:
         *,
         word_timings: list[dict] | None,
     ) -> dict | None:
+        normalized_preview = self.normalize_event_text(deduped_preview_text).strip()
         accumulated = accumulate_preview_text(self.current_preview_text, deduped_preview_text)
         normalized_accumulated = self.normalize_event_text(accumulated)
         if should_guard_preview_reset(
@@ -123,11 +175,15 @@ class TranscriptAssembler:
             return None
 
         stable_text, unstable_text = self.build_preview_snapshot(normalized_accumulated)
+        commit_ready_text = self.build_commit_ready_prefix(normalized_accumulated, stable_text)
+        self.preview_revision += 1
         return {
             "type": "interim",
-            "text": normalized_accumulated,
-            "stableText": stable_text,
-            "unstableText": unstable_text,
+            "previewText": normalized_preview,
+            "pendingText": normalized_accumulated,
+            "commitReadyText": commit_ready_text,
+            "unstableTailText": unstable_text,
+            "revision": self.preview_revision,
             "wordTimings": word_timings,
             "ts": int(time.time() * 1000),
         }
@@ -183,12 +239,14 @@ class TranscriptAssembler:
             {
                 "type": "final_chunk",
                 "text": corrected_text,
+                "reason": reason,
                 "wordTimings": word_timings,
                 "ts": int(time.time() * 1000),
             },
         ]
         events.extend(self.maybe_emit_sentence_event(reason))
-        events.append({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
+        if reason != "stable_prefix":
+            events.append({"type": "endpoint", "reason": reason, "ts": int(time.time() * 1000)})
         return events
 
     def commit_sentence_prefix_if_possible(self, reason: str) -> tuple[bool, list[dict]]:
@@ -211,16 +269,22 @@ class TranscriptAssembler:
         self.pending_final_word_timings = remaining_timings
         return True, events
 
-    def commit_stable_preview_prefix_if_possible(
+    def commit_commit_ready_prefix_if_possible(
         self,
-        stable_preview: str,
+        commit_ready_prefix: str,
         reason: str,
     ) -> tuple[bool, list[dict]]:
-        split = find_committable_stable_preview_prefix(self.pending_final_chunk, stable_preview)
-        if not split:
+        normalized_pending = self.normalize_event_text(self.pending_final_chunk).strip()
+        normalized_commit_ready = self.normalize_event_text(commit_ready_prefix).strip()
+        if not normalized_pending or not normalized_commit_ready:
+            return False, []
+        if not normalized_pending.startswith(normalized_commit_ready):
             return False, []
 
-        commit_text, remaining_text = split
+        commit_text = normalized_commit_ready
+        remaining_text = normalized_pending[len(normalized_commit_ready) :].lstrip()
+        if not remaining_text:
+            return False, []
         commit_timings, remaining_timings = split_word_timings_by_prefix(
             self.pending_final_word_timings,
             commit_text,

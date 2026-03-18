@@ -15,8 +15,10 @@ export interface SpeakerSegment {
   speaker: number
   source?: TranscriptSource
   text: string
-  stableText?: string
-  unstableText?: string
+  previewText?: string
+  commitReadyText?: string
+  unstableTailText?: string
+  previewRevision?: number
   wordTimings?: WordTiming[]
   endpointReason?: string
   translatedText?: string

@@ -108,6 +108,14 @@ class WebSocketStreamingSession:
         self.assembler.current_preview_unstable_text = value
 
     @property
+    def current_commit_ready_text(self):
+        return self.assembler.current_commit_ready_text
+
+    @current_commit_ready_text.setter
+    def current_commit_ready_text(self, value):
+        self.assembler.current_commit_ready_text = value
+
+    @property
     def preview_history(self):
         return self.assembler.preview_history
 
@@ -237,9 +245,10 @@ class WebSocketStreamingSession:
             self.emit_json(event)
         return committed
 
-    def commit_stable_preview_prefix_if_possible(self, reason: str) -> bool:
-        committed, events = self.assembler.commit_stable_preview_prefix_if_possible(
-            self.current_preview_stable_text,
+    def commit_commit_ready_prefix_if_possible(self, reason: str) -> bool:
+        commit_ready_candidate = self.current_commit_ready_text
+        committed, events = self.assembler.commit_commit_ready_prefix_if_possible(
+            commit_ready_candidate,
             reason,
         )
         for event in events:
@@ -277,14 +286,21 @@ class WebSocketStreamingSession:
             committed_prefix = False
             if reason in {"max_chunk", "silence"}:
                 committed_prefix = self.commit_sentence_prefix_if_possible(reason)
-            if not committed_prefix and reason == "max_chunk" and self.is_english_session():
-                committed_prefix = self.commit_stable_preview_prefix_if_possible(reason)
-            self.commit_pending_final_chunk(reason)
+            if not committed_prefix and reason in {"max_chunk", "stable_prefix"}:
+                committed_prefix = self.commit_commit_ready_prefix_if_possible(reason)
+            if reason == "stable_prefix":
+                self.pending_final_chunk = ""
+                self.pending_final_word_timings = None
+            else:
+                self.commit_pending_final_chunk(reason)
 
         self.pending_new_bytes = 0
         self.reset_preview_state()
-        self.retain_overlap()
         self.buffer_start_at = 0.0
+        if reason == "stable_prefix":
+            self.last_preview_audio_bytes = len(self.pending_pcm)
+            return
+        self.retain_overlap()
         self.last_preview_audio_bytes = len(self.pending_pcm)
 
     def maybe_emit_final_by_timing(self):
@@ -297,6 +313,9 @@ class WebSocketStreamingSession:
             if pending_ms < self.max_chunk_ms + self.max_chunk_extension_ms:
                 preview_text = (self.last_preview_text or "").strip()
                 if preview_text and not has_stable_final_boundary(preview_text):
+                    commit_ready_text = (self.current_commit_ready_text or "").strip()
+                    if commit_ready_text:
+                        self.emit_final("stable_prefix")
                     return
             self.emit_final("max_chunk")
             return

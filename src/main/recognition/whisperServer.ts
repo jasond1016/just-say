@@ -84,9 +84,11 @@ export interface WhisperStreamReadyEvent {
 
 export interface WhisperStreamInterimEvent {
   type: 'interim'
-  text?: string
-  stableText?: string
-  unstableText?: string
+  previewText: string
+  pendingText: string
+  commitReadyText: string
+  unstableTailText: string
+  revision: number
   wordTimings?: WhisperStreamWordTimingPayload[]
   ts?: number
 }
@@ -94,6 +96,7 @@ export interface WhisperStreamInterimEvent {
 export interface WhisperStreamFinalChunkEvent {
   type: 'final_chunk'
   text?: string
+  reason?: string
   wordTimings?: WhisperStreamWordTimingPayload[]
   ts?: number
 }

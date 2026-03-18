@@ -967,8 +967,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
     return {
       speaker: 0,
       text: liveText,
-      stableText: liveStableText && liveStableText !== liveText ? liveStableText : undefined,
-      unstableText: this.previewText || undefined,
+      previewText: this.previewText || undefined,
+      commitReadyText: liveStableText && liveStableText !== liveText ? liveStableText : undefined,
+      unstableTailText: this.previewText || undefined,
       isFinal: false
     }
   }

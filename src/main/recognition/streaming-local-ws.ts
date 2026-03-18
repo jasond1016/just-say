@@ -78,9 +78,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private startTime = 0
 
   private confirmedText = ''
+  private rawPreviewText = ''
   private previewText = ''
   private previewStableText = ''
   private previewUnstableText = ''
+  private previewRevision = 0
   private currentWordTimings: WordTiming[] = []
   private completedSegments: SpeakerSegment[] = []
   private readonly translationCoordinator: LocalTranslationCoordinator
@@ -212,9 +214,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     this.isActive = true
     this.startTime = Date.now()
     this.confirmedText = ''
+    this.rawPreviewText = ''
     this.previewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
+    this.previewRevision = 0
     this.currentWordTimings = []
     this.completedSegments = []
     this.liveSentenceTail = ''
@@ -317,8 +321,10 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     this.previewText = ''
+    this.rawPreviewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
+    this.previewRevision = 0
     this.currentWordTimings = []
     this.liveSentenceTail = ''
     this.endpointReason = ''
@@ -344,8 +350,10 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   close(): void {
     this.isActive = false
     this.previewText = ''
+    this.rawPreviewText = ''
     this.previewStableText = ''
     this.previewUnstableText = ''
+    this.previewRevision = 0
     this.currentWordTimings = []
     this.completedSegments = []
     this.liveSentenceTail = ''
@@ -368,10 +376,15 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     switch (data.type) {
       case 'interim': {
         this.endpointReason = ''
-        this.previewText = this.normalizePreviewText(data.text || '')
-        const stablePreview = this.normalizePreviewText(data.stableText || '')
-        const unstablePreview = this.normalizeUnstablePreviewText(data.unstableText || '')
-        this.applyPreviewStateFromServer(stablePreview, unstablePreview)
+        this.rawPreviewText = this.normalizePreviewText(data.previewText)
+        this.previewText = this.normalizePreviewText(data.pendingText)
+        const commitReadyPreview = this.normalizePreviewText(data.commitReadyText)
+        const unstableTailPreview = this.normalizeUnstablePreviewText(data.unstableTailText)
+        this.previewRevision =
+          typeof data.revision === 'number' && Number.isFinite(data.revision)
+            ? Math.max(0, Math.floor(data.revision))
+            : 0
+        this.applyPreviewStateFromServer(commitReadyPreview, unstableTailPreview)
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
         this.debugStreamState('interim')
         this.emitPartialResult()
@@ -380,9 +393,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       case 'final_chunk':
         this.endpointReason = ''
         this.appendCommittedChunk(data.text || '')
+        this.rawPreviewText = ''
         this.previewText = ''
         this.previewStableText = ''
         this.previewUnstableText = ''
+        this.previewRevision = 0
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
         this.debugStreamState('final_chunk')
         this.emitPartialResult()
@@ -398,9 +413,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         this.emitPartialResult()
         return
       case 'final':
+        this.rawPreviewText = ''
         this.previewText = ''
         this.previewStableText = ''
         this.previewUnstableText = ''
+        this.previewRevision = 0
         this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
         this.liveSentenceTail = ''
         this.endpointReason = ''
@@ -461,15 +478,18 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       .filter((item): item is WordTiming => item !== null)
   }
 
-  private applyPreviewStateFromServer(stablePreview: string, unstablePreview: string): void {
+  private applyPreviewStateFromServer(
+    commitReadyPreview: string,
+    unstableTailPreview: string
+  ): void {
     if (!this.previewText.trim()) {
       this.previewStableText = ''
       this.previewUnstableText = ''
       return
     }
 
-    this.previewStableText = stablePreview
-    this.previewUnstableText = unstablePreview
+    this.previewStableText = commitReadyPreview
+    this.previewUnstableText = unstableTailPreview
   }
 
   private appendConfirmed(text: string): string {
@@ -585,9 +605,11 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         eventType,
         completedSegments: this.completedSegments.length,
         sentencePairs: this.sentencePairs.length,
+        rawPreviewText: this.rawPreviewText,
         previewText: this.previewText,
         previewStableText: this.previewStableText,
         previewUnstableText: this.previewUnstableText,
+        previewRevision: this.previewRevision,
         endpointReason: this.endpointReason,
         committedTail
       })
@@ -623,12 +645,14 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       return null
     }
 
-    const liveStableText = this.previewStableText.trim()
+    const liveCommitReadyText = this.previewStableText.trim()
     return {
       speaker: 0,
       text: liveText,
-      stableText: liveStableText || undefined,
-      unstableText: this.previewUnstableText || undefined,
+      previewText: this.rawPreviewText || undefined,
+      commitReadyText: liveCommitReadyText || undefined,
+      unstableTailText: this.previewUnstableText || undefined,
+      previewRevision: this.previewRevision || undefined,
       endpointReason: this.endpointReason || undefined,
       wordTimings: this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
       isFinal: false

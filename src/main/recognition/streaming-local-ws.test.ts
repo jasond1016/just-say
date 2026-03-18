@@ -31,9 +31,11 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: '今日は？',
-        stableText: '',
-        unstableText: '今日は？'
+        previewText: '今日は？',
+        pendingText: '今日は？',
+        commitReadyText: '',
+        unstableTailText: '今日は？',
+        revision: 1
       })
     )
 
@@ -45,7 +47,7 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: '今日は？',
-      unstableText: '今日は？'
+      unstableTailText: '今日は？'
     })
   })
 
@@ -66,9 +68,11 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: "I'm Adam.",
-        stableText: "I'm",
-        unstableText: ' Adam.'
+        previewText: "I'm Adam.",
+        pendingText: "I'm Adam.",
+        commitReadyText: "I'm",
+        unstableTailText: ' Adam.',
+        revision: 1
       })
     )
 
@@ -80,8 +84,8 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: "I'm Adam.",
-      stableText: "I'm",
-      unstableText: ' Adam.'
+      commitReadyText: "I'm",
+      unstableTailText: ' Adam.'
     })
   })
 
@@ -108,9 +112,11 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: "I'm Adam.",
-        stableText: "I'm",
-        unstableText: ' Adam.'
+        previewText: "I'm Adam.",
+        pendingText: "I'm Adam.",
+        commitReadyText: "I'm",
+        unstableTailText: ' Adam.',
+        revision: 1
       })
     )
 
@@ -123,8 +129,8 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: "I'm Adam.",
-      stableText: "I'm",
-      unstableText: ' Adam.'
+      commitReadyText: "I'm",
+      unstableTailText: ' Adam.'
     })
   })
 
@@ -151,9 +157,11 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: "I'm Adam.",
-        stableText: "I'm",
-        unstableText: ' Adam.'
+        previewText: "I'm Adam.",
+        pendingText: "I'm Adam.",
+        commitReadyText: "I'm",
+        unstableTailText: ' Adam.',
+        revision: 1
       })
     )
 
@@ -166,8 +174,8 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: "I'm Adam.",
-      stableText: "I'm",
-      unstableText: ' Adam.'
+      commitReadyText: "I'm",
+      unstableTailText: ' Adam.'
     })
   })
 
@@ -263,9 +271,11 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: "I'm Adam.",
-        stableText: "I'm",
-        unstableText: ' Adam.'
+        previewText: "I'm Adam.",
+        pendingText: "I'm Adam.",
+        commitReadyText: "I'm",
+        unstableTailText: ' Adam.',
+        revision: 1
       })
     )
 
@@ -277,8 +287,8 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: "I'm Adam.",
-      stableText: "I'm",
-      unstableText: ' Adam.'
+      commitReadyText: "I'm",
+      unstableTailText: ' Adam.'
     })
   })
 
@@ -299,9 +309,11 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: 'Hello world',
-        stableText: 'Hello',
-        unstableText: ' world'
+        previewText: 'Hello world',
+        pendingText: 'Hello world',
+        commitReadyText: 'Hello',
+        unstableTailText: ' world',
+        revision: 1
       })
     )
 
@@ -313,8 +325,36 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: 'Hello world',
-      stableText: 'Hello',
-      unstableText: ' world'
+      commitReadyText: 'Hello',
+      unstableTailText: ' world'
+    })
+  })
+
+  it('prefers pendingText and commitReadyText from the newer interim protocol', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'interim',
+        previewText: 'Hello and welcome to the streaming benchmark tonight',
+        pendingText: 'Hello and welcome to the streaming benchmark tonight',
+        commitReadyText: 'Hello and welcome to the streaming benchmark',
+        unstableTailText: 'tonight',
+        revision: 7
+      })
+    )
+
+    expect(partials.at(-1)?.currentSegment).toMatchObject({
+      text: 'Hello and welcome to the streaming benchmark tonight',
+      previewText: 'Hello and welcome to the streaming benchmark tonight',
+      commitReadyText: 'Hello and welcome to the streaming benchmark',
+      unstableTailText: 'tonight',
+      previewRevision: 7
     })
   })
 
@@ -398,24 +438,28 @@ describe('StreamingLocalWsRecognizer', () => {
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: 'Hello world',
-        stableText: 'Hello',
-        unstableText: ' world'
+        previewText: 'Hello world',
+        pendingText: 'Hello world',
+        commitReadyText: 'Hello',
+        unstableTailText: ' world',
+        revision: 1
       })
     )
     ;(recognizer as any).handleMessage(
       JSON.stringify({
         type: 'interim',
-        text: 'Hello wonderful world',
-        stableText: 'Hello wonderful',
-        unstableText: ' world'
+        previewText: 'Hello wonderful world',
+        pendingText: 'Hello wonderful world',
+        commitReadyText: 'Hello wonderful',
+        unstableTailText: ' world',
+        revision: 2
       })
     )
 
     expect(partials.at(-1)?.currentSegment).toMatchObject({
       text: 'Hello wonderful world',
-      stableText: 'Hello wonderful',
-      unstableText: ' world'
+      commitReadyText: 'Hello wonderful',
+      unstableTailText: ' world'
     })
   })
 })

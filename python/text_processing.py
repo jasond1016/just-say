@@ -517,6 +517,113 @@ ENGLISH_COMMIT_STABLE_PREFIX_MIN_CHARS = 18
 ENGLISH_COMMIT_STABLE_PREFIX_MIN_REMAINING_CHARS = 2
 ENGLISH_SILENCE_THRESHOLD_MULTIPLIER = 1.5
 ENGLISH_SILENCE_THRESHOLD_MIN_MS = 900
+ENGLISH_COMMIT_WEAK_SUFFIX_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "been",
+    "being",
+    "before",
+    "but",
+    "by",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "he",
+    "her",
+    "his",
+    "how",
+    "if",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "my",
+    "no",
+    "not",
+    "of",
+    "on",
+    "or",
+    "our",
+    "she",
+    "so",
+    "than",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "to",
+    "was",
+    "we",
+    "were",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "why",
+    "with",
+    "would",
+    "you",
+    "your",
+}
+ENGLISH_COMMIT_WEAK_PREFIX_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "because",
+    "before",
+    "but",
+    "by",
+    "for",
+    "from",
+    "if",
+    "in",
+    "into",
+    "no",
+    "not",
+    "of",
+    "on",
+    "or",
+    "since",
+    "so",
+    "than",
+    "that",
+    "then",
+    "this",
+    "those",
+    "to",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "why",
+    "with",
+}
+ENGLISH_COMMIT_BOUNDARY_CHARS = {" ", "\t", "\r", "\n", ",", ";", ":", "-", "("}
 
 
 def count_meaningful_chars(text: str) -> int:
@@ -537,6 +644,53 @@ def is_latin_dominant_text(text: str) -> bool:
         if CJK_CHAR_RE.search(ch):
             cjk_count += 1
     return latin_count >= 6 and latin_count >= cjk_count * 2
+
+
+def get_last_english_word(text: str) -> str:
+    matches = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", (text or "").lower())
+    if not matches:
+        return ""
+    return matches[-1]
+
+
+def get_first_english_word(text: str) -> str:
+    match = re.search(r"[A-Za-z]+(?:'[A-Za-z]+)?", (text or "").lower())
+    if not match:
+        return ""
+    return match.group(0)
+
+
+def is_weak_commit_suffix(text: str) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return True
+    if is_weak_boundary_suffix(normalized):
+        return True
+    return get_last_english_word(normalized) in ENGLISH_COMMIT_WEAK_SUFFIX_WORDS
+
+
+def starts_with_weak_commit_word(text: str) -> bool:
+    normalized = (text or "").strip()
+    if not normalized:
+        return True
+    return get_first_english_word(normalized) in ENGLISH_COMMIT_WEAK_PREFIX_WORDS
+
+
+def iter_backtracked_commit_prefixes(text: str):
+    candidate = (text or "").rstrip(" \t\r\n,;:\uff1a\uff0c\u3001-")
+    seen = set()
+    while candidate:
+        if candidate not in seen:
+            seen.add(candidate)
+            yield candidate
+        boundary_index = -1
+        for index in range(len(candidate) - 1, -1, -1):
+            if candidate[index] in ENGLISH_COMMIT_BOUNDARY_CHARS:
+                boundary_index = index
+                break
+        if boundary_index < 0:
+            break
+        candidate = candidate[:boundary_index].rstrip(" \t\r\n,;:\uff1a\uff0c\u3001-")
 
 
 def trim_loose_prefix(text: str, prefix: str) -> str | None:
@@ -1120,13 +1274,22 @@ def find_committable_stable_preview_prefix(
     if not normalized.startswith(normalized_stable):
         return None
 
-    prefix = normalized_stable.rstrip(" \t\r\n,;:\uff1a\uff0c\u3001-")
-    if not prefix or prefix == normalized:
-        return None
-    if count_meaningful_chars(prefix) < min_prefix_chars:
-        return None
+    for prefix in iter_backtracked_commit_prefixes(normalized_stable):
+        if not prefix or prefix == normalized:
+            continue
+        if count_meaningful_chars(prefix) < min_prefix_chars:
+            continue
 
-    remaining = normalized[len(prefix) :].lstrip()
-    if count_meaningful_chars(remaining) < min_remaining_chars:
-        return None
-    return prefix, remaining
+        remaining = normalized[len(prefix) :].lstrip()
+        if count_meaningful_chars(remaining) < min_remaining_chars:
+            continue
+
+        if is_latin_dominant_text(normalized):
+            if is_weak_commit_suffix(prefix):
+                continue
+            if starts_with_weak_commit_word(remaining):
+                continue
+
+        return prefix, remaining
+
+    return None
