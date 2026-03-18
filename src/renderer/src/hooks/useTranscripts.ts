@@ -17,6 +17,7 @@ export interface TranscriptSegment {
   id: number
   transcript_id: string
   speaker: number
+  source: 'system' | 'microphone' | null
   text: string
   translated_text: string | null
   segment_order: number

@@ -90,6 +90,7 @@ interface JustSayAPI {
     source_mode?: 'ptt' | 'meeting'
     segments: {
       speaker: number
+      source?: 'system' | 'microphone'
       text: string
       translated_text?: string
       sentence_pairs?: { original: string; translated?: string }[]

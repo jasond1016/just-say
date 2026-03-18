@@ -8,7 +8,7 @@ import { DashboardSidebar, type DashboardView } from './components/dashboard/Das
 import { DashboardSettingsModal } from './components/dashboard/DashboardSettingsModal'
 import { DEFAULT_TRIGGER_KEY, getTriggerKeyLabel } from '../../shared/hotkey'
 import { startSystemAudioCapture, stopSystemAudioCapture } from './system-audio-capture'
-import { stopMicrophoneCapture } from './microphone-capture'
+import { startMicrophoneCapture, stopMicrophoneCapture } from './microphone-capture'
 import { I18nProvider } from './i18n/I18nProvider'
 import { AppLocale, resolveLocale } from './i18n'
 
@@ -28,6 +28,9 @@ interface AppConfig {
   }
   recognition?: {
     backend?: string
+    meeting?: {
+      includeMicrophone?: boolean
+    }
     translation?: {
       enabledForMeeting?: boolean
       targetLanguage?: string
@@ -63,7 +66,7 @@ function mergeSpeakerSegments(
     const baseIdentity =
       typeof segment.timestamp === 'number'
         ? `timestamp:${segment.timestamp}`
-        : `speaker:${segment.speaker}|text:${segment.text}`
+        : `source:${segment.source || 'unknown'}|speaker:${segment.speaker}|text:${segment.text}`
     const occurrence = (previousIdentityCounts.get(baseIdentity) || 0) + 1
     previousIdentityCounts.set(baseIdentity, occurrence)
     previousByIdentity.set(`${baseIdentity}|occurrence:${occurrence}`, segment)
@@ -80,7 +83,7 @@ function mergeSpeakerSegments(
     const baseIdentity =
       typeof incomingSegment.timestamp === 'number'
         ? `timestamp:${incomingSegment.timestamp}`
-        : `speaker:${incomingSegment.speaker}|text:${incomingSegment.text}`
+        : `source:${incomingSegment.source || 'unknown'}|speaker:${incomingSegment.speaker}|text:${incomingSegment.text}`
     const occurrence = (incomingIdentityCounts.get(baseIdentity) || 0) + 1
     incomingIdentityCounts.set(baseIdentity, occurrence)
     const existing = previousByIdentity.get(`${baseIdentity}|occurrence:${occurrence}`)
@@ -147,6 +150,7 @@ function App(): React.JSX.Element {
           const lastSegment = nextSegments[nextSegments.length - 1]
           const isSameAsLast =
             !!lastSegment &&
+            lastSegment.source === segment.currentSpeakerSegment.source &&
             lastSegment.speaker === segment.currentSpeakerSegment.speaker &&
             lastSegment.text === segment.currentSpeakerSegment.text
 
@@ -172,6 +176,7 @@ function App(): React.JSX.Element {
       let nextCurrentSegment: SpeakerSegment | null = null
       if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
         const previousCurrentSegment =
+          prev.currentSegment?.source === segment.currentSpeakerSegment.source &&
           prev.currentSegment?.speaker === segment.currentSpeakerSegment.speaker
             ? prev.currentSegment
             : null
@@ -256,12 +261,16 @@ function App(): React.JSX.Element {
       const runtimeConfig = (await window.api.getConfig()) as AppConfig
       const translationEnabled = runtimeConfig.recognition?.translation?.enabledForMeeting === true
       const targetLanguage = runtimeConfig.recognition?.translation?.targetLanguage
+      const includeMicrophone = runtimeConfig.recognition?.meeting?.includeMicrophone === true
       await window.api.startMeetingTranscription({
-        includeMicrophone: false,
+        includeMicrophone,
         translationEnabled,
         targetLanguage: translationEnabled ? targetLanguage : undefined
       })
       await startSystemAudioCapture(null)
+      if (includeMicrophone) {
+        await startMicrophoneCapture()
+      }
       setMeetingState((prev) => ({
         ...prev,
         status: 'transcribing',
@@ -272,6 +281,11 @@ function App(): React.JSX.Element {
     } catch (err) {
       stopSystemAudioCapture()
       stopMicrophoneCapture()
+      try {
+        await window.api.stopMeetingTranscription()
+      } catch {
+        // Ignore cleanup failures during startup rollback.
+      }
       stopMeetingSecondsTimer()
       setMeetingState((prev) => ({
         ...prev,

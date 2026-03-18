@@ -56,6 +56,33 @@ function getInlinePreviewText(segment: SpeakerSegment): string | undefined {
     : undefined
 }
 
+function getSegmentLabel(
+  segment: SpeakerSegment,
+  labels: {
+    microphone: string
+    system: string
+    speakerLabel: (index: number) => string
+  }
+): string {
+  if (segment.source === 'microphone') {
+    return labels.microphone
+  }
+  if (segment.source === 'system') {
+    return labels.system
+  }
+  return labels.speakerLabel(segment.speaker + 1)
+}
+
+function getSegmentColor(segment: SpeakerSegment): string {
+  if (segment.source === 'microphone') {
+    return '#E11D48'
+  }
+  if (segment.source === 'system') {
+    return '#2563EB'
+  }
+  return speakerColors[segment.speaker % speakerColors.length]
+}
+
 export function MeetingTranscription({
   state,
   onOpenSettings,
@@ -220,11 +247,11 @@ export function MeetingTranscription({
         ) : (
           <div className="space-y-5">
             {state.segments.map((segment) => {
-              const speakerColor = speakerColors[segment.speaker % speakerColors.length]
+              const speakerColor = getSegmentColor(segment)
               const segmentKey =
                 typeof segment.timestamp === 'number'
-                  ? `${segment.speaker}-${segment.timestamp}`
-                  : `${segment.speaker}-${segment.text}`
+                  ? `${segment.source || 'unknown'}-${segment.timestamp}`
+                  : `${segment.source || 'unknown'}-${segment.speaker}-${segment.text}`
 
               return (
                 <div key={segmentKey} className="flex gap-3 text-sm">
@@ -233,7 +260,11 @@ export function MeetingTranscription({
                   </span>
                   <div className="min-w-0 flex-1 space-y-1">
                     <p className="text-[13px] font-semibold" style={{ color: speakerColor }}>
-                      {m.meeting.speakerLabel(segment.speaker + 1)}
+                      {getSegmentLabel(segment, {
+                        microphone: m.meeting.microphoneLabel,
+                        system: m.meeting.systemLabel,
+                        speakerLabel: m.meeting.speakerLabel
+                      })}
                     </p>
                     <BilingualSegment pairs={toSentencePairsFromLive(segment)} />
                   </div>
@@ -249,11 +280,13 @@ export function MeetingTranscription({
                 <div className="min-w-0 flex-1 space-y-1">
                   <p
                     className="text-[13px] font-semibold"
-                    style={{
-                      color: speakerColors[state.currentSegment.speaker % speakerColors.length]
-                    }}
+                    style={{ color: getSegmentColor(state.currentSegment) }}
                   >
-                    {m.meeting.speakerLabel(state.currentSegment.speaker + 1)}
+                    {getSegmentLabel(state.currentSegment, {
+                      microphone: m.meeting.microphoneLabel,
+                      system: m.meeting.systemLabel,
+                      speakerLabel: m.meeting.speakerLabel
+                    })}
                   </p>
                   {state.currentSegment.endpointReason && (
                     <p className="text-[11px] text-muted-foreground">

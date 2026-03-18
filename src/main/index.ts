@@ -546,6 +546,7 @@ function persistPttTranscript(
 
 function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array<{
   speaker: number
+  source?: 'system' | 'microphone'
   text: string
   translated_text?: string
   sentence_pairs?: { original: string; translated?: string }[]
@@ -556,6 +557,7 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
       .filter((segment) => segment.text.trim())
       .map((segment) => ({
         speaker: segment.speaker,
+        source: segment.source,
         text: segment.text,
         translated_text: segment.translatedText,
         sentence_pairs: segment.sentencePairs?.map((pair) => ({
@@ -573,6 +575,7 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
   if (currentSegments.length > 0) {
     return currentSegments.map((segment) => ({
       speaker: segment.speaker ?? 0,
+      source: segment.source,
       text: segment.text,
       translated_text: segment.translatedText,
       sentence_pairs: segment.sentencePairs?.map((pair) => ({
@@ -586,6 +589,7 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
     .filter((item) => item.text.trim())
     .map((item) => ({
       speaker: item.speaker ?? 0,
+      source: item.source,
       text: item.text,
       translated_text: item.translatedText
     }))
@@ -1179,6 +1183,7 @@ ipcMain.handle(
       source_mode?: 'ptt' | 'meeting'
       segments: {
         speaker: number
+        source?: 'system' | 'microphone'
         text: string
         translated_text?: string
         sentence_pairs?: { original: string; translated?: string }[]

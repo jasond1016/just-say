@@ -16,6 +16,7 @@ export interface TranscriptSegment {
   id: number
   transcript_id: string
   speaker: number
+  source: 'system' | 'microphone' | null
   text: string
   translated_text: string | null
   segment_order: number
@@ -49,6 +50,7 @@ export interface SaveTranscriptRequest {
   source_mode?: UsageMode
   segments: {
     speaker: number
+    source?: 'system' | 'microphone'
     text: string
     translated_text?: string
     sentence_pairs?: {

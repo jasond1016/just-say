@@ -230,8 +230,8 @@ function insertSegments(
   segments: SaveTranscriptRequest['segments']
 ): void {
   const segmentStmt = db.prepare(`
-    INSERT INTO transcript_segments (transcript_id, speaker, text, translated_text, segment_order)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO transcript_segments (transcript_id, speaker, source, text, translated_text, segment_order)
+    VALUES (?, ?, ?, ?, ?, ?)
   `)
 
   const pairStmt = db.prepare(`
@@ -245,6 +245,7 @@ function insertSegments(
       const result = segmentStmt.run(
         transcriptId,
         seg.speaker,
+        seg.source || null,
         seg.text,
         seg.translated_text || null,
         i

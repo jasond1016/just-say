@@ -60,6 +60,8 @@ export const enUS = {
     endpointLabel: 'Endpoint',
     liveWordTimings: 'Live word timings',
     previewTail: 'Preview tail',
+    microphoneLabel: 'You',
+    systemLabel: 'Remote',
     speakerLabel: (index: number): string => `Speaker ${index}`
   },
   history: {
@@ -84,6 +86,8 @@ export const enUS = {
     loading: 'Loading transcript...',
     notFound: 'Transcript not found.',
     back: 'Back',
+    microphoneLabel: 'You',
+    systemLabel: 'Remote',
     speakerLabel: (index: number): string => `Speaker ${index}`,
     speakerCount: (count: number): string => `${count} speakers`,
     copy: 'Copy',
@@ -115,6 +119,9 @@ export const enUS = {
     english: 'English',
     japanese: 'Japanese',
     korean: 'Korean',
+    meetingIncludeMicrophone: 'Include Microphone In Meeting',
+    meetingIncludeMicrophoneDescription:
+      'Capture your microphone as a separate transcript stream during meeting transcription.',
     microphoneDevice: 'Microphone Device',
     refresh: 'Refresh',
     refreshing: 'Refreshing...',

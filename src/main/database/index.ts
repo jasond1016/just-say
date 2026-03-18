@@ -38,6 +38,7 @@ export function initDatabase(): Database.Database {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       transcript_id TEXT NOT NULL,
       speaker INTEGER NOT NULL,
+      source TEXT,
       text TEXT NOT NULL,
       translated_text TEXT,
       segment_order INTEGER NOT NULL,
@@ -78,6 +79,12 @@ export function initDatabase(): Database.Database {
   // Schema migration for existing databases created before `source_mode` was introduced.
   try {
     db.exec("ALTER TABLE transcripts ADD COLUMN source_mode TEXT NOT NULL DEFAULT 'meeting';")
+  } catch {
+    // Ignore duplicate-column errors for already migrated databases.
+  }
+
+  try {
+    db.exec('ALTER TABLE transcript_segments ADD COLUMN source TEXT;')
   } catch {
     // Ignore duplicate-column errors for already migrated databases.
   }

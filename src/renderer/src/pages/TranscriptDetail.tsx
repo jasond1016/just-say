@@ -16,6 +16,36 @@ interface TranscriptDetailProps {
 
 const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
 
+function getStoredSegmentLabel(
+  segment: { source: 'system' | 'microphone' | null; speaker: number },
+  labels: {
+    microphone: string
+    system: string
+    speakerLabel: (index: number) => string
+  }
+): string {
+  if (segment.source === 'microphone') {
+    return labels.microphone
+  }
+  if (segment.source === 'system') {
+    return labels.system
+  }
+  return labels.speakerLabel(segment.speaker + 1)
+}
+
+function getStoredSegmentColor(segment: {
+  source: 'system' | 'microphone' | null
+  speaker: number
+}): string {
+  if (segment.source === 'microphone') {
+    return '#E11D48'
+  }
+  if (segment.source === 'system') {
+    return '#2563EB'
+  }
+  return speakerColors[segment.speaker % speakerColors.length]
+}
+
 function formatSegmentTime(index: number, total: number, durationSeconds: number): string {
   if (total <= 1 || durationSeconds <= 0) {
     return '0:00'
@@ -56,14 +86,22 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             return `${pair.original}${translated}`
           })
           .join('\n')
-        return `${m.detail.speakerLabel(segment.speaker + 1)}: ${pairLines}`
+        return `${getStoredSegmentLabel(segment, {
+          microphone: m.detail.microphoneLabel,
+          system: m.detail.systemLabel,
+          speakerLabel: m.detail.speakerLabel
+        })}: ${pairLines}`
       })
       .join('\n\n')
   }, [currentTranscript, m])
 
   const speakerCount = useMemo(() => {
     if (!currentTranscript) return 0
-    return new Set(currentTranscript.segments.map((segment) => segment.speaker)).size
+    return new Set(
+      currentTranscript.segments.map((segment) =>
+        segment.source ? `source:${segment.source}` : `speaker:${segment.speaker}`
+      )
+    ).size
   }, [currentTranscript])
 
   const handleCopy = useCallback(async () => {
@@ -202,9 +240,13 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
               <div className="min-w-0 flex-1 space-y-1">
                 <p
                   className="text-[13px] font-semibold"
-                  style={{ color: speakerColors[segment.speaker % speakerColors.length] }}
+                  style={{ color: getStoredSegmentColor(segment) }}
                 >
-                  {m.detail.speakerLabel(segment.speaker + 1)}
+                  {getStoredSegmentLabel(segment, {
+                    microphone: m.detail.microphoneLabel,
+                    system: m.detail.systemLabel,
+                    speakerLabel: m.detail.speakerLabel
+                  })}
                 </p>
                 <BilingualSegment
                   pairs={toSentencePairsFromStored(segment)}

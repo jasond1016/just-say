@@ -9,8 +9,11 @@ export interface SentencePair {
   translated?: string | null
 }
 
+export type TranscriptSource = 'system' | 'microphone'
+
 export interface SpeakerSegment {
   speaker: number
+  source?: TranscriptSource
   text: string
   stableText?: string
   unstableText?: string
@@ -37,6 +40,7 @@ export interface MeetingTranscriptEvent {
   translatedText?: string
   timestamp: number
   isFinal: boolean
+  source?: TranscriptSource
   speaker?: number
   speakerSegments?: SpeakerSegment[]
   currentSpeakerSegment?: SpeakerSegment | null

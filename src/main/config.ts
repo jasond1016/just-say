@@ -21,6 +21,9 @@ export interface AppConfig {
     backend?: 'local' | 'api' | 'network' | 'soniox' | 'groq'
     language?: string
     punctuation?: boolean
+    meeting?: {
+      includeMicrophone?: boolean
+    }
     translation?: {
       provider?: 'openai-compatible'
       enabledForPtt?: boolean
@@ -134,6 +137,9 @@ const defaultConfig: AppConfig = {
     backend: 'local',
     language: 'auto',
     punctuation: true,
+    meeting: {
+      includeMicrophone: false
+    },
     translation: {
       provider: 'openai-compatible',
       enabledForPtt: false,

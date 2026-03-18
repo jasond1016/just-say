@@ -60,6 +60,8 @@ export const zhCN: typeof enUS = {
     endpointLabel: '切分点',
     liveWordTimings: '实时词时序',
     previewTail: '预览尾部',
+    microphoneLabel: '我',
+    systemLabel: '远端',
     speakerLabel: (index: number): string => `说话人 ${index}`
   },
   history: {
@@ -84,6 +86,8 @@ export const zhCN: typeof enUS = {
     loading: '正在加载转录...',
     notFound: '未找到该转录记录。',
     back: '返回',
+    microphoneLabel: '我',
+    systemLabel: '远端',
     speakerLabel: (index: number): string => `说话人 ${index}`,
     speakerCount: (count: number): string => `${count} 位说话人`,
     copy: '复制',
@@ -115,6 +119,8 @@ export const zhCN: typeof enUS = {
     english: '英文',
     japanese: '日文',
     korean: '韩文',
+    meetingIncludeMicrophone: '会议时包含麦克风',
+    meetingIncludeMicrophoneDescription: '会议转录时单独采集麦克风，并与系统音频分开展示。',
     microphoneDevice: '麦克风设备',
     refresh: '刷新',
     refreshing: '刷新中...',
@@ -127,8 +133,7 @@ export const zhCN: typeof enUS = {
     localRecognitionModeStreaming: '仅流式（WebSocket）',
     localRecognitionModeHttpChunk: '仅 HTTP 分块',
     localTranscriptionProfile: 'HTTP 转录 profile',
-    localTranscriptionProfileDescription:
-      '用于本地 HTTP 单次转录，包括 PTT 和 HTTP 分块回退路径。',
+    localTranscriptionProfileDescription: '用于本地 HTTP 单次转录，包括 PTT 和 HTTP 分块回退路径。',
     localTranscriptionProfileSingleShot: '单次整段',
     localTranscriptionProfileOfflineSegmented: '离线分段',
     localHoldMs: '弱边界等待（毫秒）',

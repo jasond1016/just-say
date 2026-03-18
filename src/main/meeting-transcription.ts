@@ -1,5 +1,10 @@
 import { EventEmitter } from 'events'
-import type { MeetingTranscriptEvent, PartialResult } from '../shared/transcription-types'
+import type {
+  MeetingTranscriptEvent,
+  PartialResult,
+  SpeakerSegment,
+  TranscriptSource
+} from '../shared/transcription-types'
 import { StreamingSonioxRecognizer, StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingGroqRecognizer, StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingLocalRecognizer, StreamingLocalConfig } from './recognition/streaming-local'
@@ -33,7 +38,7 @@ export interface MeetingTranscriptionOptions {
 }
 
 export interface TranscriptSegment extends MeetingTranscriptEvent {
-  source?: 'system' | 'microphone' | 'mixed'
+  source?: TranscriptSource
 }
 
 export type MeetingStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
@@ -60,14 +65,23 @@ interface LocalTranslationBatchConfig {
 export class MeetingTranscriptionManager extends EventEmitter {
   private static readonly PRECONNECT_WAIT_TIMEOUT_MS = 2500
 
-  private pendingPartialDispatch: {
-    recognizer: Recognizer
-    result: PartialResult
-  } | null = null
+  private pendingPartialDispatchBySource: Partial<
+    Record<
+      TranscriptSource,
+      {
+        recognizer: Recognizer
+        result: PartialResult
+      }
+    >
+  > = {}
   private partialDispatchScheduled = false
   private preConnectAttemptId = 0
 
-  private recognizer: Recognizer | null = null
+  private preconnectedRecognizer: Recognizer | null = null
+  private recognizers: Partial<Record<TranscriptSource, Recognizer>> = {}
+  private partialStateBySource: Partial<Record<TranscriptSource, PartialResult>> = {}
+  private currentSegmentTimestampBySource: Partial<Record<TranscriptSource, number | null>> = {}
+  private segmentTimestampCache = new Map<string, number>()
   private backend: MeetingBackend
   private sonioxConfig?: StreamingSonioxConfig
   private groqConfig?: StreamingGroqConfig
@@ -84,10 +98,6 @@ export class MeetingTranscriptionManager extends EventEmitter {
   private lastTranslatedTextLength = 0
   private maxSentencePairsSeen = 0
   private maxTranslatedSentencePairsSeen = 0
-
-  // For mixing audio streams
-  private mixBuffer: Buffer[] = []
-  private mixInterval: NodeJS.Timeout | null = null
 
   // Flag to track if we're using renderer audio
   private usingRendererAudio = false
@@ -121,7 +131,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
    * Call this when the meeting window opens or before user starts transcription.
    */
   async preConnect(): Promise<void> {
-    if (this.recognizer?.isPreConnected()) {
+    if (this.preconnectedRecognizer?.isPreConnected()) {
       console.log('[MeetingTranscription] Already pre-connected')
       return
     }
@@ -143,7 +153,10 @@ export class MeetingTranscriptionManager extends EventEmitter {
   private async createLocalRecognizerWithFallback(
     localConfig: StreamingLocalConfig | undefined,
     wsConfig: StreamingLocalWsConfig
-  ): Promise<{ recognizer: StreamingLocalWsRecognizer | StreamingLocalRecognizer; preConnected: boolean }> {
+  ): Promise<{
+    recognizer: StreamingLocalWsRecognizer | StreamingLocalRecognizer
+    preConnected: boolean
+  }> {
     const mode = localConfig?.mode || 'auto'
     if (mode !== 'http_chunk') {
       const wsRecognizer = new StreamingLocalWsRecognizer(wsConfig)
@@ -164,7 +177,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
   }
 
   private async doPreConnect(attemptId: number): Promise<void> {
-    if (this.recognizer?.isPreConnected()) {
+    if (this.preconnectedRecognizer?.isPreConnected()) {
       return
     }
 
@@ -176,10 +189,9 @@ export class MeetingTranscriptionManager extends EventEmitter {
     if (this.backend === 'groq') {
       recognizer = new StreamingGroqRecognizer(this.groqConfig)
     } else if (this.backend === 'local') {
-      const result = await this.createLocalRecognizerWithFallback(
-        this.localConfig,
-        { ...this.localConfig }
-      )
+      const result = await this.createLocalRecognizerWithFallback(this.localConfig, {
+        ...this.localConfig
+      })
       recognizer = result.recognizer
       alreadyPreConnected = result.preConnected
     } else {
@@ -198,11 +210,11 @@ export class MeetingTranscriptionManager extends EventEmitter {
       const canAdoptRecognizer =
         attemptId === this.preConnectAttemptId &&
         this.status === 'idle' &&
-        (!this.recognizer || !this.recognizer.isSessionActive())
+        (!this.preconnectedRecognizer || !this.preconnectedRecognizer.isSessionActive())
 
       if (canAdoptRecognizer) {
-        this.recognizer?.close()
-        this.recognizer = recognizer
+        this.preconnectedRecognizer?.close()
+        this.preconnectedRecognizer = recognizer
         console.log('[MeetingTranscription] Pre-connected successfully')
       } else {
         recognizer.close()
@@ -269,7 +281,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
    * Check if pre-connected and ready
    */
   isPreConnected(): boolean {
-    return this.recognizer?.isPreConnected() ?? false
+    return this.preconnectedRecognizer?.isPreConnected() ?? false
   }
 
   /**
@@ -295,6 +307,83 @@ export class MeetingTranscriptionManager extends EventEmitter {
     return [...this.transcriptHistory]
   }
 
+  private getRequestedSources(includeMicrophone: boolean): TranscriptSource[] {
+    return includeMicrophone ? ['system', 'microphone'] : ['system']
+  }
+
+  private async createRecognizerForSource(
+    source: TranscriptSource,
+    options: MeetingTranscriptionOptions,
+    useExternalTranslation: boolean
+  ): Promise<Recognizer> {
+    if (this.backend === 'groq') {
+      const recognizerConfig: StreamingGroqConfig = {
+        ...this.groqConfig,
+        translation: useExternalTranslation
+          ? { enabled: true, targetLanguage: options.targetLanguage! }
+          : undefined,
+        externalTranslator: useExternalTranslation ? this.externalTranslator : undefined
+      }
+      return new StreamingGroqRecognizer(recognizerConfig)
+    }
+
+    if (this.backend === 'local') {
+      const recognizerConfig: StreamingLocalConfig = {
+        ...this.localConfig,
+        translation: useExternalTranslation
+          ? {
+              enabled: true,
+              targetLanguage: options.targetLanguage!,
+              translator: this.externalTranslator,
+              batchTranslator: this.externalBatchTranslator,
+              batchWindowMs: this.localTranslationBatchConfig?.batchWindowMs,
+              maxBatchItems: this.localTranslationBatchConfig?.maxBatchItems
+            }
+          : undefined
+      }
+      const wsConfig: StreamingLocalWsConfig = {
+        ...recognizerConfig,
+        translation: recognizerConfig.translation
+      }
+      if (source === 'system') {
+        if (
+          this.preconnectedRecognizer instanceof StreamingLocalWsRecognizer &&
+          this.preconnectedRecognizer.isPreConnected()
+        ) {
+          this.preconnectedRecognizer.updateConfig(wsConfig)
+          return this.preconnectedRecognizer
+        }
+        if (
+          recognizerConfig.mode === 'http_chunk' &&
+          this.preconnectedRecognizer instanceof StreamingLocalRecognizer &&
+          this.preconnectedRecognizer.isPreConnected()
+        ) {
+          this.preconnectedRecognizer.updateConfig(recognizerConfig)
+          return this.preconnectedRecognizer
+        }
+      }
+      const result = await this.createLocalRecognizerWithFallback(recognizerConfig, wsConfig)
+      return result.recognizer
+    }
+
+    const recognizerConfig: StreamingSonioxConfig = {
+      ...this.sonioxConfig,
+      translation:
+        options.translationEnabled && options.targetLanguage
+          ? { enabled: true, targetLanguage: options.targetLanguage }
+          : undefined
+    }
+    if (
+      source === 'system' &&
+      this.preconnectedRecognizer instanceof StreamingSonioxRecognizer &&
+      this.preconnectedRecognizer.isPreConnected()
+    ) {
+      this.preconnectedRecognizer.updateConfig(recognizerConfig)
+      return this.preconnectedRecognizer
+    }
+    return new StreamingSonioxRecognizer(recognizerConfig)
+  }
+
   /**
    * Start meeting transcription
    */
@@ -305,8 +394,12 @@ export class MeetingTranscriptionManager extends EventEmitter {
 
     this.setStatus('starting')
     this.transcriptHistory = []
-    this.pendingPartialDispatch = null
+    this.pendingPartialDispatchBySource = {}
     this.partialDispatchScheduled = false
+    this.partialStateBySource = {}
+    this.currentSegmentTimestampBySource = {}
+    this.segmentTimestampCache.clear()
+    this.recognizers = {}
     this.lastTextLength = 0
     this.lastTranslatedTextLength = 0
     this.maxSentencePairsSeen = 0
@@ -339,104 +432,49 @@ export class MeetingTranscriptionManager extends EventEmitter {
         )
       }
 
-      if (this.backend === 'groq') {
-        const recognizerConfig: StreamingGroqConfig = {
-          ...this.groqConfig,
-          translation: useExternalTranslation
-            ? { enabled: true, targetLanguage: options.targetLanguage! }
-            : undefined,
-          externalTranslator: useExternalTranslation ? this.externalTranslator : undefined
-        }
-        this.recognizer = new StreamingGroqRecognizer(recognizerConfig)
-      } else if (this.backend === 'local') {
-        const recognizerConfig: StreamingLocalConfig = {
-          ...this.localConfig,
-          translation: useExternalTranslation
-            ? {
-                enabled: true,
-                targetLanguage: options.targetLanguage!,
-                translator: useExternalTranslation ? this.externalTranslator : undefined,
-                batchTranslator: useExternalTranslation ? this.externalBatchTranslator : undefined,
-                batchWindowMs: this.localTranslationBatchConfig?.batchWindowMs,
-                maxBatchItems: this.localTranslationBatchConfig?.maxBatchItems
-              }
-            : undefined
-        }
-        const wsConfig: StreamingLocalWsConfig = {
-          ...recognizerConfig,
-          translation: recognizerConfig.translation
-        }
-        if (
-          this.recognizer instanceof StreamingLocalWsRecognizer &&
-          this.recognizer.isPreConnected()
-        ) {
-          this.recognizer.updateConfig(wsConfig)
-        } else if (
-          recognizerConfig.mode === 'http_chunk' &&
-          this.recognizer instanceof StreamingLocalRecognizer &&
-          this.recognizer.isPreConnected()
-        ) {
-          this.recognizer.updateConfig(recognizerConfig)
-        } else {
-          const result = await this.createLocalRecognizerWithFallback(recognizerConfig, wsConfig)
-          this.recognizer = result.recognizer
-        }
-      } else {
-        const recognizerConfig: StreamingSonioxConfig = {
-          ...this.sonioxConfig,
-          translation:
-            options.translationEnabled && options.targetLanguage
-              ? { enabled: true, targetLanguage: options.targetLanguage }
-              : undefined
-        }
-        if (
-          this.recognizer instanceof StreamingSonioxRecognizer &&
-          this.recognizer.isPreConnected()
-        ) {
-          this.recognizer.updateConfig(recognizerConfig)
-        } else {
-          this.recognizer = new StreamingSonioxRecognizer(recognizerConfig)
-        }
+      const sources = this.getRequestedSources(options.includeMicrophone)
+      for (const source of sources) {
+        this.recognizers[source] = await this.createRecognizerForSource(
+          source,
+          options,
+          useExternalTranslation
+        )
       }
 
-      const recognizer = this.recognizer
-      if (!recognizer) {
-        throw new Error('Recognizer initialization failed')
+      for (const source of sources) {
+        const recognizer = this.recognizers[source]
+        if (!recognizer) {
+          throw new Error(`Recognizer initialization failed for ${source}`)
+        }
+
+        recognizer.removeAllListeners('partial')
+        recognizer.removeAllListeners('error')
+
+        recognizer.on('partial', (result: PartialResult) => {
+          this.queuePartialDispatch(source, recognizer, result)
+        })
+
+        recognizer.on('error', (err: Error) => {
+          console.error(`[MeetingTranscription] Recognizer error (${source}):`, err)
+          this.emit('error', err)
+        })
       }
 
-      // Set up recognizer events (clear any from pre-connect first)
-      recognizer.removeAllListeners('partial')
-      recognizer.removeAllListeners('error')
-
-      recognizer.on('partial', (result: PartialResult) => {
-        this.queuePartialDispatch(recognizer, result)
-      })
-
-      recognizer.on('error', (err: Error) => {
-        console.error('[MeetingTranscription] Recognizer error:', err)
-        this.emit('error', err)
-      })
-
-      // Start WebSocket connection (instant if pre-connected)
       profiler.markConnectionStart()
-      await recognizer.startSession()
+      await Promise.all(
+        sources.map(async (source) => {
+          const recognizer = this.recognizers[source]
+          if (!recognizer) {
+            throw new Error(`Recognizer missing for ${source}`)
+          }
+          await recognizer.startSession()
+        })
+      )
       profiler.markConnectionEstablished()
-      console.log('[MeetingTranscription] Recognizer session started')
+      console.log('[MeetingTranscription] Recognizer sessions started')
 
-      // Both system audio and microphone are now captured in renderer process and sent via IPC
-      // Set flags to indicate we're ready to receive audio from renderer
       this.usingRendererAudio = true
       this.usingMicrophone = options.includeMicrophone
-
-      if (options.includeMicrophone) {
-        // Mixed mode: both system audio and microphone from renderer
-        // Send mixed audio periodically
-        this.mixInterval = setInterval(() => {
-          this.sendMixedAudio()
-        }, 50) // Send every 50ms for lower latency
-        console.log('[MeetingTranscription] Mixed mode enabled (microphone + system audio)')
-      }
-      // For system audio only mode, audio will be received via handleRendererAudioChunk
 
       this.setStatus('transcribing')
       console.log('[MeetingTranscription] Ready to receive audio from renderer')
@@ -460,39 +498,71 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.setStatus('stopping')
 
     try {
-      // Stop mixing interval
-      if (this.mixInterval) {
-        clearInterval(this.mixInterval)
-        this.mixInterval = null
-      }
-
-      // Mark that we're no longer receiving renderer audio
       this.usingRendererAudio = false
       this.usingMicrophone = false
 
-      // End recognizer session and get final result
-      if (this.recognizer) {
-        const result = await this.recognizer.endSession()
-        if (result.text) {
-          const finalSegment: TranscriptSegment = {
-            text: result.text,
-            timestamp: Date.now(),
-            isFinal: true,
-            source: 'mixed',
-            speakerSegments: result.segments,
-            currentSpeakerSegment: result.currentSegment
+      const activeSources = (Object.keys(this.recognizers) as TranscriptSource[]).filter(
+        (source) => this.recognizers[source]
+      )
+      const resultEntries = await Promise.all(
+        activeSources.map(async (source) => {
+          const recognizer = this.recognizers[source]
+          if (!recognizer) {
+            return null
           }
-          this.transcriptHistory.push(finalSegment)
-          this.emit('transcript', finalSegment)
+          const result = await recognizer.endSession()
+          return { source, recognizer, result }
+        })
+      )
+
+      const finalSegments = resultEntries
+        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .flatMap((entry) => this.buildSegmentsFromRecognizerResult(entry.source, entry.result))
+
+      if (finalSegments.length > 0) {
+        const orderedFinalSegments = this.sortSegments(finalSegments)
+        const finalSegment: TranscriptSegment = {
+          text: orderedFinalSegments
+            .map((segment) => segment.text)
+            .join('')
+            .trim(),
+          translatedText:
+            orderedFinalSegments
+              .map((segment) => segment.translatedText || '')
+              .join('')
+              .trim() || undefined,
+          timestamp: Date.now(),
+          isFinal: true,
+          source: undefined,
+          speakerSegments: orderedFinalSegments,
+          currentSpeakerSegment: null,
+          translationEnabled: orderedFinalSegments.some((segment) => !!segment.translatedText)
         }
-        const keepWarmRecognizer =
-          this.recognizer instanceof StreamingLocalRecognizer ||
-          this.recognizer instanceof StreamingLocalWsRecognizer ||
-          this.recognizer instanceof StreamingGroqRecognizer
-        if (!keepWarmRecognizer) {
-          this.recognizer = null
-        }
+        this.transcriptHistory = [finalSegment]
+        this.emit('transcript', finalSegment)
       }
+
+      const systemRecognizer = this.recognizers.system || null
+      const keepWarmRecognizer =
+        systemRecognizer instanceof StreamingLocalRecognizer ||
+        systemRecognizer instanceof StreamingLocalWsRecognizer ||
+        systemRecognizer instanceof StreamingGroqRecognizer
+      if (keepWarmRecognizer) {
+        this.preconnectedRecognizer = systemRecognizer
+      } else {
+        this.preconnectedRecognizer = null
+      }
+
+      for (const source of activeSources) {
+        const recognizer = this.recognizers[source]
+        if (!recognizer || recognizer === this.preconnectedRecognizer) {
+          continue
+        }
+        recognizer.close()
+      }
+      this.recognizers = {}
+      this.partialStateBySource = {}
+      this.currentSegmentTimestampBySource = {}
 
       profiler.markSentencePairMetrics({
         sentencePairs: this.maxSentencePairsSeen,
@@ -512,7 +582,6 @@ export class MeetingTranscriptionManager extends EventEmitter {
       console.error('[MeetingTranscription] Stop error:', err)
     } finally {
       this.setStatus('idle')
-      this.mixBuffer = []
     }
 
     return this.transcriptHistory
@@ -531,105 +600,117 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.emit('status', status)
   }
 
-  /**
-   * Mix audio buffers and send to recognizer
-   */
-  private sendMixedAudio(): void {
-    if (this.mixBuffer.length === 0) return
-
-    // Simple mixing: just concatenate buffers
-    const combined = Buffer.concat(this.mixBuffer)
-    const bytesSent = combined.length
-    this.mixBuffer = []
-
-    profiler.markAudioSent(bytesSent)
-    this.recognizer?.sendAudioChunk(combined)
+  private buildSegmentTimestampCacheKey(
+    source: TranscriptSource,
+    segment: SpeakerSegment,
+    occurrenceIndex: number
+  ): string {
+    return `${source}|${occurrenceIndex}|${segment.speaker}|${segment.text}|${segment.timestamp ?? 'na'}`
   }
 
-  /**
-   * Handle audio chunk from renderer process (system audio via desktopCapturer)
-   */
-  handleRendererAudioChunk(chunk: Buffer): void {
-    if (!this.usingRendererAudio || this.status !== 'transcribing') {
-      return
-    }
-
-    if (this.mixInterval) {
-      // Mixed mode: add to mix buffer
-      this.mixBuffer.push(chunk)
-    } else {
-      // Direct mode: send to recognizer
-      profiler.markAudioSent(chunk.length)
-      this.recognizer?.sendAudioChunk(chunk)
+  private withSource(
+    source: TranscriptSource,
+    segment: SpeakerSegment,
+    fallbackTimestamp: number,
+    occurrenceIndex: number
+  ): SpeakerSegment {
+    const cacheKey = this.buildSegmentTimestampCacheKey(source, segment, occurrenceIndex)
+    const timestamp =
+      segment.timestamp ?? this.segmentTimestampCache.get(cacheKey) ?? fallbackTimestamp
+    this.segmentTimestampCache.set(cacheKey, timestamp)
+    return {
+      ...segment,
+      source,
+      timestamp
     }
   }
 
-  /**
-   * Handle microphone audio chunk from renderer process (via getUserMedia)
-   */
-  handleMicrophoneAudioChunk(chunk: Buffer): void {
-    if (!this.usingMicrophone || this.status !== 'transcribing') {
-      return
+  private tagSegments(
+    source: TranscriptSource,
+    segments: SpeakerSegment[],
+    currentSegment?: SpeakerSegment | null
+  ): SpeakerSegment[] {
+    const baseTimestamp = Date.now()
+    const taggedFinalSegments = segments.map((segment, index) =>
+      this.withSource(source, segment, baseTimestamp + index, index)
+    )
+    if (currentSegment?.text?.trim()) {
+      const nextTimestamp = this.currentSegmentTimestampBySource[source] ?? Date.now()
+      this.currentSegmentTimestampBySource[source] = nextTimestamp
+      return [
+        ...taggedFinalSegments,
+        {
+          ...currentSegment,
+          source,
+          timestamp: currentSegment.timestamp ?? nextTimestamp
+        }
+      ]
     }
-
-    // Microphone audio goes into the mix buffer (along with system audio)
-    this.mixBuffer.push(chunk)
+    if (currentSegment === null) {
+      this.currentSegmentTimestampBySource[source] = null
+    }
+    return taggedFinalSegments
   }
 
-  private async cleanup(): Promise<void> {
-    if (this.mixInterval) {
-      clearInterval(this.mixInterval)
-      this.mixInterval = null
+  private buildSegmentsFromRecognizerResult(
+    source: TranscriptSource,
+    result: {
+      segments: SpeakerSegment[]
+      currentSegment: SpeakerSegment | null
     }
+  ): SpeakerSegment[] {
+    return this.tagSegments(source, result.segments, result.currentSegment)
+  }
 
-    this.usingRendererAudio = false
-    this.usingMicrophone = false
-
-    if (this.recognizer) {
-      try {
-        this.recognizer.close()
-      } catch {
-        // Ignore cleanup errors
+  private sortSegments(segments: SpeakerSegment[]): SpeakerSegment[] {
+    return [...segments].sort((left, right) => {
+      const leftTimestamp = left.timestamp ?? 0
+      const rightTimestamp = right.timestamp ?? 0
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp
       }
-      this.recognizer = null
-    }
-
-    this.mixBuffer = []
-  }
-
-  private queuePartialDispatch(
-    recognizer:
-      | StreamingSonioxRecognizer
-      | StreamingGroqRecognizer
-      | StreamingLocalRecognizer
-      | StreamingLocalWsRecognizer,
-    result: PartialResult
-  ): void {
-    this.pendingPartialDispatch = { recognizer, result }
-    if (this.partialDispatchScheduled) {
-      return
-    }
-
-    this.partialDispatchScheduled = true
-    queueMicrotask(() => {
-      this.partialDispatchScheduled = false
-      const pending = this.pendingPartialDispatch
-      this.pendingPartialDispatch = null
-      if (!pending || pending.recognizer !== this.recognizer) {
-        return
+      if ((left.source || '') !== (right.source || '')) {
+        return (left.source || '').localeCompare(right.source || '')
       }
-      this.emitPartialTranscript(pending.recognizer, pending.result)
+      return left.speaker - right.speaker
     })
   }
 
-  private emitPartialTranscript(
-    recognizer:
-      | StreamingSonioxRecognizer
-      | StreamingGroqRecognizer
-      | StreamingLocalRecognizer
-      | StreamingLocalWsRecognizer,
-    result: PartialResult
-  ): void {
+  private buildMergedCurrentSegment(): SpeakerSegment | null {
+    const currentSegments: SpeakerSegment[] = []
+    for (const [source, result] of Object.entries(this.partialStateBySource) as Array<
+      [TranscriptSource, PartialResult | undefined]
+    >) {
+      if (!result?.currentSegment?.text?.trim()) {
+        this.currentSegmentTimestampBySource[source] = null
+        continue
+      }
+      const nextTimestamp = this.currentSegmentTimestampBySource[source] ?? Date.now()
+      this.currentSegmentTimestampBySource[source] = nextTimestamp
+      currentSegments.push({
+        ...result.currentSegment,
+        source,
+        timestamp: result.currentSegment.timestamp ?? nextTimestamp
+      })
+    }
+
+    if (currentSegments.length === 0) {
+      return null
+    }
+
+    return this.sortSegments(currentSegments)[currentSegments.length - 1]
+  }
+
+  private buildMergedCommittedSegments(): SpeakerSegment[] {
+    const merged = (
+      Object.entries(this.partialStateBySource) as Array<
+        [TranscriptSource, PartialResult | undefined]
+      >
+    ).flatMap(([source, result]) => this.tagSegments(source, result?.segments || []))
+    return this.sortSegments(merged)
+  }
+
+  private updateMetrics(result: PartialResult): void {
     const translatedLength = result.currentSegment?.translatedText?.length || 0
     const responseType =
       result.combined.length > this.lastTextLength
@@ -649,34 +730,137 @@ export class MeetingTranscriptionManager extends EventEmitter {
     if (translatedSentencePairs > this.maxTranslatedSentencePairsSeen) {
       this.maxTranslatedSentencePairsSeen = translatedSentencePairs
     }
+  }
 
+  private emitMergedPartialTranscript(): void {
+    const speakerSegments = this.buildMergedCommittedSegments()
+    const currentSpeakerSegment = this.buildMergedCurrentSegment()
+    const orderedVisibleSegments = this.sortSegments(
+      currentSpeakerSegment ? [...speakerSegments, currentSpeakerSegment] : speakerSegments
+    )
     const segment: TranscriptSegment = {
-      text: result.combined,
-      translatedText: result.currentSegment?.translatedText,
+      text: orderedVisibleSegments
+        .map((item) => item.text)
+        .join('')
+        .trim(),
+      translatedText:
+        orderedVisibleSegments
+          .map((item) => item.translatedText || '')
+          .join('')
+          .trim() || undefined,
       timestamp: Date.now(),
       isFinal: false,
-      source: 'mixed',
-      speaker: result.currentSpeaker,
-      speakerSegments: result.segments,
-      currentSpeakerSegment: result.currentSegment,
-      currentWordTimings: result.currentWordTimings,
-      translationEnabled: result.translationEnabled
+      source: currentSpeakerSegment?.source,
+      speaker: currentSpeakerSegment?.speaker,
+      speakerSegments,
+      currentSpeakerSegment,
+      currentWordTimings: currentSpeakerSegment?.wordTimings,
+      translationEnabled: orderedVisibleSegments.some((item) => !!item.translatedText)
     }
 
-    if (recognizer instanceof StreamingLocalWsRecognizer) {
+    if (this.recognizers.system instanceof StreamingLocalWsRecognizer) {
       console.log(
         '[MeetingTranscription][Debug]',
         JSON.stringify({
-          segments: result.segments.length,
-          segmentTexts: result.segments.map((item) => item.text),
-          currentText: result.currentSegment?.text || '',
-          currentStableText: result.currentSegment?.stableText || '',
-          currentPreviewText: result.currentSegment?.unstableText || '',
-          combined: result.combined
+          segments: speakerSegments.length,
+          segmentTexts: speakerSegments.map((item) => `${item.source}:${item.text}`),
+          currentText: currentSpeakerSegment?.text || '',
+          currentSource: currentSpeakerSegment?.source || null,
+          combined: segment.text
         })
       )
     }
 
     this.emit('transcript', segment)
+  }
+
+  /**
+   * Handle audio chunk from renderer process (system audio via desktopCapturer)
+   */
+  handleRendererAudioChunk(chunk: Buffer): void {
+    if (!this.usingRendererAudio || this.status !== 'transcribing') {
+      return
+    }
+
+    const recognizer = this.recognizers.system
+    if (!recognizer) {
+      return
+    }
+    profiler.markAudioSent(chunk.length)
+    recognizer.sendAudioChunk(chunk)
+  }
+
+  /**
+   * Handle microphone audio chunk from renderer process (via getUserMedia)
+   */
+  handleMicrophoneAudioChunk(chunk: Buffer): void {
+    if (!this.usingMicrophone || this.status !== 'transcribing') {
+      return
+    }
+
+    const recognizer = this.recognizers.microphone
+    if (!recognizer) {
+      return
+    }
+    profiler.markAudioSent(chunk.length)
+    recognizer.sendAudioChunk(chunk)
+  }
+
+  private async cleanup(): Promise<void> {
+    this.usingRendererAudio = false
+    this.usingMicrophone = false
+
+    for (const source of Object.keys(this.recognizers) as TranscriptSource[]) {
+      const recognizer = this.recognizers[source]
+      if (!recognizer) {
+        continue
+      }
+      try {
+        recognizer.close()
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+    this.recognizers = {}
+    this.partialStateBySource = {}
+    this.pendingPartialDispatchBySource = {}
+    this.currentSegmentTimestampBySource = {}
+    this.preconnectedRecognizer = null
+  }
+
+  private queuePartialDispatch(
+    source: TranscriptSource,
+    recognizer:
+      | StreamingSonioxRecognizer
+      | StreamingGroqRecognizer
+      | StreamingLocalRecognizer
+      | StreamingLocalWsRecognizer,
+    result: PartialResult
+  ): void {
+    this.pendingPartialDispatchBySource[source] = { recognizer, result }
+    if (this.partialDispatchScheduled) {
+      return
+    }
+
+    this.partialDispatchScheduled = true
+    queueMicrotask(() => {
+      this.partialDispatchScheduled = false
+      const pendingEntries = Object.entries(this.pendingPartialDispatchBySource) as Array<
+        [TranscriptSource, { recognizer: Recognizer; result: PartialResult }]
+      >
+      this.pendingPartialDispatchBySource = {}
+      let updated = false
+      for (const [pendingSource, pending] of pendingEntries) {
+        if (!pending || pending.recognizer !== this.recognizers[pendingSource]) {
+          continue
+        }
+        this.partialStateBySource[pendingSource] = pending.result
+        this.updateMetrics(pending.result)
+        updated = true
+      }
+      if (updated) {
+        this.emitMergedPartialTranscript()
+      }
+    })
   }
 }

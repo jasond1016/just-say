@@ -32,6 +32,9 @@ interface RendererConfig {
   recognition?: {
     backend?: Backend
     language?: string
+    meeting?: {
+      includeMicrophone?: boolean
+    }
     translation?: {
       provider?: TranslationProvider
       enabledForPtt?: boolean
@@ -165,6 +168,7 @@ export function DashboardSettingsModal({
   const [hotkey, setHotkey] = useState<TriggerKey>('RCtrl')
   const [translationEnabled, setTranslationEnabled] = useState(false)
   const [meetingTranslationEnabled, setMeetingTranslationEnabled] = useState(false)
+  const [meetingIncludeMicrophone, setMeetingIncludeMicrophone] = useState(false)
   const [targetLanguage, setTargetLanguage] = useState('zh')
   const [translationProvider, setTranslationProvider] =
     useState<TranslationProvider>('openai-compatible')
@@ -247,6 +251,7 @@ export function DashboardSettingsModal({
         setSonioxModel(cfg.recognition?.soniox?.model || 'stt-rt-v3')
         setGroqModel(cfg.recognition?.groq?.model || 'whisper-large-v3-turbo')
         setHotkey((cfg.hotkey?.triggerKey || 'RCtrl') as TriggerKey)
+        setMeetingIncludeMicrophone(cfg.recognition?.meeting?.includeMicrophone === true)
         setTranslationEnabled(cfg.recognition?.translation?.enabledForPtt === true)
         setMeetingTranslationEnabled(cfg.recognition?.translation?.enabledForMeeting === true)
         setTargetLanguage(cfg.recognition?.translation?.targetLanguage || 'zh')
@@ -512,6 +517,9 @@ export function DashboardSettingsModal({
         recognition: {
           backend,
           language,
+          meeting: {
+            includeMicrophone: meetingIncludeMicrophone
+          },
           translation: {
             provider: translationProvider,
             enabledForPtt: translationEnabled,
@@ -724,47 +732,65 @@ export function DashboardSettingsModal({
                     </div>
 
                     <div className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <label className="text-sm font-medium" htmlFor="settings-audio-device">
-                          {m.settings.microphoneDevice}
-                        </label>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 px-3 text-xs"
-                          onClick={() => {
-                            void loadMicrophoneDeviceOptions()
-                          }}
-                          disabled={microphoneDevicesLoading || saving}
-                        >
-                          {microphoneDevicesLoading ? m.settings.refreshing : m.settings.refresh}
-                        </Button>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p id="settings-meeting-microphone-label" className="text-sm font-medium">
+                            {m.settings.meetingIncludeMicrophone}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {m.settings.meetingIncludeMicrophoneDescription}
+                          </p>
+                        </div>
+                        <Toggle
+                          checked={meetingIncludeMicrophone}
+                          onChange={setMeetingIncludeMicrophone}
+                          labelledBy="settings-meeting-microphone-label"
+                        />
                       </div>
-                      <select
-                        id="settings-audio-device"
-                        className={fullFieldClassName}
-                        value={audioDevice}
-                        onChange={(event) => setAudioDevice(event.target.value)}
-                        disabled={microphoneDevicesLoading}
-                      >
-                        <option value="default">{m.settings.defaultDevice}</option>
-                        {selectedAudioDeviceUnavailable ? (
-                          <option value={audioDevice}>{m.settings.savedDeviceUnavailable}</option>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <label className="text-sm font-medium" htmlFor="settings-audio-device">
+                            {m.settings.microphoneDevice}
+                          </label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-3 text-xs"
+                            onClick={() => {
+                              void loadMicrophoneDeviceOptions()
+                            }}
+                            disabled={microphoneDevicesLoading || saving}
+                          >
+                            {microphoneDevicesLoading ? m.settings.refreshing : m.settings.refresh}
+                          </Button>
+                        </div>
+                        <select
+                          id="settings-audio-device"
+                          className={fullFieldClassName}
+                          value={audioDevice}
+                          onChange={(event) => setAudioDevice(event.target.value)}
+                          disabled={microphoneDevicesLoading}
+                        >
+                          <option value="default">{m.settings.defaultDevice}</option>
+                          {selectedAudioDeviceUnavailable ? (
+                            <option value={audioDevice}>{m.settings.savedDeviceUnavailable}</option>
+                          ) : null}
+                          {microphoneDevices
+                            .filter((device) => device.id && device.id !== 'default')
+                            .map((device, index) => (
+                              <option key={`${device.id}-${index}`} value={device.id}>
+                                {device.name}
+                              </option>
+                            ))}
+                        </select>
+                        {microphoneDevicesError ? (
+                          <p className="text-xs text-muted-foreground">
+                            {m.settings.microphoneLoadFailed}
+                          </p>
                         ) : null}
-                        {microphoneDevices
-                          .filter((device) => device.id && device.id !== 'default')
-                          .map((device, index) => (
-                            <option key={`${device.id}-${index}`} value={device.id}>
-                              {device.name}
-                            </option>
-                          ))}
-                      </select>
-                      {microphoneDevicesError ? (
-                        <p className="text-xs text-muted-foreground">
-                          {m.settings.microphoneLoadFailed}
-                        </p>
-                      ) : null}
+                      </div>
                     </div>
 
                     <div
