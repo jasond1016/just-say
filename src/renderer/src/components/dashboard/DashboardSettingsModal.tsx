@@ -105,7 +105,7 @@ function Toggle({
 
 /* ─── Form field styles ─── */
 const fieldClass =
-  'h-9 rounded-md border border-input bg-transparent px-3 text-[13px] outline-none transition-all focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:shadow-tinted-sm placeholder:text-muted-foreground/50 appearance-none'
+  'h-9 rounded-md border border-input bg-card text-foreground px-3 text-[13px] outline-none transition-all focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:shadow-tinted-sm placeholder:text-muted-foreground/50 appearance-none'
 const fullFieldClass = `${fieldClass} w-full`
 
 /* ─── Row: label + value on same line ─── */
