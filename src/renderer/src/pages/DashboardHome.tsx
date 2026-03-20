@@ -47,7 +47,7 @@ export function DashboardHome({
       )}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-auto px-8 pb-8">
-        <div className="max-w-2xl">
+        <div className="max-w-2xl w-full">
           {/* ─── PTT: live state + last result ─── */}
           <div className="pt-5 pb-5 border-b border-border">
             <p className="text-[11px] font-semibold tracking-widest uppercase text-muted-foreground mb-3">

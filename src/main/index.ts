@@ -323,8 +323,10 @@ function createMainWindow(): BrowserWindow {
         }
 
   const window = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1080,
+    height: 740,
+    minWidth: 720,
+    minHeight: 520,
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -341,7 +343,7 @@ function createMainWindow(): BrowserWindow {
   window.setMenu(null)
 
   window.on('ready-to-show', () => {
-    window.maximize()
+    window.center()
     window.show()
   })
 
