@@ -267,6 +267,20 @@ function App(): React.JSX.Element {
 
   useEffect(() => { void loadConfig() }, [loadConfig])
 
+  // ─── Title bar overlay theme sync ───
+
+  const OVERLAY_LIGHT = { color: '#FAF8F3', symbolColor: '#2D2A26' }
+  const OVERLAY_LIGHT_DIM = { color: '#E6E3DE', symbolColor: '#2D2A26' }
+  const OVERLAY_DARK = { color: '#1A1816', symbolColor: '#E8E4DD' }
+  const OVERLAY_DARK_DIM = { color: '#131210', symbolColor: '#E8E4DD' }
+
+  const getEffectiveTheme = useCallback((): 'light' | 'dark' => {
+    if (theme === 'system') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    }
+    return theme
+  }, [theme])
+
   const applyTheme = useCallback((themeOption: ThemeOption) => {
     let effectiveTheme: 'light' | 'dark'
     if (themeOption === 'system') {
@@ -281,14 +295,20 @@ function App(): React.JSX.Element {
       document.documentElement.removeAttribute('data-theme')
     }
 
-    // Sync title bar overlay color with theme
-    const overlayTheme = effectiveTheme === 'dark'
-      ? { color: '#1A1816', symbolColor: '#E8E4DD' }
-      : { color: '#FAF8F3', symbolColor: '#2D2A26' }
-    void window.api.updateTitleBarOverlay(overlayTheme).catch(() => { /* ignore on unsupported platforms */ })
+    const overlayTheme = effectiveTheme === 'dark' ? OVERLAY_DARK : OVERLAY_LIGHT
+    void window.api.updateTitleBarOverlay(overlayTheme).catch(() => { /* ignore */ })
   }, [])
 
   useEffect(() => { applyTheme(theme) }, [theme, applyTheme])
+
+  // Dim overlay when settings panel is open
+  useEffect(() => {
+    const effectiveTheme = getEffectiveTheme()
+    const overlayTheme = settingsOpen
+      ? (effectiveTheme === 'dark' ? OVERLAY_DARK_DIM : OVERLAY_LIGHT_DIM)
+      : (effectiveTheme === 'dark' ? OVERLAY_DARK : OVERLAY_LIGHT)
+    void window.api.updateTitleBarOverlay(overlayTheme).catch(() => { /* ignore */ })
+  }, [settingsOpen, getEffectiveTheme])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
