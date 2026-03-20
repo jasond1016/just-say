@@ -148,22 +148,27 @@ export async function generateSummary(
     'You are a professional meeting-notes assistant.',
     'Given a meeting transcript, produce a clear, structured summary.',
     'The transcript may contain minor speech recognition errors — ignore them and focus on meaning.',
-    'Output in the SAME language as the majority of the transcript.',
     '',
-    'Format:',
-    '## Key Topics',
+    'CRITICAL language rule:',
+    '- Identify the primary language spoken in the transcript.',
+    '- Your ENTIRE output — including section headings, bullet points, and all text — MUST be written in that same language.',
+    '- For example: if the transcript is in Japanese, write everything in Japanese; if in Chinese, write everything in Chinese.',
+    '- Do NOT default to English unless the transcript itself is predominantly in English.',
+    '',
+    'Use this structure (translate the headings into the output language):',
+    '## [Key Topics]',
     '- Bullet points of main topics discussed',
     '',
-    '## Key Decisions',
+    '## [Key Decisions]',
     '- Bullet points of decisions made (if any)',
     '',
-    '## Discussion Highlights',
+    '## [Discussion Highlights]',
     '- Brief summary of important points, context, or outcomes',
     '',
     'Be concise. Do NOT fabricate information that is not in the transcript.'
   ].join('\n')
 
-  const userPrompt = `Please summarize the following meeting transcript:\n\n${truncated}`
+  const userPrompt = `Summarize the following meeting transcript. Remember: output in the same language as the transcript.\n\n${truncated}`
 
   const summary = await callChatCompletion(systemPrompt, userPrompt)
 
@@ -190,6 +195,11 @@ export async function generateActionItems(
     'Given a meeting transcript, extract all explicit and clearly implied action items / to-dos.',
     'The transcript may contain minor speech recognition errors — ignore them.',
     '',
+    'CRITICAL language rule:',
+    '- Identify the primary language spoken in the transcript.',
+    '- The "content" field MUST be written in that same language.',
+    '- Do NOT default to English unless the transcript itself is predominantly in English.',
+    '',
     'Rules:',
     '- Only include genuinely actionable tasks that were discussed or agreed upon.',
     '- If an assignee is mentioned or can be clearly inferred, include it.',
@@ -198,15 +208,14 @@ export async function generateActionItems(
     '',
     'Output format (JSON array):',
     '[',
-    '  { "content": "task description", "assignee": "person or null" },',
+    '  { "content": "task description in transcript language", "assignee": "person or null" },',
     '  ...',
     ']',
     '',
-    'If there are no action items, return an empty array: []',
-    'The "content" field should be in the SAME language as the transcript.'
+    'If there are no action items, return an empty array: []'
   ].join('\n')
 
-  const userPrompt = `Extract action items from the following meeting transcript:\n\n${truncated}`
+  const userPrompt = `Extract action items from the following meeting transcript. Remember: write the content field in the same language as the transcript.\n\n${truncated}`
 
   const raw = await callChatCompletion(systemPrompt, userPrompt)
   const items = parseActionItemsResponse(raw)
