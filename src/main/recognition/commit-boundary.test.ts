@@ -25,4 +25,23 @@ describe('commit-boundary', () => {
   it('flushes non-weak sentence on endpoint', () => {
     expect(shouldFlushSentenceByBoundary('今天我们先讨论发布方案和灰度节奏', true)).toBe(true)
   })
+
+  it('flushes english sentence more aggressively on strong punctuation', () => {
+    expect(
+      shouldFlushSentenceByBoundary('Years ago, I found this blog called Rdom Ramblings.', false)
+    ).toBe(true)
+  })
+
+  it('flushes english clause on soft boundary when long enough', () => {
+    expect(
+      shouldFlushSentenceByBoundary(
+        'This guy named I Gat, who was most well known for this essay,',
+        false
+      )
+    ).toBe(true)
+  })
+
+  it('still blocks weak english endpoint suffixes', () => {
+    expect(shouldFlushSentenceByBoundary('We should talk to', true)).toBe(false)
+  })
 })

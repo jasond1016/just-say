@@ -11,12 +11,19 @@ export interface Transcript {
   target_language: string | null
   include_microphone: 0 | 1
   source_mode?: 'ptt' | 'meeting'
+  summary: string | null
+  action_items: string | null
+  summary_generated_at: string | null
+  summary_ai_model: string | null
+  action_items_generated_at: string | null
+  action_items_ai_model: string | null
 }
 
 export interface TranscriptSegment {
   id: number
   transcript_id: string
   speaker: number
+  source: 'system' | 'microphone' | null
   text: string
   translated_text: string | null
   segment_order: number

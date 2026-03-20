@@ -1,24 +1,27 @@
 import WebSocket from 'ws'
 import { EventEmitter } from 'events'
 
-import { getWhisperServer, LocalEngine } from './whisperServer'
-import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
+import {
+  getWhisperServer,
+  getWhisperStreamWsPort,
+  LocalEngine,
+  supportsWhisperStreamEvent,
+  WhisperStreamEvent,
+  WhisperStreamWordTimingPayload
+} from './whisperServer'
+import { SpeakerSegment, PartialResult, SentencePair, WordTiming } from './streaming-soniox'
 import {
   cleanupJapaneseAsrText,
   findTextOverlap,
-  mergeStreamingChunkText,
-  mergeText
+  mergeText,
+  normalizeJapaneseSpacing
 } from './text-utils'
-import { isWeakBoundarySuffix, shouldFlushSentenceByBoundary } from './commit-boundary'
-
-interface LocalTranslationConfig {
-  enabled: boolean
-  targetLanguage: string
-  translator?: (text: string, targetLanguage: string) => Promise<string>
-  batchTranslator?: (texts: string[], targetLanguage: string) => Promise<string[]>
-  batchWindowMs?: number
-  maxBatchItems?: number
-}
+import { TextCorrectionConfig } from './text-corrections'
+import {
+  LocalTranslationConfig,
+  LocalTranslationCoordinator,
+  cloneSpeakerSegment
+} from './streaming-local-shared'
 
 interface StreamingSegmentationConfig {
   previewIntervalMs?: number
@@ -34,6 +37,7 @@ interface StreamingSegmentationConfig {
 
 export interface StreamingLocalWsConfig {
   engine?: LocalEngine
+  transcriptionProfile?: 'single_shot' | 'offline_segmented'
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
   sensevoice?: {
     modelId?: string
@@ -46,18 +50,23 @@ export interface StreamingLocalWsConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  includeWordTimings?: boolean
+  textCorrections?: TextCorrectionConfig
   segmentation?: StreamingSegmentationConfig
   translation?: LocalTranslationConfig
 }
 
 export class StreamingLocalWsRecognizer extends EventEmitter {
+  private static readonly DEBUG_STREAM = true
+
   private config: Required<
-    Omit<StreamingLocalWsConfig, 'translation' | 'segmentation' | 'sensevoice'>
+    Omit<StreamingLocalWsConfig, 'translation' | 'segmentation' | 'sensevoice' | 'textCorrections'>
   > & {
     sensevoice: {
       modelId: string
       useItn: boolean
     }
+    textCorrections?: TextCorrectionConfig
     translation?: LocalTranslationConfig
     segmentation?: StreamingSegmentationConfig
   }
@@ -67,30 +76,27 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private wsPort: number | undefined
   private isActive = false
   private startTime = 0
-  private translationQueue: Promise<void> = Promise.resolve()
 
   private confirmedText = ''
-  private pendingChunkText = ''
+  private rawPreviewText = ''
   private previewText = ''
-  private pendingSentenceOriginal = ''
+  private previewStableText = ''
+  private previewUnstableText = ''
+  private previewRevision = 0
+  private currentWordTimings: WordTiming[] = []
+  private completedSegments: SpeakerSegment[] = []
+  private readonly translationCoordinator: LocalTranslationCoordinator
+  private liveSentenceTail = ''
+  private endpointReason = ''
   private sentencePairs: SentencePair[] = []
-  private confirmedTranslation = ''
-  private boundaryHoldTimer: NodeJS.Timeout | null = null
-  private pendingTranslationPairIndices: number[] = []
-  private translationBatchTimer: NodeJS.Timeout | null = null
-
-  private readonly SENTENCE_MIN_FLUSH_CHARS = 14
-  private readonly SENTENCE_SOFT_FLUSH_CHARS = 28
-  private readonly SENTENCE_FORCE_FLUSH_CHARS = 48
-  private readonly STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
-  private readonly DEFAULT_HOLD_MS = 260
-  private readonly DEFAULT_TRANSLATION_BATCH_WINDOW_MS = 450
-  private readonly DEFAULT_TRANSLATION_MAX_BATCH_ITEMS = 6
+  private sentencePairSegmentIndices: number[] = []
+  private pendingSentenceStartIndex = 0
 
   constructor(config?: StreamingLocalWsConfig) {
     super()
     const defaults = {
       engine: 'sensevoice',
+      transcriptionProfile: 'single_shot',
       modelType: 'tiny',
       sensevoice: {
         modelId: 'FunAudioLLM/SenseVoiceSmall',
@@ -102,7 +108,8 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       serverMode: 'local',
       serverHost: '127.0.0.1',
       serverPort: 8765,
-      sampleRate: 16000
+      sampleRate: 16000,
+      includeWordTimings: true
     } as const
     this.config = {
       ...defaults,
@@ -112,6 +119,32 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         useItn: config?.sensevoice?.useItn ?? defaults.sensevoice.useItn
       }
     }
+    this.translationCoordinator = new LocalTranslationCoordinator({
+      getConfig: () => this.config.translation,
+      isActive: () => this.isActive,
+      getSentencePairs: () => this.sentencePairs,
+      applyTranslation: (pairIndex, originalText, translated) => {
+        if (this.sentencePairs[pairIndex]?.original !== originalText) {
+          return false
+        }
+        this.sentencePairs[pairIndex] = {
+          ...this.sentencePairs[pairIndex],
+          translated
+        }
+        const segmentIndex = this.sentencePairSegmentIndices[pairIndex]
+        if (typeof segmentIndex === 'number' && this.completedSegments[segmentIndex]) {
+          this.completedSegments[segmentIndex] = {
+            ...this.completedSegments[segmentIndex],
+            translatedText: translated,
+            sentencePairs: [{ original: originalText, translated }]
+          }
+        }
+        return true
+      },
+      emitPartialResult: () => this.emitPartialResult(),
+      emitTranslationError: (error) => this.emit('translationError', error),
+      logPrefix: 'StreamingLocalWs'
+    })
   }
 
   updateConfig(config?: StreamingLocalWsConfig): void {
@@ -124,9 +157,7 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
         useItn: config.sensevoice?.useItn ?? this.config.sensevoice.useItn
       }
     }
-    this.clearBoundaryHoldTimer()
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
+    this.translationCoordinator.reset()
     this.preConnected = false
   }
 
@@ -163,10 +194,10 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     if (!capabilities.streaming_asr) {
       throw new Error('Local server does not support websocket streaming ASR')
     }
-    this.wsPort =
-      typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
-        ? Math.floor(capabilities.ws_port)
-        : undefined
+    this.wsPort = getWhisperStreamWsPort(capabilities, (this.config.serverPort || 8765) + 1)
+    if (!supportsWhisperStreamEvent(capabilities, 'sentence')) {
+      console.warn('[StreamingLocalWs] Server does not advertise sentence events')
+    }
     this.preConnected = true
     console.log('[StreamingLocalWs] Pre-connected successfully')
   }
@@ -182,22 +213,28 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
     this.isActive = true
     this.startTime = Date.now()
-    this.translationQueue = Promise.resolve()
     this.confirmedText = ''
-    this.pendingChunkText = ''
+    this.rawPreviewText = ''
     this.previewText = ''
-    this.pendingSentenceOriginal = ''
+    this.previewStableText = ''
+    this.previewUnstableText = ''
+    this.previewRevision = 0
+    this.currentWordTimings = []
+    this.completedSegments = []
+    this.liveSentenceTail = ''
+    this.endpointReason = ''
     this.sentencePairs = []
-    this.confirmedTranslation = ''
-    this.pendingTranslationPairIndices = []
-    this.clearBoundaryHoldTimer()
-    this.clearTranslationBatchTimer()
+    this.sentencePairSegmentIndices = []
+    this.pendingSentenceStartIndex = 0
+    this.translationCoordinator.reset()
 
     const server = this.getServerClient()
     const wsUrl = server.getStreamWsUrl({
       wsPort: this.wsPort,
       sampleRate: this.config.sampleRate,
       language: this.config.language,
+      returnWordTimings: this.config.engine === 'sensevoice' && this.config.includeWordTimings,
+      textCorrections: this.config.textCorrections,
       previewIntervalMs: this.config.segmentation?.previewIntervalMs,
       previewMinAudioMs: this.config.segmentation?.previewMinAudioMs,
       previewMinNewAudioMs: this.config.segmentation?.previewMinNewAudioMs,
@@ -284,30 +321,25 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     }
 
     this.previewText = ''
-    this.commitPendingChunk()
-    this.clearBoundaryHoldTimer()
-    this.flushPendingSentencePair(true, true)
+    this.rawPreviewText = ''
+    this.previewStableText = ''
+    this.previewUnstableText = ''
+    this.previewRevision = 0
+    this.currentWordTimings = []
+    this.liveSentenceTail = ''
+    this.endpointReason = ''
     this.flushPendingTranslationBatch()
-    await this.translationQueue
+    await this.translationCoordinator.waitForIdle()
     this.isActive = false
 
     const finalText = this.confirmedText.trim()
-    const finalTranslation = this.confirmedTranslation.trim()
-    const finalSegment: SpeakerSegment | null = finalText
-      ? {
-          speaker: 0,
-          text: finalText,
-          translatedText: finalTranslation || undefined,
-          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
-          isFinal: true
-        }
-      : null
+    const finalSegment = this.buildCurrentLiveSegment()
 
     return {
       text: finalText,
       durationMs: Date.now() - this.startTime,
-      segments: [],
-      currentSegment: finalSegment
+      segments: this.buildCommittedSegments(),
+      currentSegment: finalSegment ? { ...finalSegment, isFinal: true } : null
     }
   }
 
@@ -317,67 +349,98 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
 
   close(): void {
     this.isActive = false
-    this.pendingChunkText = ''
     this.previewText = ''
-    this.clearBoundaryHoldTimer()
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
+    this.rawPreviewText = ''
+    this.previewStableText = ''
+    this.previewUnstableText = ''
+    this.previewRevision = 0
+    this.currentWordTimings = []
+    this.completedSegments = []
+    this.liveSentenceTail = ''
+    this.endpointReason = ''
+    this.sentencePairSegmentIndices = []
+    this.pendingSentenceStartIndex = 0
+    this.translationCoordinator.reset()
     if (this.ws) {
       this.ws.close()
       this.ws = null
     }
-    this.translationQueue = Promise.resolve()
   }
 
   private handleMessage(raw: string): void {
-    let data: { type?: string; text?: string; message?: string; reason?: string }
+    const data = this.parseStreamEvent(raw)
+    if (!data) {
+      return
+    }
+
+    switch (data.type) {
+      case 'interim': {
+        this.endpointReason = ''
+        this.rawPreviewText = this.normalizePreviewText(data.previewText)
+        this.previewText = this.normalizePreviewText(data.pendingText)
+        const commitReadyPreview = this.normalizePreviewText(data.commitReadyText)
+        const unstableTailPreview = this.normalizeUnstablePreviewText(data.unstableTailText)
+        this.previewRevision =
+          typeof data.revision === 'number' && Number.isFinite(data.revision)
+            ? Math.max(0, Math.floor(data.revision))
+            : 0
+        this.applyPreviewStateFromServer(commitReadyPreview, unstableTailPreview)
+        this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.debugStreamState('interim')
+        this.emitPartialResult()
+        return
+      }
+      case 'final_chunk':
+        this.endpointReason = ''
+        this.appendCommittedChunk(data.text || '')
+        this.rawPreviewText = ''
+        this.previewText = ''
+        this.previewStableText = ''
+        this.previewUnstableText = ''
+        this.previewRevision = 0
+        this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.debugStreamState('final_chunk')
+        this.emitPartialResult()
+        return
+      case 'sentence':
+        this.applyFinalizedSentenceFromServer(data.text || '')
+        this.debugStreamState('sentence')
+        this.emitPartialResult()
+        return
+      case 'endpoint':
+        this.endpointReason = typeof data.reason === 'string' ? data.reason.trim() : ''
+        this.debugStreamState(`endpoint:${this.endpointReason || 'unknown'}`)
+        this.emitPartialResult()
+        return
+      case 'final':
+        this.rawPreviewText = ''
+        this.previewText = ''
+        this.previewStableText = ''
+        this.previewUnstableText = ''
+        this.previewRevision = 0
+        this.currentWordTimings = this.normalizeWordTimings(data.wordTimings)
+        this.liveSentenceTail = ''
+        this.endpointReason = ''
+        this.debugStreamState('final')
+        this.emitPartialResult()
+        return
+      case 'error':
+        this.emit('error', new Error(data.message || 'streaming_local_ws_error'))
+        return
+      default:
+        return
+    }
+  }
+
+  private parseStreamEvent(raw: string): WhisperStreamEvent | null {
     try {
-      data = JSON.parse(raw) as { type?: string; text?: string; message?: string; reason?: string }
+      const parsed = JSON.parse(raw) as Partial<WhisperStreamEvent>
+      if (!parsed || typeof parsed !== 'object' || typeof parsed.type !== 'string') {
+        return null
+      }
+      return parsed as WhisperStreamEvent
     } catch {
-      return
-    }
-
-    if (data.type === 'interim') {
-      const preview = this.normalizeText(data.text || '')
-      this.previewText = this.deduplicateFromVisible(preview)
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'final_chunk') {
-      this.clearBoundaryHoldTimer()
-      this.pendingChunkText = this.mergePendingChunk(data.text || '')
-      this.previewText = ''
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'endpoint') {
-      const shouldDeferChunkCommit = this.shouldDeferChunkCommit(data.reason || '')
-      if (!shouldDeferChunkCommit) {
-        this.commitPendingChunk()
-      }
-      if (this.pendingSentenceOriginal.trim()) {
-        if (shouldDeferChunkCommit || isWeakBoundarySuffix(this.pendingSentenceOriginal)) {
-          this.scheduleBoundaryHoldFlush(data.reason || 'endpoint')
-        } else {
-          this.flushPendingSentencePair(false, true)
-        }
-      }
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'final') {
-      this.commitPendingChunk()
-      this.previewText = ''
-      this.flushPendingSentencePair(true, true)
-      this.emitPartialResult()
-      return
-    }
-
-    if (data.type === 'error') {
-      this.emit('error', new Error(data.message || 'streaming_local_ws_error'))
+      return null
     }
   }
 
@@ -385,11 +448,48 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return cleanupJapaneseAsrText(text).trim()
   }
 
-  private deduplicateFromVisible(text: string): string {
-    const base = this.getVisibleBaseText()
-    if (!text || !base) return text
-    const overlap = findTextOverlap(base, text, 200)
-    return overlap > 0 ? text.slice(overlap) : text
+  private normalizePreviewText(text: string): string {
+    return cleanupJapaneseAsrText(text)
+  }
+
+  private normalizeUnstablePreviewText(text: string): string {
+    return normalizeJapaneseSpacing(text)
+  }
+
+  private normalizeWordTimings(items: WhisperStreamWordTimingPayload[] | undefined): WordTiming[] {
+    if (!Array.isArray(items) || items.length === 0) {
+      return []
+    }
+
+    return items
+      .map((item) => {
+        const text = this.normalizeText(item.text || '')
+        const startMs = Number(item.startMs)
+        const endMs = Number(item.endMs)
+        if (!text || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+          return null
+        }
+        return {
+          text,
+          startMs: Math.max(0, Math.floor(startMs)),
+          endMs: Math.max(0, Math.floor(endMs))
+        }
+      })
+      .filter((item): item is WordTiming => item !== null)
+  }
+
+  private applyPreviewStateFromServer(
+    commitReadyPreview: string,
+    unstableTailPreview: string
+  ): void {
+    if (!this.previewText.trim()) {
+      this.previewStableText = ''
+      this.previewUnstableText = ''
+      return
+    }
+
+    this.previewStableText = commitReadyPreview
+    this.previewUnstableText = unstableTailPreview
   }
 
   private appendConfirmed(text: string): string {
@@ -408,293 +508,154 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return deduped
   }
 
-  private mergePendingChunk(text: string): string {
-    const normalized = this.normalizeText(text)
-    if (!normalized) {
-      return this.pendingChunkText
-    }
-    if (!this.pendingChunkText) {
-      return normalized
-    }
-    return mergeStreamingChunkText(this.pendingChunkText, normalized)
-  }
-
-  private commitPendingChunk(): string {
-    const normalized = this.pendingChunkText.trim()
-    if (!normalized) {
-      this.pendingChunkText = ''
-      return ''
-    }
-
-    this.pendingChunkText = ''
-    const committed = this.appendConfirmed(normalized)
+  private appendCommittedChunk(text: string): string {
+    const committed = this.appendConfirmed(text)
     if (committed) {
-      this.pendingSentenceOriginal = mergeText(this.pendingSentenceOriginal, committed)
+      this.completedSegments.push({
+        speaker: 0,
+        text: committed,
+        isFinal: true,
+        timestamp: Date.now()
+      })
+      this.liveSentenceTail = mergeText(this.liveSentenceTail, committed)
     }
     return committed
   }
 
-  private shouldDeferChunkCommit(reason: string): boolean {
-    const normalized = this.pendingChunkText.trim()
-    if (!normalized || reason !== 'max_chunk') {
-      return false
-    }
-
-    return !shouldFlushSentenceByBoundary(normalized, true, {
-      sentenceMinFlushChars: this.SENTENCE_MIN_FLUSH_CHARS,
-      sentenceSoftFlushChars: this.SENTENCE_SOFT_FLUSH_CHARS,
-      sentenceForceFlushChars: this.SENTENCE_FORCE_FLUSH_CHARS,
-      strongPunctuationMinTailChars: this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
-    })
-  }
-
   private getVisibleBaseText(): string {
-    return mergeText(this.confirmedText, this.pendingChunkText).trim()
+    return this.confirmedText.trim()
   }
 
-  private getHoldMs(): number {
-    const holdMs = this.config.segmentation?.holdMs
-    if (typeof holdMs === 'number' && Number.isFinite(holdMs) && holdMs > 0) {
-      return Math.floor(holdMs)
-    }
-    return this.DEFAULT_HOLD_MS
-  }
-
-  private scheduleBoundaryHoldFlush(reason: string): void {
-    this.clearBoundaryHoldTimer()
-    const holdMs = this.getHoldMs()
-    this.boundaryHoldTimer = setTimeout(() => {
-      this.boundaryHoldTimer = null
-      if (!this.isActive) {
-        return
-      }
-      this.flushPendingSentencePair(false, true)
-      this.emitPartialResult()
-      if (reason) {
-        console.log(`[StreamingLocalWs] Hold flush executed after weak boundary: ${reason}`)
-      }
-    }, holdMs)
-  }
-
-  private clearBoundaryHoldTimer(): void {
-    if (this.boundaryHoldTimer) {
-      clearTimeout(this.boundaryHoldTimer)
-      this.boundaryHoldTimer = null
-    }
-  }
-
-  private flushPendingSentencePair(force: boolean, endpointTriggered: boolean): number | null {
-    const normalized = this.pendingSentenceOriginal.trim()
+  private applyFinalizedSentenceFromServer(text: string): number | null {
+    const normalized = this.normalizeText(text)
     if (!normalized) {
-      this.pendingSentenceOriginal = ''
       return null
     }
 
-    if (
-      !force &&
-      !shouldFlushSentenceByBoundary(normalized, endpointTriggered, {
-        sentenceMinFlushChars: this.SENTENCE_MIN_FLUSH_CHARS,
-        sentenceSoftFlushChars: this.SENTENCE_SOFT_FLUSH_CHARS,
-        sentenceForceFlushChars: this.SENTENCE_FORCE_FLUSH_CHARS,
-        strongPunctuationMinTailChars: this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
-      })
-    ) {
-      return null
+    if (this.liveSentenceTail.startsWith(normalized)) {
+      this.liveSentenceTail = this.liveSentenceTail.slice(normalized.length).trimStart()
+    } else if (this.liveSentenceTail === normalized) {
+      this.liveSentenceTail = ''
+    } else {
+      const overlap = findTextOverlap(normalized, this.liveSentenceTail, 200)
+      if (overlap > 0 && overlap === normalized.length) {
+        this.liveSentenceTail = this.liveSentenceTail.slice(overlap).trimStart()
+      } else {
+        this.liveSentenceTail = ''
+      }
     }
 
-    this.pendingSentenceOriginal = ''
     const pairIndex = this.sentencePairs.push({ original: normalized }) - 1
+    const segmentIndex = this.finalizePendingSentenceSegments(normalized)
+    if (segmentIndex !== null) {
+      this.sentencePairSegmentIndices[pairIndex] = segmentIndex
+    }
     this.translatePairAsync(pairIndex)
     return pairIndex
   }
 
-  private translatePairAsync(pairIndex: number): void {
-    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
-      return
+  private finalizePendingSentenceSegments(sentenceText: string): number | null {
+    const normalized = this.normalizeText(sentenceText)
+    if (!normalized) {
+      return null
     }
 
-    const originalText = this.sentencePairs[pairIndex]?.original?.trim()
-    if (!originalText || !this.shouldTranslateText(originalText)) {
-      return
+    const startIndex = Math.max(
+      0,
+      Math.min(this.pendingSentenceStartIndex, this.completedSegments.length)
+    )
+    const endIndex = this.completedSegments.length
+    this.pendingSentenceStartIndex = endIndex
+
+    if (startIndex >= endIndex) {
+      return null
     }
 
-    if (this.config.translation.batchTranslator) {
-      this.pendingTranslationPairIndices.push(pairIndex)
-      if (this.pendingTranslationPairIndices.length >= this.getTranslationMaxBatchItems()) {
-        this.flushPendingTranslationBatch()
-      } else {
-        this.scheduleTranslationBatchFlush()
-      }
-      return
+    if (endIndex - startIndex !== 1) {
+      return null
     }
 
-    const translator = this.config.translation.translator
-    if (!translator) {
-      return
+    this.completedSegments[startIndex] = {
+      ...this.completedSegments[startIndex],
+      sentencePairs: [{ original: normalized }]
     }
-
-    this.translationQueue = this.translationQueue
-      .then(async () => {
-        const translated = (
-          await translator(originalText, this.config.translation!.targetLanguage)
-        )?.trim()
-        if (!translated || !this.isActive) {
-          return
-        }
-        if (this.sentencePairs[pairIndex]?.original !== originalText) {
-          return
-        }
-        this.sentencePairs[pairIndex] = {
-          ...this.sentencePairs[pairIndex],
-          translated
-        }
-        this.rebuildConfirmedTranslation()
-        this.emitPartialResult()
-      })
-      .catch((error) => {
-        const err = error instanceof Error ? error : new Error(String(error))
-        console.warn('[StreamingLocalWs] Translation failed:', err.message)
-        this.emit('translationError', err)
-      })
-  }
-
-  private getTranslationBatchWindowMs(): number {
-    const configured = this.config.translation?.batchWindowMs
-    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-      return Math.floor(configured)
-    }
-    return this.DEFAULT_TRANSLATION_BATCH_WINDOW_MS
-  }
-
-  private getTranslationMaxBatchItems(): number {
-    const configured = this.config.translation?.maxBatchItems
-    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-      return Math.floor(configured)
-    }
-    return this.DEFAULT_TRANSLATION_MAX_BATCH_ITEMS
-  }
-
-  private scheduleTranslationBatchFlush(): void {
-    if (this.translationBatchTimer || this.pendingTranslationPairIndices.length === 0) {
-      return
-    }
-    this.translationBatchTimer = setTimeout(() => {
-      this.translationBatchTimer = null
-      this.flushPendingTranslationBatch()
-    }, this.getTranslationBatchWindowMs())
-  }
-
-  private clearTranslationBatchTimer(): void {
-    if (this.translationBatchTimer) {
-      clearTimeout(this.translationBatchTimer)
-      this.translationBatchTimer = null
-    }
+    return startIndex
   }
 
   private flushPendingTranslationBatch(): void {
-    this.clearTranslationBatchTimer()
-    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
-      this.pendingTranslationPairIndices = []
-      return
-    }
-    const batchTranslator = this.config.translation.batchTranslator
-    if (!batchTranslator || this.pendingTranslationPairIndices.length === 0) {
-      return
-    }
-
-    const indices = [...this.pendingTranslationPairIndices]
-    this.pendingTranslationPairIndices = []
-    const items = indices
-      .map((index) => ({
-        index,
-        original: this.sentencePairs[index]?.original?.trim() || ''
-      }))
-      .filter((item) => item.original && this.shouldTranslateText(item.original))
-
-    if (items.length === 0) {
-      return
-    }
-
-    this.translationQueue = this.translationQueue
-      .then(async () => {
-        const translatedBatch = await batchTranslator(
-          items.map((item) => item.original),
-          this.config.translation!.targetLanguage
-        )
-        if (!this.isActive || translatedBatch.length === 0) {
-          return
-        }
-        let changed = false
-        for (let i = 0; i < items.length; i += 1) {
-          const translated = (translatedBatch[i] || '').trim()
-          if (!translated) continue
-          const item = items[i]
-          if (this.sentencePairs[item.index]?.original !== item.original) {
-            continue
-          }
-          this.sentencePairs[item.index] = {
-            ...this.sentencePairs[item.index],
-            translated
-          }
-          changed = true
-        }
-        if (changed) {
-          this.rebuildConfirmedTranslation()
-          this.emitPartialResult()
-        }
-      })
-      .catch((error) => {
-        const err = error instanceof Error ? error : new Error(String(error))
-        console.warn('[StreamingLocalWs] Batch translation failed:', err.message)
-        this.emit('translationError', err)
-      })
+    this.translationCoordinator.flushPendingBatch()
   }
 
-  private rebuildConfirmedTranslation(): void {
-    let merged = ''
-    for (const pair of this.sentencePairs) {
-      if (!pair.translated) continue
-      merged = mergeText(merged, pair.translated)
-    }
-    this.confirmedTranslation = merged
+  private translatePairAsync(pairIndex: number): void {
+    this.translationCoordinator.translatePairAsync(pairIndex)
   }
 
-  private shouldTranslateText(text: string): boolean {
-    const normalized = text.trim()
-    if (!normalized) return false
-    return Array.from(normalized).some((ch) => /[\p{L}\p{N}]/u.test(ch))
+  private debugStreamState(eventType: string): void {
+    if (!StreamingLocalWsRecognizer.DEBUG_STREAM) {
+      return
+    }
+
+    const committedTail = this.completedSegments
+      .slice(-3)
+      .map((segment) => segment.text)
+      .join(' | ')
+    console.log(
+      '[StreamingLocalWs][Debug]',
+      JSON.stringify({
+        eventType,
+        completedSegments: this.completedSegments.length,
+        sentencePairs: this.sentencePairs.length,
+        rawPreviewText: this.rawPreviewText,
+        previewText: this.previewText,
+        previewStableText: this.previewStableText,
+        previewUnstableText: this.previewUnstableText,
+        previewRevision: this.previewRevision,
+        endpointReason: this.endpointReason,
+        committedTail
+      })
+    )
   }
 
   private emitPartialResult(): void {
     const visibleBase = this.getVisibleBaseText()
     const combined = mergeText(visibleBase, this.previewText).trim()
-    const translated = this.confirmedTranslation.trim()
-
-    const pairs: SentencePair[] = [...this.sentencePairs]
-    const pendingPairBase = mergeText(this.pendingSentenceOriginal, this.pendingChunkText)
-    const pendingPairText = mergeText(pendingPairBase, this.previewText).trim()
-    if (pendingPairText) {
-      pairs.push({ original: pendingPairText })
-    }
-
-    const currentSegment: SpeakerSegment | null = combined
-      ? {
-          speaker: 0,
-          text: combined,
-          translatedText: translated || undefined,
-          sentencePairs: pairs.length > 0 ? pairs : undefined,
-          isFinal: false
-        }
-      : null
+    const currentSegment = this.buildCurrentLiveSegment()
+    const segments = this.buildCommittedSegments()
 
     const result: PartialResult = {
-      segments: [],
+      segments,
       currentSegment,
+      currentWordTimings:
+        this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
       combined,
       currentSpeaker: 0,
       translationEnabled: this.config.translation?.enabled === true
     }
 
     this.emit('partial', result)
+  }
+
+  private buildCommittedSegments(): SpeakerSegment[] {
+    return this.completedSegments.map((segment) => cloneSpeakerSegment(segment))
+  }
+
+  private buildCurrentLiveSegment(): SpeakerSegment | null {
+    const liveText = this.previewText.trim()
+    if (!liveText) {
+      return null
+    }
+
+    const liveCommitReadyText = this.previewStableText.trim()
+    return {
+      speaker: 0,
+      text: liveText,
+      previewText: this.rawPreviewText || undefined,
+      commitReadyText: liveCommitReadyText || undefined,
+      unstableTailText: this.previewUnstableText || undefined,
+      previewRevision: this.previewRevision || undefined,
+      endpointReason: this.endpointReason || undefined,
+      wordTimings: this.currentWordTimings.length > 0 ? [...this.currentWordTimings] : undefined,
+      isFinal: false
+    }
   }
 }

@@ -11,8 +11,34 @@ interface StoredSegmentLike {
 
 interface LiveSegmentLike {
   text: string
+  commitReadyText?: string
+  unstableTailText?: string
   translatedText?: string
-  sentencePairs?: Array<{ original: string; translated?: string }>
+  sentencePairs?: Array<{ original: string; translated?: string | null }>
+}
+
+function getPreviewLiveText(segment: LiveSegmentLike): string {
+  const previewText = segment.unstableTailText || ''
+  if (previewText.trim()) {
+    return previewText
+  }
+
+  return ''
+}
+
+function getStableLiveText(segment: LiveSegmentLike): string {
+  const commitReadyText = segment.commitReadyText || ''
+  if (commitReadyText.trim()) {
+    return commitReadyText
+  }
+
+  const fullText = segment.text || ''
+  const previewText = getPreviewLiveText(segment)
+  if (previewText.trim() && fullText.endsWith(previewText)) {
+    return fullText.slice(0, fullText.length - previewText.length)
+  }
+
+  return fullText
 }
 
 function normalizePairs(
@@ -55,5 +81,29 @@ export function toSentencePairsFromLive(segment: LiveSegmentLike): RendererSente
   }
 
   const original = segment.text || ''
+  return original.trim() ? [{ original, translated: segment.translatedText ?? null }] : []
+}
+
+export function toSentencePairsFromCurrentLive(segment: LiveSegmentLike): RendererSentencePair[] {
+  const pairs = normalizePairs(segment.sentencePairs)
+  const stableOriginal = getStableLiveText(segment)
+  if (pairs.length > 0) {
+    const joinedOriginal = pairs.map((pair) => pair.original).join('')
+    if (stableOriginal.startsWith(joinedOriginal)) {
+      const tail = stableOriginal.slice(joinedOriginal.length)
+      if (tail.trim()) {
+        return [...pairs, { original: tail, translated: null }]
+      }
+      return pairs
+    }
+
+    if (stableOriginal.trim()) {
+      return [{ original: stableOriginal, translated: segment.translatedText ?? null }]
+    }
+
+    return pairs
+  }
+
+  const original = stableOriginal || segment.text || ''
   return original.trim() ? [{ original, translated: segment.translatedText ?? null }] : []
 }

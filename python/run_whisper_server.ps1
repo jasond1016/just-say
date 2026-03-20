@@ -3,8 +3,13 @@ param(
   [int]$Port = 8765,
   [int]$WsPort = 8766,
   [string]$SenseVoiceModelId = 'FunAudioLLM/SenseVoiceSmall',
+  [string]$SenseVoiceVadModel = 'fsmn-vad',
+  [double]$SenseVoiceVadMergeLengthS = 15,
+  [int]$SenseVoiceVadMaxSingleSegmentTimeMs = 30000,
   [string]$DownloadRoot = '.\.cache\models',
   [string]$ComputeType = 'float16',
+  [switch]$DisableSenseVoiceVad,
+  [switch]$NoSenseVoiceVadMerge,
   [switch]$NoLockModel,
   [switch]$NoLockDeviceCompute
 )
@@ -77,10 +82,18 @@ $args = @(
   '--engine', 'sensevoice'
   '--sensevoice-model-id', $SenseVoiceModelId
   '--sensevoice-use-itn', 'true'
+  '--sensevoice-vad-merge', $(if ($NoSenseVoiceVadMerge) { 'false' } else { 'true' })
+  '--sensevoice-vad-merge-length-s', $SenseVoiceVadMergeLengthS
+  '--sensevoice-vad-max-single-segment-time-ms', $SenseVoiceVadMaxSingleSegmentTimeMs
   '--device', 'cuda'
   '--compute-type', $ComputeType
   '--download-root', $resolvedDownloadRoot
 )
+
+if (-not $DisableSenseVoiceVad -and -not [string]::IsNullOrWhiteSpace($SenseVoiceVadModel)) {
+  $args += '--sensevoice-vad-model'
+  $args += $SenseVoiceVadModel
+}
 
 if (-not $NoLockModel) {
   $args += '--lock-model'
@@ -93,6 +106,7 @@ if (-not $NoLockDeviceCompute) {
 Write-Host "[Wrapper] Python: $pythonBin"
 Write-Host "[Wrapper] Download root: $resolvedDownloadRoot"
 Write-Host "[Wrapper] PATH updated with NVIDIA runtime bins when available"
+Write-Host "[Wrapper] SenseVoice VAD: $(if ($DisableSenseVoiceVad) { 'disabled' } else { $SenseVoiceVadModel })"
 Write-Host "[Wrapper] Starting SenseVoice on CUDA at http://${ListenHost}:$Port (WS: $WsPort)"
 
 & $pythonBin @args

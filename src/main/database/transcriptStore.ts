@@ -230,8 +230,8 @@ function insertSegments(
   segments: SaveTranscriptRequest['segments']
 ): void {
   const segmentStmt = db.prepare(`
-    INSERT INTO transcript_segments (transcript_id, speaker, text, translated_text, segment_order)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO transcript_segments (transcript_id, speaker, source, text, translated_text, segment_order)
+    VALUES (?, ?, ?, ?, ?, ?)
   `)
 
   const pairStmt = db.prepare(`
@@ -245,6 +245,7 @@ function insertSegments(
       const result = segmentStmt.run(
         transcriptId,
         seg.speaker,
+        seg.source || null,
         seg.text,
         seg.translated_text || null,
         i
@@ -304,4 +305,44 @@ function formatDateTime(date: Date): string {
   const hours = date.getHours().toString().padStart(2, '0')
   const minutes = date.getMinutes().toString().padStart(2, '0')
   return `${year}-${month}-${day} ${hours}:${minutes}`
+}
+
+// Update AI-generated summary
+export function updateTranscriptSummary(id: string, summary: string, model: string): boolean {
+  const db = getDatabase()
+  const now = new Date().toISOString()
+  const result = db
+    .prepare(
+      'UPDATE transcripts SET summary = ?, summary_ai_model = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?'
+    )
+    .run(summary, model, now, now, id)
+  return result.changes > 0
+}
+
+// Update AI-generated action items (stored as JSON string)
+export function updateTranscriptActionItems(
+  id: string,
+  actionItemsJson: string,
+  model: string
+): boolean {
+  const db = getDatabase()
+  const now = new Date().toISOString()
+  const result = db
+    .prepare(
+      'UPDATE transcripts SET action_items = ?, action_items_ai_model = ?, action_items_generated_at = ?, updated_at = ? WHERE id = ?'
+    )
+    .run(actionItemsJson, model, now, now, id)
+  return result.changes > 0
+}
+
+// Clear AI-generated content for a transcript
+export function clearTranscriptAiContent(id: string): boolean {
+  const db = getDatabase()
+  const now = new Date().toISOString()
+  const result = db
+    .prepare(
+      'UPDATE transcripts SET summary = NULL, action_items = NULL, summary_generated_at = NULL, summary_ai_model = NULL, action_items_generated_at = NULL, action_items_ai_model = NULL, updated_at = ? WHERE id = ?'
+    )
+    .run(now, id)
+  return result.changes > 0
 }

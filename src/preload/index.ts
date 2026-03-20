@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { MeetingTranscriptEvent } from '../shared/transcription-types'
 
 // Desktop capturer API for system audio capture (via IPC to main process)
 const desktopCapturerAPI = {
@@ -85,25 +86,7 @@ const api = {
   getPttRuntimeState: (): Promise<{ recording: boolean; processing: boolean }> =>
     ipcRenderer.invoke('get-ptt-runtime-state'),
 
-  onMeetingTranscript: (
-    callback: (segment: {
-      text: string
-      timestamp: number
-      isFinal: boolean
-      speakerSegments?: Array<{
-        speaker: number
-        text: string
-        translatedText?: string
-        sentencePairs?: Array<{ original: string; translated?: string }>
-      }>
-      currentSpeakerSegment?: {
-        speaker: number
-        text: string
-        translatedText?: string
-        sentencePairs?: Array<{ original: string; translated?: string }>
-      }
-    }) => void
-  ): void => {
+  onMeetingTranscript: (callback: (segment: MeetingTranscriptEvent) => void): void => {
     ipcRenderer.on('meeting-transcript', (_event, segment) => callback(segment))
   },
 
@@ -190,6 +173,7 @@ const api = {
     source_mode?: 'ptt' | 'meeting'
     segments: {
       speaker: number
+      source?: 'system' | 'microphone'
       text: string
       translated_text?: string
       sentence_pairs?: { original: string; translated?: string }[]
@@ -244,6 +228,19 @@ const api = {
   exportTranscript: (id: string): Promise<string | null> =>
     ipcRenderer.invoke('export-transcript', id),
 
+  generateMeetingSummary: (
+    id: string
+  ): Promise<{ summary: string; generatedAt: string; model: string }> =>
+    ipcRenderer.invoke('generate-meeting-summary', id),
+
+  generateMeetingActionItems: (
+    id: string
+  ): Promise<{
+    items: Array<{ content: string; assignee?: string }>
+    generatedAt: string
+    model: string
+  }> => ipcRenderer.invoke('generate-meeting-action-items', id),
+
   getHomeStats: (): Promise<{
     todayPttCount: number
     todayChars: number
@@ -260,7 +257,11 @@ const api = {
     const handler = (): void => callback()
     ipcRenderer.on('home-stats-updated', handler)
     return () => ipcRenderer.removeListener('home-stats-updated', handler)
-  }
+  },
+
+  // Title bar overlay theme
+  updateTitleBarOverlay: (theme: { color: string; symbolColor: string }): Promise<void> =>
+    ipcRenderer.invoke('update-title-bar-overlay', theme)
 }
 
 if (process.contextIsolated) {

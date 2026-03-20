@@ -41,6 +41,10 @@ vi.mock('./recognition/streaming-local', () => {
       return { text: '', durationMs: 0, segments: [], currentSegment: null }
     }
 
+    isSessionActive(): boolean {
+      return false
+    }
+
     close(): void {
       this.listeners.clear()
     }

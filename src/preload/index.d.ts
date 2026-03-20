@@ -1,32 +1,9 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import { DesktopCapturerSource, SourcesOptions } from 'electron'
+import type { MeetingTranscriptEvent } from '../shared/transcription-types'
 
 interface DesktopCapturerAPI {
   getSources: (options: SourcesOptions) => Promise<DesktopCapturerSource[]>
-}
-
-interface MeetingTranscriptSegment {
-  text: string
-  timestamp: number
-  isFinal: boolean
-  speakerSegments?: Array<{
-    speaker: number
-    text: string
-    translatedText?: string
-    sentencePairs?: Array<{
-      original: string
-      translated?: string
-    }>
-  }>
-  currentSpeakerSegment?: {
-    speaker: number
-    text: string
-    translatedText?: string
-    sentencePairs?: Array<{
-      original: string
-      translated?: string
-    }>
-  }
 }
 
 interface JustSayAPI {
@@ -71,7 +48,7 @@ interface JustSayAPI {
   getSystemAudioSources: () => Promise<Array<{ id: string; name: string; isDefault?: boolean }>>
   getMeetingRuntimeState: () => Promise<{ status: string; startedAt: number | null }>
   getPttRuntimeState: () => Promise<{ recording: boolean; processing: boolean }>
-  onMeetingTranscript: (callback: (segment: MeetingTranscriptSegment) => void) => void
+  onMeetingTranscript: (callback: (segment: MeetingTranscriptEvent) => void) => void
   onMeetingStatus: (callback: (status: string) => void) => void
 
   // System audio capture (renderer-side)
@@ -113,6 +90,7 @@ interface JustSayAPI {
     source_mode?: 'ptt' | 'meeting'
     segments: {
       speaker: number
+      source?: 'system' | 'microphone'
       text: string
       translated_text?: string
       sentence_pairs?: { original: string; translated?: string }[]
@@ -165,6 +143,16 @@ interface JustSayAPI {
 
   exportTranscript: (id: string) => Promise<string | null>
 
+  generateMeetingSummary: (
+    id: string
+  ) => Promise<{ summary: string; generatedAt: string; model: string }>
+
+  generateMeetingActionItems: (id: string) => Promise<{
+    items: Array<{ content: string; assignee?: string }>
+    generatedAt: string
+    model: string
+  }>
+
   getHomeStats: () => Promise<{
     todayPttCount: number
     todayChars: number
@@ -178,6 +166,9 @@ interface JustSayAPI {
   }>
 
   onHomeStatsUpdated: (callback: () => void) => () => void
+
+  // Title bar overlay theme
+  updateTitleBarOverlay: (theme: { color: string; symbolColor: string }) => Promise<void>
 }
 
 declare global {

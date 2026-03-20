@@ -24,7 +24,9 @@ import {
   searchTranscripts,
   updateTranscript,
   deleteTranscript,
-  exportTranscript
+  exportTranscript,
+  updateTranscriptSummary,
+  updateTranscriptActionItems
 } from './database/transcriptStore'
 import { getHomeStats, recordUsageEvent } from './database/statsStore'
 import { WebAudioRecorder } from './audio/web-recorder'
@@ -39,6 +41,7 @@ import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingLocalConfig } from './recognition/streaming-local'
 import { TranslationService } from './translation/service'
 import { processPttRecognitionResult } from './ptt/postProcess'
+import { generateSummary, generateActionItems } from './ai/meeting-ai-service'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -46,8 +49,8 @@ let indicatorWindow: BrowserWindow | null = null
 let outputWindow: BrowserWindow | null = null
 let pendingOutputText: string | null = null
 
-const INDICATOR_WINDOW_WIDTH = 240
-const INDICATOR_WINDOW_HEIGHT = 64
+const INDICATOR_WINDOW_WIDTH = 280
+const INDICATOR_WINDOW_HEIGHT = 56
 
 const OUTPUT_WINDOW_WIDTH = 500
 const OUTPUT_WINDOW_HEIGHT = 230
@@ -306,11 +309,28 @@ async function requestAppQuit(): Promise<void> {
 }
 
 function createMainWindow(): BrowserWindow {
+  // Use hidden title bar so our renderer draws its own chrome.
+  // titleBarOverlay gives us native window controls (minimize/maximize/close)
+  // painted over our content on Windows/Linux.
+  // Color must match the CONTENT area background (right side), not the sidebar.
+  const titleBarOverlay =
+    process.platform === 'darwin'
+      ? undefined
+      : {
+          color: '#FAF8F3',
+          symbolColor: '#2D2A26',
+          height: 36
+        }
+
   const window = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1080,
+    height: 740,
+    minWidth: 720,
+    minHeight: 520,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay,
     ...(process.platform === 'linux' ? { icon } : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -323,7 +343,7 @@ function createMainWindow(): BrowserWindow {
   window.setMenu(null)
 
   window.on('ready-to-show', () => {
-    window.maximize()
+    window.center()
     window.show()
   })
 
@@ -546,6 +566,7 @@ function persistPttTranscript(
 
 function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array<{
   speaker: number
+  source?: 'system' | 'microphone'
   text: string
   translated_text?: string
   sentence_pairs?: { original: string; translated?: string }[]
@@ -556,11 +577,12 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
       .filter((segment) => segment.text.trim())
       .map((segment) => ({
         speaker: segment.speaker,
+        source: segment.source,
         text: segment.text,
         translated_text: segment.translatedText,
         sentence_pairs: segment.sentencePairs?.map((pair) => ({
           original: pair.original,
-          translated: pair.translated
+          translated: pair.translated ?? undefined
         }))
       }))
   }
@@ -573,11 +595,12 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
   if (currentSegments.length > 0) {
     return currentSegments.map((segment) => ({
       speaker: segment.speaker ?? 0,
+      source: segment.source,
       text: segment.text,
       translated_text: segment.translatedText,
       sentence_pairs: segment.sentencePairs?.map((pair) => ({
         original: pair.original,
-        translated: pair.translated
+        translated: pair.translated ?? undefined
       }))
     }))
   }
@@ -586,6 +609,7 @@ function buildMeetingSegmentsForPersistence(history: TranscriptSegment[]): Array
     .filter((item) => item.text.trim())
     .map((item) => ({
       speaker: item.speaker ?? 0,
+      source: item.source,
       text: item.text,
       translated_text: item.translatedText
     }))
@@ -1179,6 +1203,7 @@ ipcMain.handle(
       source_mode?: 'ptt' | 'meeting'
       segments: {
         speaker: number
+        source?: 'system' | 'microphone'
         text: string
         translated_text?: string
         sentence_pairs?: { original: string; translated?: string }[]
@@ -1244,6 +1269,52 @@ ipcMain.handle('export-transcript', (_event, id: string) => {
   return exportTranscript(id)
 })
 
+ipcMain.handle('generate-meeting-summary', async (_event, id: string) => {
+  const transcript = getTranscriptWithSegments(id)
+  if (!transcript) {
+    throw new Error('Transcript not found')
+  }
+  const segments = transcript.segments.map((seg) => ({
+    speaker: seg.speaker,
+    source: seg.source,
+    text: seg.text
+  }))
+  const result = await generateSummary(segments)
+  updateTranscriptSummary(id, result.summary, result.model)
+  return result
+})
+
+ipcMain.handle('generate-meeting-action-items', async (_event, id: string) => {
+  const transcript = getTranscriptWithSegments(id)
+  if (!transcript) {
+    throw new Error('Transcript not found')
+  }
+  const segments = transcript.segments.map((seg) => ({
+    speaker: seg.speaker,
+    source: seg.source,
+    text: seg.text
+  }))
+  const result = await generateActionItems(segments)
+  updateTranscriptActionItems(id, JSON.stringify(result.items), result.model)
+  return result
+})
+
 ipcMain.handle('get-home-stats', () => {
   return getHomeStats()
 })
+
+// ─── Title bar overlay theme sync ───
+ipcMain.handle(
+  'update-title-bar-overlay',
+  (_event, theme: { color: string; symbolColor: string }) => {
+    if (process.platform === 'darwin' || !mainWindow || mainWindow.isDestroyed()) return
+    try {
+      mainWindow.setTitleBarOverlay({
+        color: theme.color,
+        symbolColor: theme.symbolColor
+      })
+    } catch {
+      // setTitleBarOverlay may not be available on all platforms
+    }
+  }
+)

@@ -6,7 +6,7 @@ function Card({ className, ...props }: React.ComponentProps<'div'>): React.JSX.E
   return (
     <div
       data-slot="card"
-      className={cn('bg-card text-card-foreground rounded-xl border', className)}
+      className={cn('bg-card text-card-foreground', className)}
       {...props}
     />
   )
@@ -16,7 +16,7 @@ function CardHeader({ className, ...props }: React.ComponentProps<'div'>): React
   return (
     <div
       data-slot="card-header"
-      className={cn('flex flex-col gap-1.5 px-6 pt-6', className)}
+      className={cn('flex flex-col gap-1', className)}
       {...props}
     />
   )
@@ -39,7 +39,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<'div'>): 
 }
 
 function CardContent({ className, ...props }: React.ComponentProps<'div'>): React.JSX.Element {
-  return <div data-slot="card-content" className={cn('px-6 pb-6', className)} {...props} />
+  return <div data-slot="card-content" className={cn('', className)} {...props} />
 }
 
 export { Card, CardContent, CardDescription, CardHeader, CardTitle }

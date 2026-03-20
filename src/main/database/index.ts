@@ -30,7 +30,13 @@ export function initDatabase(): Database.Database {
       translation_enabled INTEGER DEFAULT 0,
       target_language TEXT,
       include_microphone INTEGER DEFAULT 0,
-      source_mode TEXT NOT NULL DEFAULT 'meeting'
+      source_mode TEXT NOT NULL DEFAULT 'meeting',
+      summary TEXT,
+      action_items TEXT,
+      summary_generated_at TEXT,
+      summary_ai_model TEXT,
+      action_items_generated_at TEXT,
+      action_items_ai_model TEXT
     );
 
     -- Speaker segments table
@@ -38,6 +44,7 @@ export function initDatabase(): Database.Database {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       transcript_id TEXT NOT NULL,
       speaker INTEGER NOT NULL,
+      source TEXT,
       text TEXT NOT NULL,
       translated_text TEXT,
       segment_order INTEGER NOT NULL,
@@ -80,6 +87,28 @@ export function initDatabase(): Database.Database {
     db.exec("ALTER TABLE transcripts ADD COLUMN source_mode TEXT NOT NULL DEFAULT 'meeting';")
   } catch {
     // Ignore duplicate-column errors for already migrated databases.
+  }
+
+  try {
+    db.exec('ALTER TABLE transcript_segments ADD COLUMN source TEXT;')
+  } catch {
+    // Ignore duplicate-column errors for already migrated databases.
+  }
+
+  // AI summary & action items columns
+  for (const col of [
+    'summary TEXT',
+    'action_items TEXT',
+    'summary_generated_at TEXT',
+    'summary_ai_model TEXT',
+    'action_items_generated_at TEXT',
+    'action_items_ai_model TEXT'
+  ]) {
+    try {
+      db.exec(`ALTER TABLE transcripts ADD COLUMN ${col};`)
+    } catch {
+      // Ignore duplicate-column errors for already migrated databases.
+    }
   }
 
   db.exec(`

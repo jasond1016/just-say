@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { toSentencePairsFromLive, toSentencePairsFromStored } from './transcript-segmentation'
+import {
+  toSentencePairsFromCurrentLive,
+  toSentencePairsFromLive,
+  toSentencePairsFromStored
+} from './transcript-segmentation'
 
 describe('transcript-segmentation', () => {
   it('uses sentence_pairs for stored segments when available', () => {
@@ -66,5 +70,52 @@ describe('transcript-segmentation', () => {
     })
 
     expect(pairs).toEqual([{ original: 'Hello world.', translated: '你好，世界。' }])
+  })
+
+  it('falls back to full text for current live segment when sentencePairs no longer align', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'Hello world again.',
+      translatedText: '你好，世界，再次问好。',
+      sentencePairs: [{ original: 'world again.', translated: '世界，再次问好。' }]
+    })
+
+    expect(pairs).toEqual([
+      { original: 'Hello world again.', translated: '你好，世界，再次问好。' }
+    ])
+  })
+
+  it('uses commitReadyText for current live segment instead of unstable preview tail', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'かき氷はイチゴ味です',
+      commitReadyText: 'かき氷は',
+      unstableTailText: 'イチゴ味です',
+      sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
+    })
+
+    expect(pairs).toEqual([{ original: 'かき氷は', translated: 'Shaved ice is' }])
+  })
+
+  it('appends only stable tail beyond translated sentencePairs for current live segment', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'かき氷はイチゴ味です',
+      commitReadyText: 'かき氷はイチゴ',
+      unstableTailText: '味です',
+      sentencePairs: [{ original: 'かき氷は', translated: 'Shaved ice is' }]
+    })
+
+    expect(pairs).toEqual([
+      { original: 'かき氷は', translated: 'Shaved ice is' },
+      { original: 'イチゴ', translated: null }
+    ])
+  })
+
+  it('uses unstableTailText as preview fallback for current live segment', () => {
+    const pairs = toSentencePairsFromCurrentLive({
+      text: 'Hello world',
+      commitReadyText: 'Hello',
+      unstableTailText: ' world'
+    })
+
+    expect(pairs).toEqual([{ original: 'Hello', translated: null }])
   })
 })

@@ -10,9 +10,11 @@ import { join } from 'path'
 import { app } from 'electron'
 import * as fs from 'fs'
 import * as http from 'http'
-import * as net from 'net'
+import WebSocket from 'ws'
+import { TextCorrectionConfig, serializeTextCorrectionConfig } from './text-corrections'
 
 export type LocalEngine = 'faster-whisper' | 'sensevoice'
+export type LocalTranscriptionProfile = 'single_shot' | 'offline_segmented'
 
 export interface WhisperServerConfig {
   host?: string
@@ -31,6 +33,7 @@ export interface WhisperServerConfig {
 export interface TranscribeResult {
   success: boolean
   text: string
+  transcription_profile?: LocalTranscriptionProfile
   language?: string
   language_probability?: number
   duration?: number
@@ -57,6 +60,101 @@ export interface WhisperServerCapabilities {
   sample_rate?: number
   ws_path?: string
   ws_port?: number
+  interim_schema?: WhisperCapabilitySchema
+  final_chunk_schema?: WhisperCapabilitySchema
+  sentence_schema?: WhisperCapabilitySchema
+  query_options?: WhisperCapabilitySchema
+}
+
+export interface WhisperCapabilitySchema {
+  [field: string]: string | undefined
+}
+
+export interface WhisperStreamWordTimingPayload {
+  text?: string
+  startMs?: number
+  endMs?: number
+}
+
+export interface WhisperStreamReadyEvent {
+  type: 'ready'
+  streaming?: boolean
+  ts?: number
+}
+
+export interface WhisperStreamInterimEvent {
+  type: 'interim'
+  previewText: string
+  pendingText: string
+  commitReadyText: string
+  unstableTailText: string
+  revision: number
+  wordTimings?: WhisperStreamWordTimingPayload[]
+  ts?: number
+}
+
+export interface WhisperStreamFinalChunkEvent {
+  type: 'final_chunk'
+  text?: string
+  reason?: string
+  wordTimings?: WhisperStreamWordTimingPayload[]
+  ts?: number
+}
+
+export interface WhisperStreamSentenceEvent {
+  type: 'sentence'
+  text?: string
+  ts?: number
+}
+
+export interface WhisperStreamEndpointEvent {
+  type: 'endpoint'
+  reason?: string
+  ts?: number
+}
+
+export interface WhisperStreamFinalEvent {
+  type: 'final'
+  text?: string
+  wordTimings?: WhisperStreamWordTimingPayload[]
+  ts?: number
+}
+
+export interface WhisperStreamErrorEvent {
+  type: 'error'
+  message?: string
+  ts?: number
+}
+
+export interface WhisperStreamPongEvent {
+  type: 'pong'
+  ts?: number
+}
+
+export type WhisperStreamEvent =
+  | WhisperStreamReadyEvent
+  | WhisperStreamInterimEvent
+  | WhisperStreamFinalChunkEvent
+  | WhisperStreamSentenceEvent
+  | WhisperStreamEndpointEvent
+  | WhisperStreamFinalEvent
+  | WhisperStreamErrorEvent
+  | WhisperStreamPongEvent
+
+export function getWhisperStreamWsPort(
+  capabilities: WhisperServerCapabilities,
+  fallbackPort: number
+): number {
+  return typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
+    ? Math.floor(capabilities.ws_port)
+    : fallbackPort
+}
+
+export function supportsWhisperStreamEvent(
+  capabilities: WhisperServerCapabilities,
+  eventType: WhisperStreamEvent['type']
+): boolean {
+  return Array.isArray(capabilities.events) && capabilities.events.includes(eventType)
 }
 
 type WhisperServerRuntimeConfig = {
@@ -197,12 +295,13 @@ class WhisperServerClient {
       '--device',
       this.config.device,
       '--compute-type',
-      this.config.computeType,
-      '--sensevoice-model-id',
-      this.config.sensevoiceModelId,
-      '--sensevoice-use-itn',
-      this.config.sensevoiceUseItn ? 'true' : 'false'
+      this.config.computeType
     ]
+
+    if (this.config.engine === 'sensevoice') {
+      args.push('--sensevoice-model-id', this.config.sensevoiceModelId)
+      args.push('--sensevoice-use-itn', this.config.sensevoiceUseItn ? 'true' : 'false')
+    }
 
     args.push('--download-root', downloadRoot)
 
@@ -250,11 +349,9 @@ class WhisperServerClient {
       if (await this.isHealthy()) {
         const capabilities = await this.readCapabilities()
         if (capabilities.streaming_asr) {
-          const wsPort =
-            typeof capabilities.ws_port === 'number' && Number.isFinite(capabilities.ws_port)
-              ? Math.floor(capabilities.ws_port)
-              : this.config.port + 1
-          const wsReady = await this.isTcpPortOpen(this.config.host, wsPort, 500)
+          const wsPort = getWhisperStreamWsPort(capabilities, this.config.port + 1)
+          const wsPath = capabilities.ws_path || '/stream'
+          const wsReady = await this.isStreamingWsReady(this.config.host, wsPort, wsPath, 800)
           if (!wsReady) {
             await new Promise((resolve) => setTimeout(resolve, pollInterval))
             continue
@@ -331,21 +428,33 @@ class WhisperServerClient {
     }
   }
 
-  private isTcpPortOpen(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  private isStreamingWsReady(
+    host: string,
+    port: number,
+    path: string,
+    timeoutMs: number
+  ): Promise<boolean> {
     return new Promise((resolve) => {
-      const socket = net.createConnection({ host, port })
+      const normalizedPath = path.startsWith('/') ? path : `/${path}`
+      const socket = new WebSocket(`ws://${host}:${port}${normalizedPath}`)
       let settled = false
+      let timeout: NodeJS.Timeout | null = null
 
       const finish = (result: boolean): void => {
         if (settled) return
         settled = true
-        socket.destroy()
+        if (timeout) {
+          clearTimeout(timeout)
+          timeout = null
+        }
+        if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+          socket.terminate()
+        }
         resolve(result)
       }
 
-      socket.setTimeout(timeoutMs)
-      socket.once('connect', () => finish(true))
-      socket.once('timeout', () => finish(false))
+      timeout = setTimeout(() => finish(false), timeoutMs)
+      socket.once('open', () => finish(true))
       socket.once('error', () => finish(false))
     })
   }
@@ -357,6 +466,8 @@ class WhisperServerClient {
     wsPort?: number
     sampleRate?: number
     language?: string
+    returnWordTimings?: boolean
+    textCorrections?: TextCorrectionConfig
     previewIntervalMs?: number
     previewMinAudioMs?: number
     previewMinNewAudioMs?: number
@@ -381,6 +492,13 @@ class WhisperServerClient {
     }
     if (options?.language && options.language !== 'auto') {
       params.set('language', options.language)
+    }
+    if (options?.returnWordTimings === true) {
+      params.set('return_word_timestamps', 'true')
+    }
+    const serializedTextCorrections = serializeTextCorrectionConfig(options?.textCorrections)
+    if (serializedTextCorrections) {
+      params.set('text_corrections', serializedTextCorrections)
     }
 
     const maybeSetMs = (key: string, value: number | undefined): void => {
@@ -474,11 +592,13 @@ class WhisperServerClient {
     options?: {
       modelType?: string
       engine?: LocalEngine
+      transcriptionProfile?: LocalTranscriptionProfile
       sensevoiceModelId?: string
       sensevoiceUseItn?: boolean
       device?: 'cpu' | 'cuda'
       computeType?: string
       language?: string
+      textCorrections?: TextCorrectionConfig
       skipHealthCheck?: boolean
     }
   ): Promise<TranscribeResult> {
@@ -515,6 +635,13 @@ class WhisperServerClient {
 
     if (options?.language && options.language !== 'auto') {
       params.set('language', options.language)
+    }
+    if (options?.transcriptionProfile === 'offline_segmented') {
+      params.set('offline_segmented', 'true')
+    }
+    const serializedTextCorrections = serializeTextCorrectionConfig(options?.textCorrections)
+    if (serializedTextCorrections) {
+      params.set('text_corrections', serializedTextCorrections)
     }
 
     const downloadRoot = this.modelsPath

@@ -5,6 +5,7 @@ import * as fs from 'fs'
 import { EventEmitter } from 'events'
 import { SpeechRecognizer, RecognitionResult } from './index'
 import { getWhisperServer, WhisperServerClient, LocalEngine } from './whisperServer'
+import { TextCorrectionConfig } from './text-corrections'
 
 const DEFAULT_SENSEVOICE_MODEL_ID = 'FunAudioLLM/SenseVoiceSmall'
 const SENSEVOICE_SMALL_MODEL_KEY = 'sensevoice-small'
@@ -34,6 +35,7 @@ export interface GpuInfo {
 }
 
 export interface LocalRecognizerConfig {
+  transcriptionProfile?: 'single_shot' | 'offline_segmented'
   modelPath?: string
   engine?: LocalEngine
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
@@ -50,6 +52,7 @@ export interface LocalRecognizerConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  textCorrections?: TextCorrectionConfig
 }
 
 export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
@@ -69,6 +72,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
   constructor(config?: LocalRecognizerConfig) {
     super()
     this.config = {
+      transcriptionProfile: 'single_shot',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
@@ -204,9 +208,11 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
       console.log('[LocalRecognizer] Recognizing via remote HTTP server (server-controlled params)')
       const requestOptions = {
         engine: this.config.engine,
+        transcriptionProfile: this.config.transcriptionProfile,
         sensevoiceModelId: this.getSenseVoiceModelId(),
         sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
-        language: this.config.language
+        language: this.config.language,
+        textCorrections: this.config.textCorrections
       }
 
       let remoteResult
@@ -245,6 +251,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     const runtime = {
       engine: this.getEngine(),
       modelType: this.config.modelType || 'tiny',
+      transcriptionProfile: this.config.transcriptionProfile,
       sensevoiceModelId: this.getSenseVoiceModelId(),
       sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
       device,
@@ -265,11 +272,13 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
     const requestOptions = {
       engine: this.config.engine,
       modelType: this.config.modelType,
+      transcriptionProfile: this.config.transcriptionProfile,
       sensevoiceModelId: this.getSenseVoiceModelId(),
       sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
       device,
       computeType,
-      language: this.config.language
+      language: this.config.language,
+      textCorrections: this.config.textCorrections
     }
     const prewarmKey = this.getPrewarmKey(runtime)
 
@@ -304,11 +313,13 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
         const retry = await this.whisperServer!.transcribe(wavBuffer, {
           engine: this.config.engine,
           modelType: this.config.modelType,
+          transcriptionProfile: this.config.transcriptionProfile,
           sensevoiceModelId: this.getSenseVoiceModelId(),
           sensevoiceUseItn: this.shouldUseSenseVoiceItn(),
           device,
           computeType: 'int8_float16',
-          language: this.config.language
+          language: this.config.language,
+          textCorrections: this.config.textCorrections
         })
         if (retry.success) {
           this.rememberAutoComputeTypeHint(device, 'int8_float16')
@@ -374,7 +385,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
       if ((this.config.engine || 'faster-whisper') === 'faster-whisper') {
         args.push('--model', this.config.modelType || 'tiny')
-      } else {
+      } else if ((this.config.engine || 'faster-whisper') === 'sensevoice') {
         args.push('--sensevoice-model-id', this.getSenseVoiceModelId())
         args.push('--sensevoice-use-itn', this.shouldUseSenseVoiceItn() ? 'true' : 'false')
       }
@@ -870,9 +881,7 @@ export class LocalRecognizer extends EventEmitter implements SpeechRecognizer {
 
   private getAutoComputeHintKey(device: 'cpu' | 'cuda'): string {
     const modelIdentity =
-      this.getEngine() === 'sensevoice'
-        ? this.getSenseVoiceModelId()
-        : this.config.modelType || 'tiny'
+      this.getEngine() === 'sensevoice' ? this.getSenseVoiceModelId() : this.config.modelType || 'tiny'
     return `${this.getEngine()}|${modelIdentity}|${device}`
   }
 

@@ -1,5 +1,11 @@
 import WebSocket from 'ws'
 import { EventEmitter } from 'events'
+import type {
+  PartialResult,
+  SentencePair,
+  SpeakerSegment,
+  WordTiming
+} from '../../shared/transcription-types'
 
 export interface StreamingSonioxConfig {
   apiKey?: string
@@ -36,35 +42,7 @@ interface SonioxResponse {
   message?: string
 }
 
-// A sentence pair: original text and its translation (aligned by <end> token)
-export interface SentencePair {
-  original: string
-  translated?: string
-}
-
-// A segment of text from a specific speaker
-export interface SpeakerSegment {
-  speaker: number
-  text: string
-  translatedText?: string // Translated text (when translation enabled)
-  isFinal: boolean // Is this segment complete (speaker changed or session ended)
-  /** Sentence pairs aligned by <end> tokens for interleaved display */
-  sentencePairs?: SentencePair[]
-}
-
-// Partial result with speaker-aware segments
-export interface PartialResult {
-  /** All completed speaker segments (speaker changed, so these are finalized) */
-  segments: SpeakerSegment[]
-  /** Current active segment being transcribed */
-  currentSegment: SpeakerSegment | null
-  /** Legacy: combined text for backward compatibility */
-  combined: string
-  /** Current speaker number */
-  currentSpeaker?: number
-  /** Whether translation is enabled */
-  translationEnabled?: boolean
-}
+export type { PartialResult, SentencePair, SpeakerSegment, WordTiming }
 
 /**
  * Streaming Soniox recognizer that maintains a WebSocket connection
@@ -513,7 +491,7 @@ export class StreamingSonioxRecognizer extends EventEmitter {
               }
             : null
 
-        // Compute combined text for backward compatibility
+        // Keep a combined visible text snapshot for profiling and compatibility paths.
         const allTexts = [
           ...this.completedSegments.map((s) => s.text),
           this.currentSegmentText.join(''),

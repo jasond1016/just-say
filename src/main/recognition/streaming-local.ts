@@ -3,18 +3,17 @@ import { LocalRecognizer } from './local'
 import { SpeakerSegment, PartialResult, SentencePair } from './streaming-soniox'
 import { VADState } from './vad-utils'
 import { findTextOverlap, mergeText } from './text-utils'
-
-interface LocalTranslationConfig {
-  enabled: boolean
-  targetLanguage: string
-  translator?: (text: string, targetLanguage: string) => Promise<string>
-  batchTranslator?: (texts: string[], targetLanguage: string) => Promise<string[]>
-  batchWindowMs?: number
-  maxBatchItems?: number
-}
+import { TextCorrectionConfig } from './text-corrections'
+import { shouldFlushSentenceByBoundary } from './commit-boundary'
+import {
+  LocalTranslationConfig,
+  LocalTranslationCoordinator,
+  cloneSpeakerSegment
+} from './streaming-local-shared'
 
 export interface StreamingLocalConfig {
   mode?: 'auto' | 'streaming' | 'http_chunk'
+  transcriptionProfile?: 'single_shot' | 'offline_segmented'
   engine?: 'faster-whisper' | 'sensevoice'
   modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
   sensevoice?: {
@@ -28,6 +27,7 @@ export interface StreamingLocalConfig {
   serverHost?: string
   serverPort?: number
   sampleRate?: number
+  textCorrections?: TextCorrectionConfig
   segmentation?: {
     previewIntervalMs?: number
     previewMinAudioMs?: number
@@ -49,7 +49,8 @@ export interface StreamingLocalConfig {
  * then sends finalized chunks to LocalRecognizer (HTTP server path).
  */
 export class StreamingLocalRecognizer extends EventEmitter {
-  private config: Required<Omit<StreamingLocalConfig, 'translation'>> & {
+  private config: Required<Omit<StreamingLocalConfig, 'translation' | 'textCorrections'>> & {
+    textCorrections?: TextCorrectionConfig
     translation?: LocalTranslationConfig
   }
   private recognizer: LocalRecognizer
@@ -72,10 +73,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private confirmedTranslation = ''
   private completedSegments: SpeakerSegment[] = []
   private sentencePairs: SentencePair[] = []
-  private translationQueue: Promise<void> = Promise.resolve()
-  private pendingTranslationPairIndices: number[] = []
-  private translationBatchTimer: NodeJS.Timeout | null = null
-  private pendingSentenceOriginal = ''
+  private readonly translationCoordinator: LocalTranslationCoordinator
+  private liveSentenceTail = ''
   private previewText = ''
   private pendingHypothesis = ''
   private lastHypothesisUpdateAt = 0
@@ -84,17 +83,11 @@ export class StreamingLocalRecognizer extends EventEmitter {
   private readonly MIN_CHUNK_DURATION_MS = 1200
   private readonly MAX_CHUNK_DURATION_MS = 6000
   private readonly OVERLAP_AUDIO_MS = 360
-  private readonly SENTENCE_MIN_FLUSH_CHARS = 14
-  private readonly SENTENCE_SOFT_FLUSH_CHARS = 28
-  private readonly SENTENCE_FORCE_FLUSH_CHARS = 48
   private readonly STABILITY_FORCE_COMMIT_CHARS = 20
   private readonly STABILITY_MIN_BOUNDARY_CHARS = 6
   private readonly STABILITY_REPLACE_COMMIT_MIN_COMMON_CHARS = 2
-  private readonly STRONG_PUNCTUATION_MIN_TAIL_CHARS = 3
   private readonly HYPOTHESIS_FINALIZE_SILENCE_MS = 1200
   private readonly HYPOTHESIS_FINALIZE_IDLE_MS = 220
-  private readonly DEFAULT_TRANSLATION_BATCH_WINDOW_MS = 450
-  private readonly DEFAULT_TRANSLATION_MAX_BATCH_ITEMS = 6
   private readonly JAPANESE_CONTINUATION_PARTICLES = new Set([
     'は',
     'が',
@@ -111,6 +104,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
     super()
     this.config = {
       mode: 'auto',
+      transcriptionProfile: 'single_shot',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
@@ -129,6 +123,25 @@ export class StreamingLocalRecognizer extends EventEmitter {
     }
 
     this.recognizer = this.createLocalRecognizer()
+    this.translationCoordinator = new LocalTranslationCoordinator({
+      getConfig: () => this.config.translation,
+      isActive: () => this.isActive,
+      getSentencePairs: () => this.sentencePairs,
+      applyTranslation: (pairIndex, originalText, translated) => {
+        if (this.sentencePairs[pairIndex]?.original !== originalText) {
+          return false
+        }
+        this.sentencePairs[pairIndex] = {
+          ...this.sentencePairs[pairIndex],
+          translated
+        }
+        this.rebuildConfirmedTranslation()
+        return true
+      },
+      emitPartialResult: () => this.emitPartialResult(),
+      emitTranslationError: (error) => this.emit('translationError', error),
+      logPrefix: 'StreamingLocal'
+    })
   }
 
   updateConfig(config?: StreamingLocalConfig): void {
@@ -158,7 +171,9 @@ export class StreamingLocalRecognizer extends EventEmitter {
       nextConfig.serverMode !== this.config.serverMode ||
       nextConfig.serverHost !== this.config.serverHost ||
       nextConfig.serverPort !== this.config.serverPort ||
-      nextConfig.sampleRate !== this.config.sampleRate
+      nextConfig.sampleRate !== this.config.sampleRate ||
+      JSON.stringify(nextConfig.textCorrections || null) !==
+        JSON.stringify(this.config.textCorrections || null)
 
     this.config = nextConfig
 
@@ -166,8 +181,7 @@ export class StreamingLocalRecognizer extends EventEmitter {
       this.recognizer = this.createLocalRecognizer()
       this.preConnected = false
     }
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
+    this.translationCoordinator.reset()
   }
 
   async preConnect(): Promise<void> {
@@ -207,13 +221,11 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.confirmedTranslation = ''
     this.completedSegments = []
     this.sentencePairs = []
-    this.pendingSentenceOriginal = ''
+    this.liveSentenceTail = ''
     this.previewText = ''
     this.pendingHypothesis = ''
     this.lastHypothesisUpdateAt = 0
-    this.translationQueue = Promise.resolve()
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
+    this.translationCoordinator.reset()
     this.vadState.reset()
 
     if (this.silenceCheckInterval) {
@@ -267,29 +279,20 @@ export class StreamingLocalRecognizer extends EventEmitter {
       this.translatePairAsync(finalPairIndex)
     }
     this.flushPendingTranslationBatch()
-    await this.translationQueue
+    await this.translationCoordinator.waitForIdle()
 
     this.isActive = false
 
     const text = this.normalizeJapaneseSpacing(
       mergeText(this.confirmedText, this.previewText)
     ).trim()
-    const translatedText = this.confirmedTranslation.trim()
-    const finalSegment: SpeakerSegment | null = text
-      ? {
-          speaker: 0,
-          text,
-          translatedText: translatedText || undefined,
-          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
-          isFinal: true
-        }
-      : null
+    const finalSegment = this.buildCurrentLiveSegment()
 
     return {
       text,
       durationMs: Date.now() - this.startTime,
-      segments: [...this.completedSegments],
-      currentSegment: finalSegment
+      segments: this.buildCommittedSegments(),
+      currentSegment: finalSegment ? { ...finalSegment, isFinal: true } : null
     }
   }
 
@@ -311,13 +314,11 @@ export class StreamingLocalRecognizer extends EventEmitter {
     this.confirmedText = ''
     this.confirmedTranslation = ''
     this.sentencePairs = []
-    this.pendingSentenceOriginal = ''
+    this.liveSentenceTail = ''
     this.previewText = ''
     this.pendingHypothesis = ''
     this.lastHypothesisUpdateAt = 0
-    this.pendingTranslationPairIndices = []
-    this.clearTranslationBatchTimer()
-    this.translationQueue = Promise.resolve()
+    this.translationCoordinator.reset()
   }
 
   private createLocalRecognizer(): LocalRecognizer {
@@ -332,6 +333,8 @@ export class StreamingLocalRecognizer extends EventEmitter {
       serverHost: this.config.serverHost,
       serverPort: this.config.serverPort,
       sampleRate: this.config.sampleRate,
+      transcriptionProfile: this.config.transcriptionProfile,
+      textCorrections: this.config.textCorrections,
       useHttpServer: true
     })
   }
@@ -518,10 +521,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
       return null
     }
 
-    this.pendingSentenceOriginal = this.normalizeJapaneseSpacing(
-      mergeText(this.pendingSentenceOriginal, appended)
+    this.liveSentenceTail = this.normalizeJapaneseSpacing(
+      mergeText(this.liveSentenceTail, appended)
     )
-    if (this.shouldFlushSentence(this.pendingSentenceOriginal)) {
+    if (this.shouldFlushSentence(this.liveSentenceTail)) {
       return this.flushPendingSentencePair()
     }
     return null
@@ -752,179 +755,21 @@ export class StreamingLocalRecognizer extends EventEmitter {
     return right.replace(/^[\p{P}\p{S}\s]+/u, '')
   }
 
-  private translatePairAsync(pairIndex: number): void {
-    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
-      return
-    }
-
-    const originalText = this.sentencePairs[pairIndex]?.original?.trim()
-    if (!originalText || !this.shouldTranslateText(originalText)) {
-      return
-    }
-
-    if (this.config.translation.batchTranslator) {
-      this.pendingTranslationPairIndices.push(pairIndex)
-      if (this.pendingTranslationPairIndices.length >= this.getTranslationMaxBatchItems()) {
-        this.flushPendingTranslationBatch()
-      } else {
-        this.scheduleTranslationBatchFlush()
-      }
-      return
-    }
-
-    const translator = this.config.translation.translator
-    if (!translator) {
-      return
-    }
-
-    this.translationQueue = this.translationQueue
-      .then(async () => {
-        const translated = (
-          await translator(originalText, this.config.translation!.targetLanguage)
-        )?.trim()
-        if (!this.isActive || !translated) {
-          return
-        }
-        if (this.sentencePairs[pairIndex]?.original !== originalText) {
-          return
-        }
-        this.sentencePairs[pairIndex] = {
-          ...this.sentencePairs[pairIndex],
-          translated
-        }
-        this.rebuildConfirmedTranslation()
-        this.emitPartialResult()
-      })
-      .catch((error) => {
-        const err = error instanceof Error ? error : new Error(String(error))
-        console.warn('[StreamingLocal] Chunk translation failed:', err.message)
-        this.emit('translationError', err)
-      })
-  }
-
-  private getTranslationBatchWindowMs(): number {
-    const configured = this.config.translation?.batchWindowMs
-    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-      return Math.floor(configured)
-    }
-    return this.DEFAULT_TRANSLATION_BATCH_WINDOW_MS
-  }
-
-  private getTranslationMaxBatchItems(): number {
-    const configured = this.config.translation?.maxBatchItems
-    if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
-      return Math.floor(configured)
-    }
-    return this.DEFAULT_TRANSLATION_MAX_BATCH_ITEMS
-  }
-
-  private scheduleTranslationBatchFlush(): void {
-    if (this.translationBatchTimer || this.pendingTranslationPairIndices.length === 0) {
-      return
-    }
-    this.translationBatchTimer = setTimeout(() => {
-      this.translationBatchTimer = null
-      this.flushPendingTranslationBatch()
-    }, this.getTranslationBatchWindowMs())
-  }
-
-  private clearTranslationBatchTimer(): void {
-    if (this.translationBatchTimer) {
-      clearTimeout(this.translationBatchTimer)
-      this.translationBatchTimer = null
-    }
-  }
-
   private flushPendingTranslationBatch(): void {
-    this.clearTranslationBatchTimer()
-    if (!this.config.translation?.enabled || !this.config.translation.targetLanguage) {
-      this.pendingTranslationPairIndices = []
-      return
-    }
-    const batchTranslator = this.config.translation.batchTranslator
-    if (!batchTranslator || this.pendingTranslationPairIndices.length === 0) {
-      return
-    }
+    this.translationCoordinator.flushPendingBatch()
+  }
 
-    const indices = [...this.pendingTranslationPairIndices]
-    this.pendingTranslationPairIndices = []
-    const items = indices
-      .map((index) => ({
-        index,
-        original: this.sentencePairs[index]?.original?.trim() || ''
-      }))
-      .filter((item) => item.original && this.shouldTranslateText(item.original))
-
-    if (items.length === 0) {
-      return
-    }
-
-    this.translationQueue = this.translationQueue
-      .then(async () => {
-        const translatedBatch = await batchTranslator(
-          items.map((item) => item.original),
-          this.config.translation!.targetLanguage
-        )
-        if (!this.isActive || translatedBatch.length === 0) {
-          return
-        }
-        let changed = false
-        for (let i = 0; i < items.length; i += 1) {
-          const translated = (translatedBatch[i] || '').trim()
-          if (!translated) continue
-          const item = items[i]
-          if (this.sentencePairs[item.index]?.original !== item.original) {
-            continue
-          }
-          this.sentencePairs[item.index] = {
-            ...this.sentencePairs[item.index],
-            translated
-          }
-          changed = true
-        }
-        if (changed) {
-          this.rebuildConfirmedTranslation()
-          this.emitPartialResult()
-        }
-      })
-      .catch((error) => {
-        const err = error instanceof Error ? error : new Error(String(error))
-        console.warn('[StreamingLocal] Batch translation failed:', err.message)
-        this.emit('translationError', err)
-      })
+  private translatePairAsync(pairIndex: number): void {
+    this.translationCoordinator.translatePairAsync(pairIndex)
   }
 
   private shouldFlushSentence(sentence: string): boolean {
-    const normalized = sentence.trim()
-    if (!normalized) {
-      return false
-    }
-
-    const meaningfulChars = this.getMeaningfulCharCount(normalized)
-    if (meaningfulChars >= this.SENTENCE_FORCE_FLUSH_CHARS) {
-      return true
-    }
-
-    const endsWithStrongPunctuation = /[。！？!?]$/.test(normalized)
-    if (
-      endsWithStrongPunctuation &&
-      meaningfulChars >= this.SENTENCE_MIN_FLUSH_CHARS &&
-      this.hasEnoughTailForStrongPunctuationCommit(normalized)
-    ) {
-      return true
-    }
-
-    const hasSoftBoundary = /[，、,;；:：]$/.test(normalized)
-    if (hasSoftBoundary && meaningfulChars >= this.SENTENCE_SOFT_FLUSH_CHARS) {
-      return true
-    }
-
-    return false
+    return shouldFlushSentenceByBoundary(sentence, false)
   }
 
   private flushPendingSentencePair(): number | null {
-    const finalized = this.normalizeJapaneseSpacing(this.pendingSentenceOriginal).trim()
-    this.pendingSentenceOriginal = ''
+    const finalized = this.normalizeJapaneseSpacing(this.liveSentenceTail).trim()
+    this.liveSentenceTail = ''
     if (!finalized) {
       return null
     }
@@ -935,16 +780,6 @@ export class StreamingLocalRecognizer extends EventEmitter {
     }
 
     return this.sentencePairs.push({ original: finalized }) - 1
-  }
-
-  private shouldTranslateText(text: string): boolean {
-    const normalized = text.trim()
-    if (!normalized) {
-      return false
-    }
-
-    // Skip chunks that are just punctuation/symbols to avoid noisy translations.
-    return Array.from(normalized).some((ch) => this.isMeaningfulChar(ch))
   }
 
   private getMeaningfulCharCount(text: string): number {
@@ -963,15 +798,6 @@ export class StreamingLocalRecognizer extends EventEmitter {
 
   private isHanChar(ch: string): boolean {
     return /\p{Script=Han}/u.test(ch)
-  }
-
-  private hasEnoughTailForStrongPunctuationCommit(text: string): boolean {
-    const trailingRemoved = text.replace(/[。！？!?]+$/u, '')
-    if (!trailingRemoved) {
-      return false
-    }
-    const tail = this.getTailAfterLastBoundary(trailingRemoved)
-    return this.getMeaningfulCharCount(tail) >= this.STRONG_PUNCTUATION_MIN_TAIL_CHARS
   }
 
   private getTailAfterLastBoundary(text: string): string {
@@ -1072,19 +898,10 @@ export class StreamingLocalRecognizer extends EventEmitter {
     const combined = this.normalizeJapaneseSpacing(
       mergeText(this.confirmedText, this.previewText)
     ).trim()
-    const translated = this.confirmedTranslation.trim()
-    const currentSegment: SpeakerSegment | null = combined
-      ? {
-          speaker: 0,
-          text: combined,
-          translatedText: translated || undefined,
-          sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
-          isFinal: false
-        }
-      : null
+    const currentSegment = this.buildCurrentLiveSegment()
 
     const result: PartialResult = {
-      segments: [...this.completedSegments],
+      segments: this.buildCommittedSegments(),
       currentSegment,
       combined,
       currentSpeaker: 0,
@@ -1119,5 +936,41 @@ export class StreamingLocalRecognizer extends EventEmitter {
     if (ms <= 0) return 0
     const sampleRate = this.config.sampleRate || 16000
     return Math.floor((sampleRate * 2 * ms) / 1000)
+  }
+
+  private buildCommittedSegments(): SpeakerSegment[] {
+    const confirmedText = this.confirmedText.trim()
+    const translated = this.confirmedTranslation.trim()
+    if (!confirmedText) {
+      return this.completedSegments.map((segment) => cloneSpeakerSegment(segment))
+    }
+
+    return [
+      ...this.completedSegments,
+      {
+        speaker: 0,
+        text: confirmedText,
+        translatedText: translated || undefined,
+        sentencePairs: this.sentencePairs.length > 0 ? [...this.sentencePairs] : undefined,
+        isFinal: true
+      }
+    ]
+  }
+
+  private buildCurrentLiveSegment(): SpeakerSegment | null {
+    const liveText = this.normalizeJapaneseSpacing(this.previewText).trim()
+    if (!liveText) {
+      return null
+    }
+
+    const liveStableText = this.normalizeJapaneseSpacing(this.previewText).trim()
+    return {
+      speaker: 0,
+      text: liveText,
+      previewText: this.previewText || undefined,
+      commitReadyText: liveStableText && liveStableText !== liveText ? liveStableText : undefined,
+      unstableTailText: this.previewText || undefined,
+      isFinal: false
+    }
   }
 }

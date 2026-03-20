@@ -1,5 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  CheckSquare,
+  Copy,
+  Download,
+  FileText,
+  Loader2,
+  MoreHorizontal,
+  Trash2,
+  User
+} from 'lucide-react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
 import { toSentencePairsFromStored } from '@/lib/transcript-segmentation'
@@ -14,24 +25,116 @@ interface TranscriptDetailProps {
   onBack: () => void
 }
 
-const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
+interface ActionItem {
+  content: string
+  assignee?: string
+}
+
+const SPEAKER_COLOR_VARS = [
+  'var(--speaker-1)',
+  'var(--speaker-2)',
+  'var(--speaker-3)',
+  'var(--speaker-4)',
+  'var(--speaker-5)',
+  'var(--speaker-6)'
+]
+
+function getStoredSegmentLabel(
+  segment: { source: 'system' | 'microphone' | null; speaker: number },
+  labels: {
+    microphone: string
+    system: string
+    speakerLabel: (index: number) => string
+  }
+): string {
+  if (segment.source === 'microphone') return labels.microphone
+  if (segment.source === 'system') return labels.system
+  return labels.speakerLabel(segment.speaker + 1)
+}
+
+function getStoredSegmentColor(segment: {
+  source: 'system' | 'microphone' | null
+  speaker: number
+}): string {
+  if (segment.source === 'microphone') return 'var(--speaker-mic)'
+  if (segment.source === 'system') return 'var(--speaker-system)'
+  return SPEAKER_COLOR_VARS[segment.speaker % SPEAKER_COLOR_VARS.length]
+}
 
 function formatSegmentTime(index: number, total: number, durationSeconds: number): string {
-  if (total <= 1 || durationSeconds <= 0) {
-    return '0:00'
-  }
+  if (total <= 1 || durationSeconds <= 0) return '0:00'
   const estimated = Math.floor((index / (total - 1)) * durationSeconds)
   const minutes = Math.floor(estimated / 60)
   const seconds = estimated % 60
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+function parseStoredActionItems(json: string | null): ActionItem[] {
+  if (!json) return []
+  try {
+    const parsed = JSON.parse(json)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item: unknown) => {
+          if (typeof item === 'object' && item !== null) {
+            const obj = item as Record<string, unknown>
+            return {
+              content: String(obj.content || ''),
+              assignee: obj.assignee ? String(obj.assignee) : undefined
+            }
+          }
+          return { content: String(item) }
+        })
+        .filter((item) => item.content.trim().length > 0)
+    }
+  } catch { /* ignore */ }
+  return []
+}
+
+function DetailSkeleton(): React.JSX.Element {
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
+      <header className="px-8 py-3 space-y-3">
+        <div className="skeleton h-8 w-16 rounded-md" />
+        <div className="space-y-2">
+          <div className="skeleton h-7 w-2/3 rounded-md" />
+          <div className="skeleton h-4 w-1/3 rounded" />
+        </div>
+      </header>
+      <div className="mx-8 border-t border-border" />
+      <div className="flex-1 px-8 py-6 space-y-5">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="flex gap-4">
+            <div className="skeleton h-4 w-[44px] rounded shrink-0" />
+            <div className="skeleton h-2 w-2 rounded-full shrink-0 mt-1" />
+            <div className="flex-1 space-y-2">
+              <div className="skeleton h-3 w-20 rounded" />
+              <div className="skeleton h-4 w-full rounded" />
+              <div className="skeleton h-4 w-3/4 rounded" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.JSX.Element {
   const { m, locale } = useI18n()
-  const { currentTranscript, loading, error, getTranscript, deleteTranscript, exportTranscript } =
-    useTranscripts()
+  const {
+    currentTranscript,
+    loading,
+    error,
+    getTranscript,
+    deleteTranscript,
+    exportTranscript,
+    setCurrentTranscript
+  } = useTranscripts()
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [actionItemsLoading, setActionItemsLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -40,9 +143,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
 
   useEffect(() => {
     return () => {
-      if (copyFeedbackTimerRef.current) {
-        clearTimeout(copyFeedbackTimerRef.current)
-      }
+      if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current)
     }
   }, [])
 
@@ -56,22 +157,33 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             return `${pair.original}${translated}`
           })
           .join('\n')
-        return `${m.detail.speakerLabel(segment.speaker + 1)}: ${pairLines}`
+        return `${getStoredSegmentLabel(segment, {
+          microphone: m.detail.microphoneLabel,
+          system: m.detail.systemLabel,
+          speakerLabel: m.detail.speakerLabel
+        })}: ${pairLines}`
       })
       .join('\n\n')
   }, [currentTranscript, m])
 
   const speakerCount = useMemo(() => {
     if (!currentTranscript) return 0
-    return new Set(currentTranscript.segments.map((segment) => segment.speaker)).size
+    return new Set(
+      currentTranscript.segments.map((segment) =>
+        segment.source ? `source:${segment.source}` : `speaker:${segment.speaker}`
+      )
+    ).size
   }, [currentTranscript])
+
+  const storedActionItems = useMemo(
+    () => parseStoredActionItems(currentTranscript?.action_items ?? null),
+    [currentTranscript?.action_items]
+  )
+  const hasGeneratedActionItems = currentTranscript?.action_items != null
 
   const handleCopy = useCallback(async () => {
     if (!fullText) return
-
-    if (copyFeedbackTimerRef.current) {
-      clearTimeout(copyFeedbackTimerRef.current)
-    }
+    if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current)
 
     try {
       await navigator.clipboard.writeText(fullText)
@@ -87,133 +199,295 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
     }, 1600)
   }, [fullText])
 
-  const handleDelete = useCallback(() => {
-    setDeleteDialogOpen(true)
-  }, [])
+  const handleDelete = useCallback(() => { setDeleteDialogOpen(true) }, [])
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!currentTranscript) return
-
     const ok = await deleteTranscript(currentTranscript.id)
     setDeleteDialogOpen(false)
-    if (ok) {
-      onBack()
-    }
+    if (ok) onBack()
   }, [currentTranscript, deleteTranscript, onBack])
 
   const handleExport = useCallback(async () => {
     await exportTranscript(id)
   }, [exportTranscript, id])
 
+  const handleGenerateSummary = useCallback(async () => {
+    if (summaryLoading) return
+    setSummaryLoading(true)
+    setAiError(null)
+    try {
+      const result = await window.api.generateMeetingSummary(id)
+      setCurrentTranscript((prev) => {
+        if (!prev || prev.id !== id) return prev
+        return { ...prev, summary: result.summary, summary_generated_at: result.generatedAt, summary_ai_model: result.model }
+      })
+    } catch (err) {
+      console.error('Failed to generate summary:', err)
+      setAiError(m.detail.aiError)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }, [id, summaryLoading, m, setCurrentTranscript])
+
+  const handleGenerateActionItems = useCallback(async () => {
+    if (actionItemsLoading) return
+    setActionItemsLoading(true)
+    setAiError(null)
+    try {
+      const result = await window.api.generateMeetingActionItems(id)
+      setCurrentTranscript((prev) => {
+        if (!prev || prev.id !== id) return prev
+        return { ...prev, action_items: JSON.stringify(result.items), action_items_generated_at: result.generatedAt, action_items_ai_model: result.model }
+      })
+    } catch (err) {
+      console.error('Failed to generate action items:', err)
+      setAiError(m.detail.aiError)
+    } finally {
+      setActionItemsLoading(false)
+    }
+  }, [id, actionItemsLoading, m, setCurrentTranscript])
+
   if (loading) {
-    return (
-      <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-        {m.detail.loading}
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !currentTranscript) {
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground page-enter">
         <p>{error || m.detail.notFound}</p>
-        <Button onClick={onBack}>{m.detail.back}</Button>
+        <Button variant="outline" size="sm" onClick={onBack}>{m.detail.back}</Button>
       </div>
     )
   }
 
+  const isMeeting = currentTranscript.source_mode === 'meeting'
+
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header className="flex h-[53px] items-center justify-between border-b px-6">
-        <div className="min-w-0">
-          <div className="flex items-center gap-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
+      <header className="px-8 py-3 space-y-2">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5">
+            <ArrowLeft className="h-4 w-4" />
+            {m.detail.back}
+          </Button>
+        </div>
+
+        <div className="flex items-start justify-between">
+          <div className="min-w-0 flex-1">
+            <h1 className="font-display text-2xl text-foreground truncate">
+              {currentTranscript.title}
+            </h1>
+            <p className="mt-1 font-mono tabular-nums text-[12px] text-muted-foreground">
+              {formatRelativeDateTime(currentTranscript.created_at, locale)}
+              <span className="mx-1.5 opacity-40">·</span>
+              {formatDurationShort(currentTranscript.duration_seconds, locale)}
+              <span className="mx-1.5 opacity-40">·</span>
+              {m.detail.speakerCount(speakerCount)}
+            </p>
+          </div>
+
+          {/* Primary action: Copy */}
+          <div className="flex items-center gap-1.5 shrink-0 ml-4">
             <Button
               variant="outline"
               size="sm"
-              className="h-7 gap-1.5 rounded-md px-2.5 text-[13px] font-medium"
-              onClick={onBack}
+              onClick={handleCopy}
+              className={
+                copyStatus === 'success'
+                  ? 'text-[var(--color-success)] border-[var(--color-success)]/30'
+                  : copyStatus === 'error'
+                    ? 'text-destructive border-destructive/30'
+                    : ''
+              }
             >
-              <ArrowLeft className="h-4 w-4" />
-              {m.detail.back}
+              <Copy className="h-3.5 w-3.5" />
+              {copyStatus === 'success' ? m.detail.copySuccess : copyStatus === 'error' ? m.detail.copyFailed : m.detail.copy}
             </Button>
-            <h1 className="truncate text-base font-semibold">{currentTranscript.title}</h1>
-          </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {formatRelativeDateTime(currentTranscript.created_at, locale)} ·{' '}
-            {formatDurationShort(currentTranscript.duration_seconds, locale)} ·{' '}
-            {m.detail.speakerCount(speakerCount)}
-          </p>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className={`h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)] ${
-              copyStatus === 'success'
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700'
-                : copyStatus === 'error'
-                  ? 'border-red-300 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700'
-                  : ''
-            }`}
-            onClick={handleCopy}
-          >
-            <Copy className="h-4 w-4" />
-            {copyStatus === 'success'
-              ? m.detail.copySuccess
-              : copyStatus === 'error'
-                ? m.detail.copyFailed
-                : m.detail.copy}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-            onClick={() => {
-              void handleExport()
-            }}
-          >
-            <Download className="h-4 w-4" />
-            {m.detail.export}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5 border-red-300 px-4 text-sm font-medium text-red-500 hover:bg-red-50 hover:text-red-600"
-            onClick={handleDelete}
-          >
-            <Trash2 className="h-4 w-4" />
-            {m.detail.delete}
-          </Button>
+            {/* Secondary actions — dropdown */}
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenu.Trigger>
+
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  align="end"
+                  sideOffset={4}
+                  className="z-50 w-56 bg-card border border-border py-1 rounded-md shadow-tinted-lg animate-[slideInUp_150ms_var(--ease-out-expo)] focus:outline-none"
+                >
+                  {isMeeting && (
+                    <>
+                      <DropdownMenu.Item
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-accent transition-colors disabled:opacity-40 cursor-default outline-none data-[highlighted]:bg-accent"
+                        onSelect={() => void handleGenerateSummary()}
+                        disabled={summaryLoading}
+                      >
+                        {summaryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
+                        {summaryLoading ? m.detail.generating : currentTranscript.summary ? m.detail.regenerate + ' ' + m.detail.generateSummary : m.detail.generateSummary}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-accent transition-colors disabled:opacity-40 cursor-default outline-none data-[highlighted]:bg-accent"
+                        onSelect={() => void handleGenerateActionItems()}
+                        disabled={actionItemsLoading}
+                      >
+                        {actionItemsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                        {actionItemsLoading ? m.detail.generating : hasGeneratedActionItems ? m.detail.regenerate + ' ' + m.detail.generateActionItems : m.detail.generateActionItems}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator className="my-1 border-t border-border" />
+                    </>
+                  )}
+                  <DropdownMenu.Item
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-accent transition-colors cursor-default outline-none data-[highlighted]:bg-accent"
+                    onSelect={() => void handleExport()}
+                  >
+                    <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                    {m.detail.export}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator className="my-1 border-t border-border" />
+                  <DropdownMenu.Item
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-destructive hover:bg-accent transition-colors cursor-default outline-none data-[highlighted]:bg-accent"
+                    onSelect={handleDelete}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {m.detail.delete}
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          </div>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-        <div className="space-y-5">
-          {currentTranscript.segments.map((segment, index) => (
-            <div key={segment.id} className="flex gap-3">
-              <span className="w-10 shrink-0 pt-0.5 text-xs text-muted-foreground">
-                {formatSegmentTime(
-                  index,
-                  currentTranscript.segments.length,
-                  currentTranscript.duration_seconds
+      <div className="mx-8 border-t border-border" />
+
+      {/* Content */}
+      <div className="min-h-0 flex-1 overflow-auto px-8 py-6">
+        <div className="max-w-3xl">
+          {/* AI error banner */}
+          {aiError && (
+            <div className="mb-5 border-l-2 border-destructive bg-[var(--color-danger-bg)] px-4 py-3 text-sm text-destructive rounded-r-md">
+              {aiError}
+            </div>
+          )}
+
+          {/* Summary */}
+          {currentTranscript.summary && (
+            <div className="mb-6 border-l-2 border-primary bg-primary/5 px-5 py-4 rounded-r-md">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-primary">
+                  <FileText className="h-3.5 w-3.5" />
+                  {m.detail.summaryTitle}
+                </h3>
+                {currentTranscript.summary_ai_model && (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {m.detail.aiGeneratedAt(currentTranscript.summary_ai_model)}
+                  </span>
                 )}
-              </span>
-              <div className="min-w-0 flex-1 space-y-1">
-                <p
-                  className="text-[13px] font-semibold"
-                  style={{ color: speakerColors[segment.speaker % speakerColors.length] }}
-                >
-                  {m.detail.speakerLabel(segment.speaker + 1)}
-                </p>
-                <BilingualSegment
-                  pairs={toSentencePairsFromStored(segment)}
-                  originalText={segment.text}
-                  translatedText={segment.translated_text}
-                />
+              </div>
+              <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                {currentTranscript.summary}
               </div>
             </div>
-          ))}
+          )}
+
+          {/* Action items */}
+          {hasGeneratedActionItems && (
+            <div className="mb-6 border-l-2 border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-5 py-4 rounded-r-md">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-warning)]">
+                  <CheckSquare className="h-3.5 w-3.5" />
+                  {m.detail.actionItemsTitle}
+                </h3>
+                {currentTranscript.action_items_ai_model && (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {m.detail.aiGeneratedAt(currentTranscript.action_items_ai_model)}
+                  </span>
+                )}
+              </div>
+              {storedActionItems.length > 0 ? (
+                <ul className="space-y-2">
+                  {storedActionItems.map((item, index) => (
+                    <li key={index} className="flex items-start gap-3 text-sm">
+                      <span className="font-mono tabular-nums text-[12px] text-[var(--color-warning)] font-medium shrink-0 pt-0.5 w-5 text-right">
+                        {index + 1}.
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-foreground">{item.content}</span>
+                        {item.assignee && (
+                          <span className="ml-2 inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
+                            <User className="h-3 w-3" />
+                            {m.detail.assignee}: {item.assignee}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">{m.detail.noActionItems}</p>
+              )}
+            </div>
+          )}
+
+          {/* Transcript segments — timeline format */}
+          <div className="relative">
+            {/* Timeline rail */}
+            <div className="absolute left-[52px] top-0 bottom-0 w-px bg-border" />
+
+            <div className="space-y-0">
+              {currentTranscript.segments.map((segment, index) => (
+                <div
+                  key={segment.id}
+                  className="flex gap-4 py-3"
+                  style={{
+                    animationName: 'staggerIn',
+                    animationDuration: '300ms',
+                    animationTimingFunction: 'var(--ease-out-expo)',
+                    animationDelay: `${Math.min(index * 30, 600)}ms`,
+                    animationFillMode: 'backwards'
+                  }}
+                >
+                  <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
+                    {formatSegmentTime(index, currentTranscript.segments.length, currentTranscript.duration_seconds)}
+                  </span>
+
+                  {/* Timeline dot */}
+                  <div className="relative flex shrink-0 items-start pt-1.5">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: getStoredSegmentColor(segment) }}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p
+                      className="text-[12px] font-semibold tracking-wide uppercase"
+                      style={{ color: getStoredSegmentColor(segment) }}
+                    >
+                      {getStoredSegmentLabel(segment, {
+                        microphone: m.detail.microphoneLabel,
+                        system: m.detail.systemLabel,
+                        speakerLabel: m.detail.speakerLabel
+                      })}
+                    </p>
+                    <BilingualSegment
+                      pairs={toSentencePairsFromStored(segment)}
+                      originalText={segment.text}
+                      translatedText={segment.translated_text}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 

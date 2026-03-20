@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Clock3, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,6 +10,19 @@ import { useI18n } from '@/i18n/useI18n'
 
 interface TranscriptHistoryProps {
   onNavigateToDetail: (id: string) => void
+}
+
+function ListItemSkeleton(): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-4 py-4">
+      <span className="skeleton h-10 w-[3px] rounded-full shrink-0" />
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="skeleton h-4 w-2/3 rounded" />
+        <div className="skeleton h-3 w-1/4 rounded" />
+      </div>
+      <div className="skeleton h-5 w-14 rounded-sm shrink-0" />
+    </div>
+  )
 }
 
 export function TranscriptHistory({
@@ -58,13 +71,7 @@ export function TranscriptHistory({
         activeElement instanceof HTMLTextAreaElement ||
         (activeElement instanceof HTMLElement && activeElement.isContentEditable)
 
-      if (
-        event.key === '/' &&
-        !event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !isTypingTarget
-      ) {
+      if (event.key === '/' && !event.metaKey && !event.ctrlKey && !event.altKey && !isTypingTarget) {
         event.preventDefault()
         searchInputRef.current?.focus()
         return
@@ -87,15 +94,17 @@ export function TranscriptHistory({
   ]
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header className="flex h-[53px] items-center justify-between border-b px-6">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
+      <header className="px-8 py-3 space-y-2">
         <div className="flex items-center gap-3">
-          <Clock3 className="h-5 w-5 text-[#7C3AED]" />
-          <h1 className="text-[18px] leading-none font-semibold">{m.history.title}</h1>
-          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
+          <h1 className="font-display text-2xl text-foreground">{m.history.title}</h1>
+          <span className="font-mono tabular-nums text-[12px] text-muted-foreground">
             {pagination.total}
           </span>
-          <div className="ml-1 flex items-center gap-1">
+        </div>
+
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-0.5">
             {filterOptions.map((option) => {
               const active = filterMode === option.id
               return (
@@ -103,89 +112,118 @@ export function TranscriptHistory({
                   key={option.id}
                   type="button"
                   onClick={() => setFilterMode(option.id)}
-                  className={`rounded-md border px-2.5 py-1 text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/35 ${
+                  className={`press-scale relative px-2.5 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-md ${
                     active
-                      ? 'border-[#7C3AED]/30 bg-[#F5F3FF] text-[#6D28D9]'
-                      : 'border-border text-muted-foreground hover:bg-muted/30'
+                      ? 'text-primary'
+                      : 'text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   {option.label}
+                  {active && (
+                    <span className="absolute bottom-0 left-2.5 right-2.5 h-[2px] bg-primary rounded-full" />
+                  )}
                 </button>
               )
             })}
           </div>
-        </div>
 
-        <div className="relative w-[220px]">
-          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            ref={searchInputRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={m.history.searchPlaceholder}
-            aria-label={m.history.searchAria}
-            className="h-8 w-full rounded-md border border-input bg-background pr-3 pl-9 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/35"
-          />
+          <div className="relative w-[200px]">
+            <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              ref={searchInputRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={m.history.searchPlaceholder}
+              aria-label={m.history.searchAria}
+              className="h-8 w-full border border-border bg-transparent pr-3 pl-9 text-[13px] rounded-md outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:shadow-tinted-sm transition-shadow"
+            />
+          </div>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="mx-8 border-t border-border" />
+
+      {/* List */}
+      <div className="min-h-0 flex-1 overflow-auto px-8">
         {loading && (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {m.history.loading}
+          <div className="divide-y divide-border">
+            <ListItemSkeleton />
+            <ListItemSkeleton />
+            <ListItemSkeleton />
+            <ListItemSkeleton />
+            <ListItemSkeleton />
           </div>
         )}
 
         {!loading && error && (
-          <div className="px-6 py-4 text-sm text-red-600">
+          <div className="py-6 text-sm text-destructive">
             {m.history.loadFailedPrefix}: {error}
           </div>
         )}
 
         {!loading && !error && items.length === 0 && (
-          <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-            {isSearching
-              ? m.history.emptySearch
-              : isFiltering
-                ? m.history.emptyFilter
-                : m.history.emptyDefault}
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="text-sm text-muted-foreground">
+              {isSearching
+                ? m.history.emptySearch
+                : isFiltering
+                  ? m.history.emptyFilter
+                  : m.history.emptyDefault}
+            </p>
+            {!isSearching && !isFiltering && (
+              <p className="text-[13px] text-muted-foreground/70 max-w-xs">
+                {m.history.emptyDefaultGuide}
+              </p>
+            )}
           </div>
         )}
 
         {!loading && !error && items.length > 0 && (
-          <div className="py-2">
+          <div className="divide-y divide-border">
             {items.map((transcript, index) => {
               const mode = getTranscriptSourceMode(transcript)
               const kind = mode === 'meeting' ? m.history.meetingBadge : m.history.pttBadge
+              const isMeeting = mode === 'meeting'
               return (
                 <button
                   key={transcript.id}
                   type="button"
                   onClick={() => onNavigateToDetail(transcript.id)}
-                  className={`flex w-full items-center justify-between px-6 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#7C3AED]/35 ${
-                    index === 0 ? 'bg-secondary' : 'hover:bg-muted/30'
-                  } ${index < items.length - 1 ? 'border-b border-border' : ''}`}
+                  className="press-scale group flex w-full items-center gap-4 py-4 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 -mx-2 px-2 rounded-sm"
+                  style={{
+                    animationName: 'staggerIn',
+                    animationDuration: '250ms',
+                    animationTimingFunction: 'var(--ease-out-expo)',
+                    animationDelay: `${index * 40}ms`,
+                    animationFillMode: 'backwards'
+                  }}
                 >
+                  {/* Color indicator */}
+                  <span
+                    className="h-10 w-[3px] rounded-full shrink-0"
+                    style={{
+                      backgroundColor: isMeeting
+                        ? 'var(--color-success)'
+                        : 'var(--color-info)'
+                    }}
+                  />
+
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{transcript.title}</p>
-                    <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>{formatRelativeDateTime(transcript.created_at, locale)}</span>
-                      <span>· {formatDurationShort(transcript.duration_seconds, locale)}</span>
-                    </div>
+                    <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                      {transcript.title}
+                    </p>
+                    <p className="mt-1 font-mono tabular-nums text-[11px] text-muted-foreground">
+                      {formatRelativeDateTime(transcript.created_at, locale)}
+                      <span className="mx-1.5 opacity-40">·</span>
+                      {formatDurationShort(transcript.duration_seconds, locale)}
+                    </p>
                   </div>
 
-                  <div className="ml-4 flex items-center gap-3">
-                    {mode === 'meeting' ? (
-                      <Badge variant="success" className="px-2 py-[3px] text-[11px]">
-                        {kind}
-                      </Badge>
-                    ) : (
-                      <Badge variant="info" className="px-2 py-[3px] text-[11px]">
-                        {kind}
-                      </Badge>
-                    )}
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  </div>
+                  {isMeeting ? (
+                    <Badge variant="success">{kind}</Badge>
+                  ) : (
+                    <Badge variant="info">{kind}</Badge>
+                  )}
                 </button>
               )
             })}
@@ -193,21 +231,22 @@ export function TranscriptHistory({
         )}
       </div>
 
+      {/* Pagination */}
       {!loading && pagination.totalPages > 1 && (
-        <footer className="flex items-center justify-center gap-4 border-t px-6 py-3">
+        <footer className="flex items-center justify-center gap-4 border-t border-border px-8 py-3">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             disabled={pagination.page <= 1}
             onClick={() => handlePageChange(pagination.page - 1)}
           >
             {m.history.previous}
           </Button>
-          <span className="text-xs text-muted-foreground">
+          <span className="font-mono tabular-nums text-[11px] text-muted-foreground">
             {m.history.pageLabel(pagination.page, pagination.totalPages)}
           </span>
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             disabled={pagination.page >= pagination.totalPages}
             onClick={() => handlePageChange(pagination.page + 1)}

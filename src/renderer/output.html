@@ -6,36 +6,34 @@
     <title>JustSay Output</title>
     <style>
       :root {
-        --panel-bg: #ffffff;
-        --panel-border: #e5e5e5;
-        --panel-shadow: 0 12px 28px #00000029;
-        --text-main: #1a1a1a;
-        --text-subtle: #7a7a7a;
-        --surface-muted: #f7f7f8;
-        --surface-muted-border: #ececec;
-        --button-main-bg: #171717;
-        --button-main-text: #ffffff;
-        --button-main-hover: #262626;
-        --button-ghost-bg: transparent;
-        --button-ghost-border: #dedede;
-        --button-ghost-hover: #f3f3f3;
-        --success: #22c55e;
+        /* Aligned with globals.css warm palette */
+        --panel-bg: #FFFFFF;
+        --panel-border: #E5E0D8;
+        --panel-shadow: 0 8px 24px -4px rgba(45, 42, 38, 0.08), 0 2px 6px rgba(45, 42, 38, 0.04);
+        --text-main: #2D2A26;
+        --text-subtle: #8A857C;
+        --surface-muted: #F0EDE6;
+        --surface-muted-border: #E5E0D8;
+        --primary: #A85A2A;
+        --primary-fg: #FFFAF5;
+        --button-ghost-border: #E5E0D8;
+        --button-ghost-hover: #F0EDE6;
+        --success: #5D7A4F;
       }
 
-      body.dark {
-        --panel-bg: #171717;
-        --panel-border: #2d2d2d;
-        --panel-shadow: 0 12px 28px #00000052;
-        --text-main: #f4f4f5;
-        --text-subtle: #a1a1aa;
-        --surface-muted: #202020;
-        --surface-muted-border: #2f2f2f;
-        --button-main-bg: #fafafa;
-        --button-main-text: #171717;
-        --button-main-hover: #e5e5e5;
-        --button-ghost-bg: transparent;
-        --button-ghost-border: #343434;
-        --button-ghost-hover: #262626;
+      html.dark {
+        --panel-bg: #242220;
+        --panel-border: #3A3734;
+        --panel-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.12);
+        --text-main: #E8E4DD;
+        --text-subtle: #9A958D;
+        --surface-muted: #2A2826;
+        --surface-muted-border: #3A3734;
+        --primary: #D4885A;
+        --primary-fg: #1A1816;
+        --button-ghost-border: #3A3734;
+        --button-ghost-hover: #2A2826;
+        --success: #7A9C6A;
       }
 
       * {
@@ -49,8 +47,12 @@
         margin: 0;
         background: transparent;
         overflow: hidden;
-        font-family: Inter, 'Segoe UI', sans-serif;
+        font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
         user-select: none;
+      }
+
+      html.dark {
+        color-scheme: dark;
       }
 
       .root {
@@ -65,7 +67,7 @@
         flex-direction: column;
         gap: 10px;
         padding: 12px;
-        border-radius: 12px;
+        border-radius: 10px;
         border: 1px solid var(--panel-border);
         background: var(--panel-bg);
         box-shadow: var(--panel-shadow);
@@ -93,6 +95,8 @@
 
       .title-sub {
         margin-top: 2px;
+        font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+        font-variant-numeric: tabular-nums;
         font-size: 12px;
         color: var(--text-subtle);
         white-space: nowrap;
@@ -107,32 +111,36 @@
       .actions {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
       }
 
       .btn {
         border: 1px solid transparent;
-        border-radius: 8px;
+        border-radius: 6px;
         padding: 6px 10px;
         font-size: 12px;
         line-height: 1;
         font-weight: 500;
-        cursor: pointer;
-        transition: background-color 0.15s ease;
+        cursor: default;
+        transition: all 0.15s ease;
+      }
+
+      .btn:active {
+        transform: scale(0.98);
       }
 
       .btn-primary {
-        background: var(--button-main-bg);
-        border-color: var(--button-main-bg);
-        color: var(--button-main-text);
+        background: var(--primary);
+        border-color: var(--primary);
+        color: var(--primary-fg);
       }
 
       .btn-primary:hover {
-        background: var(--button-main-hover);
+        opacity: 0.9;
       }
 
       .btn-ghost {
-        background: var(--button-ghost-bg);
+        background: transparent;
         border-color: var(--button-ghost-border);
         color: var(--text-main);
       }
@@ -146,15 +154,26 @@
         flex: 1;
         overflow: auto;
         border: 1px solid var(--surface-muted-border);
-        border-radius: 10px;
+        border-radius: 8px;
         background: var(--surface-muted);
         color: var(--text-main);
         padding: 10px;
         font-size: 13px;
-        line-height: 1.45;
+        line-height: 1.55;
         white-space: pre-wrap;
         word-break: break-word;
         user-select: text;
+      }
+
+      .text::-webkit-scrollbar {
+        width: 6px;
+      }
+      .text::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .text::-webkit-scrollbar-thumb {
+        background: var(--panel-border);
+        border-radius: 3px;
       }
 
       .footer {
@@ -162,7 +181,8 @@
         justify-content: space-between;
         align-items: center;
         gap: 8px;
-        font-size: 11px;
+        font-family: 'JetBrains Mono', 'Cascadia Code', monospace;
+        font-size: 10px;
         color: var(--text-subtle);
       }
 
@@ -170,12 +190,13 @@
         position: absolute;
         right: 12px;
         bottom: 12px;
-        border-radius: 8px;
+        border-radius: 6px;
         border: 1px solid var(--panel-border);
         background: var(--panel-bg);
-        color: var(--text-main);
+        color: var(--success);
         padding: 5px 8px;
         font-size: 11px;
+        font-weight: 500;
         opacity: 0;
         transform: translateY(6px);
         transition:
@@ -257,9 +278,9 @@
         try {
           const config = await window.api.getConfig()
           const mode = resolveThemeMode(config?.ui?.theme || 'system')
-          document.body.classList.toggle('dark', mode === 'dark')
+          document.documentElement.classList.toggle('dark', mode === 'dark')
         } catch {
-          document.body.classList.remove('dark')
+          document.documentElement.classList.remove('dark')
         }
       }
 

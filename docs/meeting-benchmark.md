@@ -23,7 +23,7 @@
 示例：
 
 ```powershell
-./run_whisper_server.sh --host 0.0.0.0 --port 8765 --engine sensevoice --sensevoice-model-id FunAudioLLM/SenseVoiceSmall --sensevoice-use-itn true --device cuda --compute-type float16 --lock-model --lock-device-compute
+./run_whisper_server.sh --host 0.0.0.0 --port 8765 --engine sensevoice --sensevoice-model-id FunAudioLLM/SenseVoiceSmall --sensevoice-use-itn true --sensevoice-vad-model fsmn-vad --sensevoice-vad-merge true --sensevoice-vad-merge-length-s 15 --sensevoice-vad-max-single-segment-time-ms 30000 --device cuda --compute-type float16 --lock-model --lock-device-compute
 ```
 
 说明：
@@ -44,7 +44,14 @@ pnpm meeting:bench -- --audio .\fixtures\case01.wav --ref .\fixtures\case01.ref.
 - `--speed`: 回放倍速（默认 1）
 - `--flush-wait-ms`: 发送 flush 后等待时间（默认 900）
 - `--ws-url`: 自定义 WS 地址
-- 也可覆盖 WS query：`--language`、`--sample-rate`、`--min-chunk-ms` 等（详见 `tools/meeting-bench.mjs` 的 usage）
+- 也可覆盖 WS query：`--language`、`--sample-rate`、`--min-chunk-ms`、`--sensevoice-vad-model`、`--sensevoice-vad-merge`、`--sensevoice-vad-merge-length-s`、`--sensevoice-vad-max-single-segment-time-ms` 等（详见 `tools/meeting-bench.mjs` 的 usage）
+
+示例：对比 SenseVoice VAD 开关
+
+```powershell
+pnpm meeting:bench -- --audio .\fixtures\en_case01.wav --ref .\fixtures\en_case01.ref.json --ws-url ws://10.10.216.249:8766/stream --http-url http://10.10.216.249:8765 --sensevoice-vad-model fsmn-vad --sensevoice-vad-merge true --sensevoice-vad-merge-length-s 15 --sensevoice-vad-max-single-segment-time-ms 30000
+pnpm meeting:bench -- --audio .\fixtures\en_case01.wav --ref .\fixtures\en_case01.ref.json --ws-url ws://10.10.216.249:8766/stream --http-url http://10.10.216.249:8765 --sensevoice-vad-merge false
+```
 
 ## 4. 输出结果
 

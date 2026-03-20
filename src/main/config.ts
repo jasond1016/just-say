@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import { DEFAULT_TRIGGER_KEY, type TriggerKey } from '../shared/hotkey'
+import type { TextCorrectionConfig } from './recognition/text-corrections'
 
 export interface AppConfig {
   general?: {
@@ -20,6 +21,9 @@ export interface AppConfig {
     backend?: 'local' | 'api' | 'network' | 'soniox' | 'groq'
     language?: string
     punctuation?: boolean
+    meeting?: {
+      includeMicrophone?: boolean
+    }
     translation?: {
       provider?: 'openai-compatible'
       enabledForPtt?: boolean
@@ -43,6 +47,7 @@ export interface AppConfig {
     }
     local?: {
       mode?: 'auto' | 'streaming' | 'http_chunk'
+      transcriptionProfile?: 'single_shot' | 'offline_segmented'
       modelPath?: string
       engine?: 'faster-whisper' | 'sensevoice'
       modelType?: 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
@@ -56,6 +61,7 @@ export interface AppConfig {
       serverMode?: 'local' | 'remote'
       serverHost?: string
       serverPort?: number
+      textCorrections?: TextCorrectionConfig
       segmentation?: {
         previewIntervalMs?: number
         previewMinAudioMs?: number
@@ -110,6 +116,11 @@ export interface AppConfig {
     indicatorOpacity?: number
     soundFeedback?: boolean
   }
+  ai?: {
+    endpoint?: string
+    model?: string
+    timeoutMs?: number
+  }
 }
 
 const defaultConfig: AppConfig = {
@@ -131,6 +142,9 @@ const defaultConfig: AppConfig = {
     backend: 'local',
     language: 'auto',
     punctuation: true,
+    meeting: {
+      includeMicrophone: false
+    },
     translation: {
       provider: 'openai-compatible',
       enabledForPtt: false,
@@ -140,20 +154,21 @@ const defaultConfig: AppConfig = {
       model: 'gpt-4o-mini',
       timeoutMs: 15000,
       rateControl: {
-        "preset": "balanced",
-        "enabled": true,
-        "maxTokensPerMinute": 8500,
-        "maxRequestsPerMinute": 40,
-        "minRequestIntervalMs": 1200,
-        "maxQueueSize": 64,
-        "maxQueueWaitMs": 45000,
-        "dropPolicy": "drop_oldest",
-        "batchWindowMs": 600,
-        "maxBatchItems": 8
+        preset: 'balanced',
+        enabled: true,
+        maxTokensPerMinute: 8500,
+        maxRequestsPerMinute: 40,
+        minRequestIntervalMs: 1200,
+        maxQueueSize: 64,
+        maxQueueWaitMs: 45000,
+        dropPolicy: 'drop_oldest',
+        batchWindowMs: 600,
+        maxBatchItems: 8
       }
     },
     local: {
       mode: 'auto',
+      transcriptionProfile: 'single_shot',
       engine: 'faster-whisper',
       modelType: 'tiny',
       sensevoice: {
@@ -166,14 +181,14 @@ const defaultConfig: AppConfig = {
       serverMode: 'local',
       serverPort: 8765,
       segmentation: {
-        previewIntervalMs: 450,
-        previewMinAudioMs: 350,
-        previewMinNewAudioMs: 220,
-        previewWindowMs: 2600,
-        minChunkMs: 1000,
-        silenceMs: 550,
-        maxChunkMs: 3800,
-        overlapMs: 450,
+        previewIntervalMs: 520,
+        previewMinAudioMs: 450,
+        previewMinNewAudioMs: 360,
+        previewWindowMs: 4200,
+        minChunkMs: 950,
+        silenceMs: 520,
+        maxChunkMs: 3600,
+        overlapMs: 480,
         holdMs: 260
       }
     },
