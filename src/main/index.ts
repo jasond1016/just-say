@@ -309,11 +309,25 @@ async function requestAppQuit(): Promise<void> {
 }
 
 function createMainWindow(): BrowserWindow {
+  // Use hidden title bar so our renderer draws its own chrome.
+  // titleBarOverlay gives us native window controls (minimize/maximize/close)
+  // painted over our content on Windows/Linux.
+  const titleBarOverlay =
+    process.platform === 'darwin'
+      ? undefined
+      : {
+          color: '#2D2A26',
+          symbolColor: '#E8E4DD',
+          height: 36
+        }
+
   const window = new BrowserWindow({
     width: 800,
     height: 600,
     show: false,
     autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    titleBarOverlay,
     ...(process.platform === 'linux' ? { icon } : { icon }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

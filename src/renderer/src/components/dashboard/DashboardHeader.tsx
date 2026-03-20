@@ -10,8 +10,14 @@ export function DashboardHeader({
   subtitle
 }: DashboardHeaderProps): JSX.Element {
   return (
-    <header className="flex h-14 items-center px-8">
-      <div className="flex items-baseline gap-3">
+    <header
+      className="flex items-end px-8 pb-2"
+      style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
+    >
+      <div
+        className="flex items-baseline gap-3"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         {title && (
           <h1 className="font-display text-2xl text-foreground italic">{title}</h1>
         )}

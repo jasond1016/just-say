@@ -37,17 +37,22 @@ export function DashboardSidebar({
   }
 
   return (
-    <aside
-      className="flex h-full w-16 shrink-0 flex-col items-center bg-[var(--sidebar-bg)] py-5"
-      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-    >
-      {/* Logo mark */}
-      <div className="mb-8 flex h-9 w-9 items-center justify-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-        <Mic className="h-5 w-5 text-[var(--sidebar-active)]" />
+    <aside className="flex h-full w-16 shrink-0 flex-col items-center bg-[var(--sidebar-bg)]">
+      {/* Drag region — fills the title-bar overlay height */}
+      <div
+        className="w-full pt-2 pb-4 flex items-end justify-center"
+        style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
+      >
+        <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <Mic className="h-5 w-5 text-[var(--sidebar-active)]" />
+        </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-1 flex-col items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <nav
+        className="flex flex-1 flex-col items-center gap-1"
+        style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      >
         {navItems.map((item) => {
           const Icon = item.icon
           const isActive = activeView === item.id
@@ -80,8 +85,8 @@ export function DashboardSidebar({
         })}
       </nav>
 
-      {/* Settings — global, pinned to bottom */}
-      <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      {/* Settings — pinned to bottom */}
+      <div className="pb-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
           type="button"
           onClick={onOpenSettings}

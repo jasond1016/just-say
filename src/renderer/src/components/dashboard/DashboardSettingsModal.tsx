@@ -104,15 +104,107 @@ function Toggle({
 
 /* ─── Form field styles ─── */
 const fieldClass =
-  'h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/30 placeholder:text-muted-foreground/50'
+  'h-9 rounded-md border border-input bg-transparent px-3 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/30 placeholder:text-muted-foreground/50 appearance-none'
 const fullFieldClass = `${fieldClass} w-full`
+
+/* ─── Row: label + value on same line ─── */
+function FieldRow({
+  label,
+  htmlFor,
+  children
+}: {
+  label: string
+  htmlFor: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <label className="text-[13px] font-medium shrink-0" htmlFor={htmlFor}>
+        {label}
+      </label>
+      <div className="w-[220px] shrink-0">{children}</div>
+    </div>
+  )
+}
+
+/* ─── Toggle row: label+desc on left, toggle on right ─── */
+function ToggleRow({
+  id,
+  label,
+  description,
+  checked,
+  onChange
+}: {
+  id: string
+  label: string
+  description?: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <p id={id} className="text-[13px] font-medium">{label}</p>
+        {description && <p className="text-[12px] text-muted-foreground mt-0.5">{description}</p>}
+      </div>
+      <Toggle checked={checked} onChange={onChange} labelledBy={id} />
+    </div>
+  )
+}
 
 /* ─── Section divider ─── */
 function SectionLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <p className="text-[11px] font-medium tracking-widest uppercase text-muted-foreground mb-3 mt-1">
+    <div className="pt-4 pb-2 border-b border-border mb-3">
+      <p className="text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
+        {children}
+      </p>
+    </div>
+  )
+}
+
+/* ─── Stacked field: label above, full-width input below ─── */
+function StackedField({
+  label,
+  htmlFor,
+  hint,
+  children
+}: {
+  label: string
+  htmlFor: string
+  hint?: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-[13px] font-medium" htmlFor={htmlFor}>{label}</label>
       {children}
-    </p>
+      {hint && <p className="text-[11px] text-muted-foreground leading-relaxed">{hint}</p>}
+    </div>
+  )
+}
+
+/* ─── Status bar ─── */
+function StatusBar({
+  text,
+  action,
+  actionLabel,
+  actionDisabled
+}: {
+  text: string
+  action?: () => void
+  actionLabel?: string
+  actionDisabled?: boolean
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-sm">
+      <p className="text-[12px] text-muted-foreground">{text}</p>
+      {action && actionLabel && (
+        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={action} disabled={actionDisabled}>
+          {actionLabel}
+        </Button>
+      )}
+    </div>
   )
 }
 
@@ -440,193 +532,166 @@ export function DashboardSettingsModal({
         </header>
 
         {/* Tabs + Content */}
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="min-h-0 flex flex-1 flex-col overflow-hidden">
           {loading ? (
             <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
               {m.settings.loading}
             </div>
           ) : (
             <>
-              {/* Tab list */}
-              <aside className="w-36 shrink-0 border-r border-border px-3 py-4">
-                <div role="tablist" aria-label={m.settings.sectionsAria} aria-orientation="vertical" className="flex flex-col gap-0.5">
-                  {modalTabOrder.map((tab) => {
-                    const labels: Record<ModalTab, string> = {
-                      recognition: m.settings.tabRecognition,
-                      appearance: m.settings.tabAppearance,
-                      about: m.settings.tabAbout
-                    }
-                    return (
-                      <button
-                        key={tab}
-                        ref={setTabRef(tab)}
-                        type="button"
-                        onClick={() => setActiveTab(tab)}
-                        onKeyDown={(e) => handleTabTriggerKeyDown(e, tab)}
-                        role="tab"
-                        id={`settings-tab-${tab}`}
-                        aria-controls={`settings-panel-${tab}`}
-                        aria-selected={activeTab === tab}
-                        tabIndex={activeTab === tab ? 0 : -1}
-                        className={`px-3 py-2 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-sm ${
-                          activeTab === tab
-                            ? 'font-medium text-primary'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {labels[tab]}
-                        {activeTab === tab && <span className="block h-[2px] w-4 bg-primary mt-0.5 rounded-full" />}
-                      </button>
-                    )
-                  })}
-                </div>
-              </aside>
+              {/* Tab bar — horizontal at top */}
+              <div className="flex items-center gap-0 border-b border-border px-5">
+                {modalTabOrder.map((tab) => {
+                  const labels: Record<ModalTab, string> = {
+                    recognition: m.settings.tabRecognition,
+                    appearance: m.settings.tabAppearance,
+                    about: m.settings.tabAbout
+                  }
+                  return (
+                    <button
+                      key={tab}
+                      ref={setTabRef(tab)}
+                      type="button"
+                      onClick={() => setActiveTab(tab)}
+                      onKeyDown={(e) => handleTabTriggerKeyDown(e, tab)}
+                      role="tab"
+                      id={`settings-tab-${tab}`}
+                      aria-controls={`settings-panel-${tab}`}
+                      aria-selected={activeTab === tab}
+                      tabIndex={activeTab === tab ? 0 : -1}
+                      className={`px-4 py-3 text-[13px] transition-colors focus-visible:outline-none relative ${
+                        activeTab === tab
+                          ? 'font-medium text-primary'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {labels[tab]}
+                      {activeTab === tab && (
+                        <span className="absolute bottom-0 left-4 right-4 h-[2px] bg-primary rounded-full" />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
 
               {/* Panel content */}
               <div className="min-w-0 flex-1 overflow-auto p-5">
 
                 {/* ─── Recognition ─── */}
                 {activeTab === 'recognition' && (
-                  <div role="tabpanel" id="settings-panel-recognition" aria-labelledby="settings-tab-recognition" className="space-y-5">
+                  <div role="tabpanel" id="settings-panel-recognition" aria-labelledby="settings-tab-recognition" className="space-y-4">
 
                     <SectionLabel>{m.settings.recognitionEngine}</SectionLabel>
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="space-y-1.5" htmlFor="s-engine">
-                        <span className="text-[13px] font-medium">{m.settings.recognitionEngine}</span>
-                        <select id="s-engine" className={fullFieldClass} value={engine} onChange={(e) => setEngine(e.target.value as EngineOption)}>
-                          <option value="local-faster-whisper">{m.settings.engineFasterWhisperLocal}</option>
-                          <option value="local-sensevoice">{m.settings.engineSenseVoiceLocal}</option>
-                          <option value="soniox">{m.settings.engineSoniox}</option>
-                          <option value="api">{m.settings.engineOpenAiApi}</option>
-                          <option value="groq">{m.settings.engineGroq}</option>
-                        </select>
-                      </label>
-                      <label className="space-y-1.5" htmlFor="s-lang">
-                        <span className="text-[13px] font-medium">{m.settings.language}</span>
-                        <select id="s-lang" className={fullFieldClass} value={language} onChange={(e) => setLanguage(e.target.value)}>
-                          <option value="auto">{m.settings.autoDetect}</option>
-                          <option value="zh">{m.settings.chinese}</option>
-                          <option value="en">{m.settings.english}</option>
-                          <option value="ja">{m.settings.japanese}</option>
-                          <option value="ko">{m.settings.korean}</option>
-                        </select>
-                      </label>
-                    </div>
 
-                    <div className="space-y-3 pt-2">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p id="s-mic-label" className="text-[13px] font-medium">{m.settings.meetingIncludeMicrophone}</p>
-                          <p className="text-[12px] text-muted-foreground">{m.settings.meetingIncludeMicrophoneDescription}</p>
-                        </div>
-                        <Toggle checked={meetingIncludeMicrophone} onChange={setMeetingIncludeMicrophone} labelledBy="s-mic-label" />
-                      </div>
+                    <FieldRow label={m.settings.recognitionEngine} htmlFor="s-engine">
+                      <select id="s-engine" className={fullFieldClass} value={engine} onChange={(e) => setEngine(e.target.value as EngineOption)}>
+                        <option value="local-faster-whisper">{m.settings.engineFasterWhisperLocal}</option>
+                        <option value="local-sensevoice">{m.settings.engineSenseVoiceLocal}</option>
+                        <option value="soniox">{m.settings.engineSoniox}</option>
+                        <option value="api">{m.settings.engineOpenAiApi}</option>
+                        <option value="groq">{m.settings.engineGroq}</option>
+                      </select>
+                    </FieldRow>
 
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between gap-3">
-                          <label className="text-[13px] font-medium" htmlFor="s-audio-device">{m.settings.microphoneDevice}</label>
-                          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={() => { void loadMicrophoneDeviceOptions() }} disabled={microphoneDevicesLoading || saving}>
-                            {microphoneDevicesLoading ? m.settings.refreshing : m.settings.refresh}
-                          </Button>
-                        </div>
-                        <select id="s-audio-device" className={fullFieldClass} value={audioDevice} onChange={(e) => setAudioDevice(e.target.value)} disabled={microphoneDevicesLoading}>
+                    <FieldRow label={m.settings.language} htmlFor="s-lang">
+                      <select id="s-lang" className={fullFieldClass} value={language} onChange={(e) => setLanguage(e.target.value)}>
+                        <option value="auto">{m.settings.autoDetect}</option>
+                        <option value="zh">{m.settings.chinese}</option>
+                        <option value="en">{m.settings.english}</option>
+                        <option value="ja">{m.settings.japanese}</option>
+                        <option value="ko">{m.settings.korean}</option>
+                      </select>
+                    </FieldRow>
+
+                    <FieldRow label={m.settings.hotkey} htmlFor="s-hotkey">
+                      <select id="s-hotkey" className={fullFieldClass} value={hotkey} onChange={(e) => setHotkey(e.target.value as TriggerKey)}>
+                        <option value="RCtrl">{m.settings.rightCtrl}</option>
+                        <option value="RAlt">{m.settings.rightAlt}</option>
+                        <option value="F13">F13</option>
+                        <option value="F14">F14</option>
+                      </select>
+                    </FieldRow>
+
+                    {isLocalEngine && !isSenseVoiceEngine && (
+                      <FieldRow label={m.settings.modelSize} htmlFor="s-model">
+                        <select id="s-model" className={fullFieldClass} value={modelSize} onChange={(e) => setModelSize(e.target.value as ModelType)}>
+                          <option value="tiny">tiny</option>
+                          <option value="base">base</option>
+                          <option value="small">small</option>
+                          <option value="medium">medium</option>
+                          <option value="large-v3">large-v3</option>
+                        </select>
+                      </FieldRow>
+                    )}
+
+                    <ToggleRow
+                      id="s-mic-label"
+                      label={m.settings.meetingIncludeMicrophone}
+                      description={m.settings.meetingIncludeMicrophoneDescription}
+                      checked={meetingIncludeMicrophone}
+                      onChange={setMeetingIncludeMicrophone}
+                    />
+
+                    <FieldRow label={m.settings.microphoneDevice} htmlFor="s-audio-device">
+                      <div className="flex items-center gap-2">
+                        <select id="s-audio-device" className={`${fieldClass} flex-1`} value={audioDevice} onChange={(e) => setAudioDevice(e.target.value)} disabled={microphoneDevicesLoading}>
                           <option value="default">{m.settings.defaultDevice}</option>
                           {selectedAudioDeviceUnavailable ? <option value={audioDevice}>{m.settings.savedDeviceUnavailable}</option> : null}
                           {microphoneDevices.filter((d) => d.id && d.id !== 'default').map((d, i) => (
                             <option key={`${d.id}-${i}`} value={d.id}>{d.name}</option>
                           ))}
                         </select>
-                        {microphoneDevicesError && <p className="text-[11px] text-muted-foreground">{m.settings.microphoneLoadFailed}</p>}
+                        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] shrink-0" onClick={() => { void loadMicrophoneDeviceOptions() }} disabled={microphoneDevicesLoading || saving}>
+                          {microphoneDevicesLoading ? '…' : m.settings.refresh}
+                        </Button>
                       </div>
-                    </div>
-
-                    <div className={`grid gap-3 ${isLocalEngine && !isSenseVoiceEngine ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                      {isLocalEngine && !isSenseVoiceEngine && (
-                        <label className="space-y-1.5" htmlFor="s-model">
-                          <span className="text-[13px] font-medium">{m.settings.modelSize}</span>
-                          <select id="s-model" className={fullFieldClass} value={modelSize} onChange={(e) => setModelSize(e.target.value as ModelType)}>
-                            <option value="tiny">tiny</option>
-                            <option value="base">base</option>
-                            <option value="small">small</option>
-                            <option value="medium">medium</option>
-                            <option value="large-v3">large-v3</option>
-                          </select>
-                        </label>
-                      )}
-                      <label className="space-y-1.5" htmlFor="s-hotkey">
-                        <span className="text-[13px] font-medium">{m.settings.hotkey}</span>
-                        <select id="s-hotkey" className={fullFieldClass} value={hotkey} onChange={(e) => setHotkey(e.target.value as TriggerKey)}>
-                          <option value="RCtrl">{m.settings.rightCtrl}</option>
-                          <option value="RAlt">{m.settings.rightAlt}</option>
-                          <option value="F13">F13</option>
-                          <option value="F14">F14</option>
-                        </select>
-                      </label>
-                    </div>
+                    </FieldRow>
+                    {microphoneDevicesError && <p className="text-[11px] text-muted-foreground pl-1">{m.settings.microphoneLoadFailed}</p>}
 
                     {isLocalEngine && (
                       <>
                         <SectionLabel>Local Engine</SectionLabel>
-                        <div className="grid grid-cols-2 gap-3">
-                          <label className="space-y-1.5" htmlFor="s-local-mode">
-                            <span className="text-[13px] font-medium">{m.settings.localRecognitionMode}</span>
-                            <select id="s-local-mode" className={fullFieldClass} value={localRecognitionMode} onChange={(e) => setLocalRecognitionMode(e.target.value as LocalRecognitionMode)}>
-                              <option value="auto">{m.settings.localRecognitionModeAuto}</option>
-                              <option value="streaming">{m.settings.localRecognitionModeStreaming}</option>
-                              <option value="http_chunk">{m.settings.localRecognitionModeHttpChunk}</option>
-                            </select>
-                          </label>
-                          <label className="space-y-1.5" htmlFor="s-local-profile">
-                            <span className="text-[13px] font-medium">{m.settings.localTranscriptionProfile}</span>
-                            <select id="s-local-profile" className={fullFieldClass} value={localTranscriptionProfile} onChange={(e) => setLocalTranscriptionProfile(e.target.value as LocalTranscriptionProfile)}>
-                              <option value="single_shot">{m.settings.localTranscriptionProfileSingleShot}</option>
-                              <option value="offline_segmented">{m.settings.localTranscriptionProfileOfflineSegmented}</option>
-                            </select>
-                            <p className="text-[11px] text-muted-foreground">{m.settings.localTranscriptionProfileDescription}</p>
-                          </label>
-                        </div>
 
-                        <div className="grid grid-cols-2 gap-3">
-                          <label className="space-y-1.5" htmlFor="s-hold-ms">
-                            <span className="text-[13px] font-medium">{m.settings.localHoldMs}</span>
-                            <input id="s-hold-ms" type="number" min={50} max={5000} className={`${fullFieldClass} disabled:opacity-40`} value={localHoldMsInput} onChange={(e) => setLocalHoldMsInput(e.target.value)} onBlur={() => setLocalHoldMsInput(String(resolveLocalHoldMs()))} placeholder="260" disabled={!isStreamingModeEnabled} />
-                            <p className="text-[11px] text-muted-foreground">{m.settings.localHoldMsDescription}</p>
-                          </label>
-                          <div />
-                        </div>
+                        <FieldRow label={m.settings.localRecognitionMode} htmlFor="s-local-mode">
+                          <select id="s-local-mode" className={fullFieldClass} value={localRecognitionMode} onChange={(e) => setLocalRecognitionMode(e.target.value as LocalRecognitionMode)}>
+                            <option value="auto">{m.settings.localRecognitionModeAuto}</option>
+                            <option value="streaming">{m.settings.localRecognitionModeStreaming}</option>
+                            <option value="http_chunk">{m.settings.localRecognitionModeHttpChunk}</option>
+                          </select>
+                        </FieldRow>
 
-                        <label className="space-y-1.5 block" htmlFor="s-server-mode">
-                          <span className="text-[13px] font-medium">{m.settings.localServerMode}</span>
-                          <select id="s-server-mode" className={`${fieldClass} w-[200px]`} value={localServerMode} onChange={(e) => setLocalServerMode(e.target.value as 'local' | 'remote')}>
+                        <StackedField label={m.settings.localTranscriptionProfile} htmlFor="s-local-profile" hint={m.settings.localTranscriptionProfileDescription}>
+                          <select id="s-local-profile" className={fullFieldClass} value={localTranscriptionProfile} onChange={(e) => setLocalTranscriptionProfile(e.target.value as LocalTranscriptionProfile)}>
+                            <option value="single_shot">{m.settings.localTranscriptionProfileSingleShot}</option>
+                            <option value="offline_segmented">{m.settings.localTranscriptionProfileOfflineSegmented}</option>
+                          </select>
+                        </StackedField>
+
+                        <StackedField label={m.settings.localHoldMs} htmlFor="s-hold-ms" hint={m.settings.localHoldMsDescription}>
+                          <input id="s-hold-ms" type="number" min={50} max={5000} className={`${fullFieldClass} disabled:opacity-40 w-[120px]`} value={localHoldMsInput} onChange={(e) => setLocalHoldMsInput(e.target.value)} onBlur={() => setLocalHoldMsInput(String(resolveLocalHoldMs()))} placeholder="260" disabled={!isStreamingModeEnabled} />
+                        </StackedField>
+
+                        <FieldRow label={m.settings.localServerMode} htmlFor="s-server-mode">
+                          <select id="s-server-mode" className={fullFieldClass} value={localServerMode} onChange={(e) => setLocalServerMode(e.target.value as 'local' | 'remote')}>
                             <option value="local">{m.settings.localServerModeLocal}</option>
                             <option value="remote">{m.settings.localServerModeRemote}</option>
                           </select>
-                        </label>
+                        </FieldRow>
 
                         {isRemoteLocalServer && (
                           <>
-                            <div className="grid grid-cols-2 gap-3">
-                              <label className="space-y-1.5" htmlFor="s-host">
-                                <span className="text-[13px] font-medium">{m.settings.localServerHost}</span>
-                                <input id="s-host" type="text" className={fullFieldClass} value={localServerHost} onChange={(e) => setLocalServerHost(e.target.value)} placeholder="127.0.0.1" />
-                              </label>
-                              <label className="space-y-1.5" htmlFor="s-port">
-                                <span className="text-[13px] font-medium">{m.settings.localServerPort}</span>
-                                <input id="s-port" type="number" min={1} max={65535} className={fullFieldClass} value={localServerPortInput} onChange={(e) => setLocalServerPortInput(e.target.value)} placeholder="8765" />
-                              </label>
-                            </div>
-                            <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-sm">
-                              <p className="text-[12px] text-muted-foreground">
-                                {localServerTestResult === null
-                                  ? m.settings.localServerTestIdle
-                                  : localServerTestResult
-                                    ? m.settings.localServerTestSuccess
-                                    : m.settings.localServerTestFailed}
-                              </p>
-                              <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[12px]" onClick={() => { void testRemoteLocalServer() }} disabled={testingLocalServer || saving}>
-                                {testingLocalServer ? m.settings.localServerTesting : m.settings.testLocalServer}
-                              </Button>
-                            </div>
+                            <FieldRow label={m.settings.localServerHost} htmlFor="s-host">
+                              <input id="s-host" type="text" className={fullFieldClass} value={localServerHost} onChange={(e) => setLocalServerHost(e.target.value)} placeholder="127.0.0.1" />
+                            </FieldRow>
+                            <FieldRow label={m.settings.localServerPort} htmlFor="s-port">
+                              <input id="s-port" type="number" min={1} max={65535} className={fullFieldClass} value={localServerPortInput} onChange={(e) => setLocalServerPortInput(e.target.value)} placeholder="8765" />
+                            </FieldRow>
+                            <StatusBar
+                              text={localServerTestResult === null ? m.settings.localServerTestIdle : localServerTestResult ? m.settings.localServerTestSuccess : m.settings.localServerTestFailed}
+                              action={() => { void testRemoteLocalServer() }}
+                              actionLabel={testingLocalServer ? m.settings.localServerTesting : m.settings.testLocalServer}
+                              actionDisabled={testingLocalServer || saving}
+                            />
                           </>
                         )}
                       </>
@@ -635,96 +700,83 @@ export function DashboardSettingsModal({
                     {isOnlineEngine && (
                       <>
                         <SectionLabel>API</SectionLabel>
-                        <div className="grid grid-cols-2 gap-3">
-                          <label className="space-y-1.5" htmlFor="s-api-key">
-                            <span className="text-[13px] font-medium">{m.settings.recognitionApiKey}</span>
-                            <input id="s-api-key" type="password" className={fullFieldClass} value={onlineApiKeyInput} onChange={(e) => setOnlineApiKeyInput(e.target.value)} placeholder={onlineApiKeyConfigured ? m.settings.storedKeyPlaceholder : m.settings.enterApiKey} />
-                          </label>
-                          <label className="space-y-1.5" htmlFor="s-model-type">
-                            <span className="text-[13px] font-medium">{m.settings.modelType}</span>
-                            {engine === 'groq' ? (
-                              <select id="s-model-type" className={fullFieldClass} value={groqModel} onChange={(e) => setGroqModel(e.target.value as GroqModelType)}>
-                                <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
-                                <option value="whisper-large-v3">whisper-large-v3</option>
-                              </select>
-                            ) : (
-                              <input id="s-model-type" type="text" className={fullFieldClass} value={engine === 'api' ? apiModel : sonioxModel} onChange={(e) => { if (engine === 'api') setApiModel(e.target.value); else if (engine === 'soniox') setSonioxModel(e.target.value) }} placeholder={engine === 'api' ? 'whisper-1' : 'stt-rt-v3'} />
-                            )}
-                          </label>
-                        </div>
-                        <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-sm">
-                          <p className="text-[12px] text-muted-foreground">
-                            {m.settings.apiKeyStatus}{' '}
-                            <span className="font-medium text-foreground">{onlineApiKeyConfigured ? m.settings.configured : m.settings.notConfigured}</span>
-                          </p>
-                          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={() => { void clearOnlineApiKey() }} disabled={!onlineApiKeyConfigured || updatingOnlineApiKey || saving}>
-                            {m.settings.removeStoredKey}
-                          </Button>
-                        </div>
+
+                        <StackedField label={m.settings.recognitionApiKey} htmlFor="s-api-key">
+                          <input id="s-api-key" type="password" className={fullFieldClass} value={onlineApiKeyInput} onChange={(e) => setOnlineApiKeyInput(e.target.value)} placeholder={onlineApiKeyConfigured ? m.settings.storedKeyPlaceholder : m.settings.enterApiKey} />
+                        </StackedField>
+
+                        <FieldRow label={m.settings.modelType} htmlFor="s-model-type">
+                          {engine === 'groq' ? (
+                            <select id="s-model-type" className={fullFieldClass} value={groqModel} onChange={(e) => setGroqModel(e.target.value as GroqModelType)}>
+                              <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+                              <option value="whisper-large-v3">whisper-large-v3</option>
+                            </select>
+                          ) : (
+                            <input id="s-model-type" type="text" className={fullFieldClass} value={engine === 'api' ? apiModel : sonioxModel} onChange={(e) => { if (engine === 'api') setApiModel(e.target.value); else if (engine === 'soniox') setSonioxModel(e.target.value) }} placeholder={engine === 'api' ? 'whisper-1' : 'stt-rt-v3'} />
+                          )}
+                        </FieldRow>
+
+                        <StatusBar
+                          text={`${m.settings.apiKeyStatus} ${onlineApiKeyConfigured ? m.settings.configured : m.settings.notConfigured}`}
+                          action={() => { void clearOnlineApiKey() }}
+                          actionLabel={m.settings.removeStoredKey}
+                          actionDisabled={!onlineApiKeyConfigured || updatingOnlineApiKey || saving}
+                        />
                       </>
                     )}
 
                     <SectionLabel>Translation</SectionLabel>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p id="s-t-ptt" className="text-[13px] font-medium">{m.settings.enableTranslationForPtt}</p>
-                          <p className="text-[12px] text-muted-foreground">{m.settings.translationPttDescription}</p>
-                        </div>
-                        <Toggle checked={translationEnabled} onChange={setTranslationEnabled} labelledBy="s-t-ptt" />
-                      </div>
-                      <div className="flex items-center justify-between gap-4">
-                        <div>
-                          <p id="s-t-mtg" className="text-[13px] font-medium">{m.settings.enableTranslationForMeeting}</p>
-                          <p className="text-[12px] text-muted-foreground">{m.settings.translationMeetingDescription}</p>
-                        </div>
-                        <Toggle checked={meetingTranslationEnabled} onChange={setMeetingTranslationEnabled} labelledBy="s-t-mtg" />
-                      </div>
-                    </div>
 
-                    <label className="space-y-1.5 block" htmlFor="s-target-lang">
-                      <span className="text-[13px] font-medium">{m.settings.targetLanguage}</span>
-                      <select id="s-target-lang" className={`${fieldClass} w-[200px] disabled:opacity-40`} value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!anyTranslationEnabled}>
+                    <ToggleRow
+                      id="s-t-ptt"
+                      label={m.settings.enableTranslationForPtt}
+                      description={m.settings.translationPttDescription}
+                      checked={translationEnabled}
+                      onChange={setTranslationEnabled}
+                    />
+                    <ToggleRow
+                      id="s-t-mtg"
+                      label={m.settings.enableTranslationForMeeting}
+                      description={m.settings.translationMeetingDescription}
+                      checked={meetingTranslationEnabled}
+                      onChange={setMeetingTranslationEnabled}
+                    />
+
+                    <FieldRow label={m.settings.targetLanguage} htmlFor="s-target-lang">
+                      <select id="s-target-lang" className={`${fullFieldClass} disabled:opacity-40`} value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!anyTranslationEnabled}>
                         <option value="zh">{m.settings.chineseSimplified}</option>
                         <option value="en">{m.settings.english}</option>
                         <option value="ja">{m.settings.japanese}</option>
                         <option value="ko">{m.settings.korean}</option>
                       </select>
-                    </label>
+                    </FieldRow>
 
                     {anyTranslationEnabled && (
                       <>
-                        <div className="grid grid-cols-2 gap-3">
-                          <label className="space-y-1.5" htmlFor="s-t-provider">
-                            <span className="text-[13px] font-medium">{m.settings.translationProvider}</span>
-                            <select id="s-t-provider" className={fullFieldClass} value={translationProvider} onChange={(e) => setTranslationProvider(e.target.value as TranslationProvider)}>
-                              <option value="openai-compatible">{m.settings.openaiCompatible}</option>
-                            </select>
-                          </label>
-                          <label className="space-y-1.5" htmlFor="s-t-model">
-                            <span className="text-[13px] font-medium">{m.settings.translationModel}</span>
-                            <input id="s-t-model" type="text" className={fullFieldClass} value={translationModel} onChange={(e) => setTranslationModel(e.target.value)} placeholder="gpt-4o-mini" />
-                          </label>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <label className="space-y-1.5" htmlFor="s-t-endpoint">
-                            <span className="text-[13px] font-medium">{m.settings.translationEndpoint}</span>
-                            <input id="s-t-endpoint" type="text" className={fullFieldClass} value={translationEndpoint} onChange={(e) => setTranslationEndpoint(e.target.value)} placeholder="https://api.openai.com/v1" />
-                          </label>
-                          <label className="space-y-1.5" htmlFor="s-t-key">
-                            <span className="text-[13px] font-medium">{m.settings.translationApiKey}</span>
-                            <input id="s-t-key" type="password" className={fullFieldClass} value={translationApiKeyInput} onChange={(e) => setTranslationApiKeyInput(e.target.value)} placeholder={translationApiKeyConfigured ? m.settings.storedKeyPlaceholder : m.settings.translationApiKeyPlaceholder} />
-                          </label>
-                        </div>
-                        <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-sm">
-                          <p className="text-[12px] text-muted-foreground">
-                            {m.settings.apiKeyStatus}{' '}
-                            <span className="font-medium text-foreground">{translationApiKeyConfigured ? m.settings.configured : m.settings.notConfigured}</span>
-                          </p>
-                          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={() => { void clearTranslationApiKey() }} disabled={!translationApiKeyConfigured || updatingTranslationApiKey || saving}>
-                            {m.settings.removeStoredKey}
-                          </Button>
-                        </div>
+                        <FieldRow label={m.settings.translationProvider} htmlFor="s-t-provider">
+                          <select id="s-t-provider" className={fullFieldClass} value={translationProvider} onChange={(e) => setTranslationProvider(e.target.value as TranslationProvider)}>
+                            <option value="openai-compatible">{m.settings.openaiCompatible}</option>
+                          </select>
+                        </FieldRow>
+
+                        <FieldRow label={m.settings.translationModel} htmlFor="s-t-model">
+                          <input id="s-t-model" type="text" className={fullFieldClass} value={translationModel} onChange={(e) => setTranslationModel(e.target.value)} placeholder="gpt-4o-mini" />
+                        </FieldRow>
+
+                        <StackedField label={m.settings.translationEndpoint} htmlFor="s-t-endpoint">
+                          <input id="s-t-endpoint" type="text" className={fullFieldClass} value={translationEndpoint} onChange={(e) => setTranslationEndpoint(e.target.value)} placeholder="https://api.openai.com/v1" />
+                        </StackedField>
+
+                        <StackedField label={m.settings.translationApiKey} htmlFor="s-t-key">
+                          <input id="s-t-key" type="password" className={fullFieldClass} value={translationApiKeyInput} onChange={(e) => setTranslationApiKeyInput(e.target.value)} placeholder={translationApiKeyConfigured ? m.settings.storedKeyPlaceholder : m.settings.translationApiKeyPlaceholder} />
+                        </StackedField>
+
+                        <StatusBar
+                          text={`${m.settings.apiKeyStatus} ${translationApiKeyConfigured ? m.settings.configured : m.settings.notConfigured}`}
+                          action={() => { void clearTranslationApiKey() }}
+                          actionLabel={m.settings.removeStoredKey}
+                          actionDisabled={!translationApiKeyConfigured || updatingTranslationApiKey || saving}
+                        />
                       </>
                     )}
                   </div>
@@ -732,49 +784,47 @@ export function DashboardSettingsModal({
 
                 {/* ─── Appearance ─── */}
                 {activeTab === 'appearance' && (
-                  <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" className="space-y-5">
+                  <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" className="space-y-4">
                     <SectionLabel>{m.settings.tabAppearance}</SectionLabel>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[13px] font-medium" htmlFor="s-theme">{m.settings.theme}</label>
-                      <select id="s-theme" className={`${fieldClass} w-[160px]`} value={theme} onChange={(e) => setTheme(e.target.value as ThemeOption)}>
+                    <FieldRow label={m.settings.theme} htmlFor="s-theme">
+                      <select id="s-theme" className={fullFieldClass} value={theme} onChange={(e) => setTheme(e.target.value as ThemeOption)}>
                         <option value="system">{m.settings.system}</option>
                         <option value="light">{m.settings.light}</option>
                         <option value="dark">{m.settings.dark}</option>
                       </select>
-                    </div>
+                    </FieldRow>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <label className="text-[13px] font-medium" htmlFor="s-app-lang">{m.settings.interfaceLanguage}</label>
-                      <select id="s-app-lang" className={`${fieldClass} w-[160px]`} value={appLanguage} onChange={(e) => setAppLanguage(resolveLocale(e.target.value))}>
+                    <FieldRow label={m.settings.interfaceLanguage} htmlFor="s-app-lang">
+                      <select id="s-app-lang" className={fullFieldClass} value={appLanguage} onChange={(e) => setAppLanguage(resolveLocale(e.target.value))}>
                         <option value="zh-CN">{m.settings.languageOptionZhCn}</option>
                         <option value="en-US">{m.settings.languageOptionEnUs}</option>
                       </select>
-                    </div>
+                    </FieldRow>
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p id="s-launch-label" className="text-[13px] font-medium">{m.settings.launchAtLogin}</p>
-                        <p className="text-[12px] text-muted-foreground">{m.settings.launchAtLoginDescription}</p>
-                      </div>
-                      <Toggle checked={launchAtLogin} onChange={setLaunchAtLogin} labelledBy="s-launch-label" />
-                    </div>
+                    <ToggleRow
+                      id="s-launch-label"
+                      label={m.settings.launchAtLogin}
+                      description={m.settings.launchAtLoginDescription}
+                      checked={launchAtLogin}
+                      onChange={setLaunchAtLogin}
+                    />
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p id="s-indicator-label" className="text-[13px] font-medium">{m.settings.recordingIndicator}</p>
-                        <p className="text-[12px] text-muted-foreground">{m.settings.recordingIndicatorDescription}</p>
-                      </div>
-                      <Toggle checked={indicatorEnabled} onChange={setIndicatorEnabled} labelledBy="s-indicator-label" />
-                    </div>
+                    <ToggleRow
+                      id="s-indicator-label"
+                      label={m.settings.recordingIndicator}
+                      description={m.settings.recordingIndicatorDescription}
+                      checked={indicatorEnabled}
+                      onChange={setIndicatorEnabled}
+                    />
 
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p id="s-sound-label" className="text-[13px] font-medium">{m.settings.soundFeedback}</p>
-                        <p className="text-[12px] text-muted-foreground">{m.settings.soundFeedbackDescription}</p>
-                      </div>
-                      <Toggle checked={soundEnabled} onChange={setSoundEnabled} labelledBy="s-sound-label" />
-                    </div>
+                    <ToggleRow
+                      id="s-sound-label"
+                      label={m.settings.soundFeedback}
+                      description={m.settings.soundFeedbackDescription}
+                      checked={soundEnabled}
+                      onChange={setSoundEnabled}
+                    />
                   </div>
                 )}
 
