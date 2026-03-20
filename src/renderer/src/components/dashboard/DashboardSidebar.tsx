@@ -47,8 +47,9 @@ export function DashboardSidebar({
           className="flex items-center gap-2.5"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--sidebar-active)]/15">
-            <Mic className="h-3.5 w-3.5 text-[var(--sidebar-active)]" strokeWidth={2.2} />
+          <div className="relative flex h-7 w-7 items-center justify-center rounded-lg">
+            <span className="absolute inset-0 rounded-lg bg-[var(--sidebar-active)] opacity-[0.15]" />
+            <Mic className="relative h-3.5 w-3.5 text-[var(--sidebar-active)]" strokeWidth={2.2} />
           </div>
           <span className="text-[14px] font-semibold tracking-tight text-[var(--sidebar-fg)]">
             JustSay

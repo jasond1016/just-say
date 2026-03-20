@@ -185,15 +185,15 @@ export function MeetingTranscription({
             <ol className="space-y-1.5 text-[13px] text-muted-foreground leading-relaxed list-none">
               <li className="flex gap-2">
                 <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0">1.</span>
-                <span>{m.meeting.emptyStep1.replace(/^1\.\s*/, '')}</span>
+                <span>{m.meeting.emptyStep1}</span>
               </li>
               <li className="flex gap-2">
                 <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0">2.</span>
-                <span>{m.meeting.emptyStep2.replace(/^2\.\s*/, '')}</span>
+                <span>{m.meeting.emptyStep2}</span>
               </li>
               <li className="flex gap-2">
                 <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0">3.</span>
-                <span>{m.meeting.emptyStep3.replace(/^3\.\s*/, '')}</span>
+                <span>{m.meeting.emptyStep3}</span>
               </li>
             </ol>
 

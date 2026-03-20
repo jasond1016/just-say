@@ -72,9 +72,9 @@ export const enUS = {
     emptyTitle: 'Ready to transcribe',
     emptyDescription:
       'Captures system audio (and optionally your microphone) to produce a real-time transcript.',
-    emptyStep1: '1. Check that your recognition engine is configured in Settings.',
-    emptyStep2: '2. Make sure the audio you want to capture is playing on this device.',
-    emptyStep3: '3. Click Start Recording below.',
+    emptyStep1: 'Check that your recognition engine is configured in Settings.',
+    emptyStep2: 'Make sure the audio you want to capture is playing on this device.',
+    emptyStep3: 'Click Start Recording below.',
     warmingUp: 'Warming up in background. You can start now, but the first response may be slower.',
     warmupFailed: 'Warm-up failed, first start may take longer.',
     endpointLabel: 'Endpoint',
