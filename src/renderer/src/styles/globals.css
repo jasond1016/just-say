@@ -10,7 +10,7 @@
   --card-foreground: #2D2A26;
   --popover: #FFFFFF;
   --popover-foreground: #2D2A26;
-  --primary: #B8632F;
+  --primary: #A85A2A;
   --primary-foreground: #FFFAF5;
   --secondary: #F0EDE6;
   --secondary-foreground: #2D2A26;
@@ -21,16 +21,17 @@
   --destructive: #C53030;
   --border: #E5E0D8;
   --input: #E5E0D8;
-  --ring: #B8632F;
+  --ring: #A85A2A;
 
   --sidebar-bg: #2D2A26;
   --sidebar-fg: #E8E4DD;
   --sidebar-muted: #9A958D;
-  --sidebar-active: #B8632F;
+  --sidebar-active: #D4885A;
   --sidebar-hover: rgba(255, 255, 255, 0.06);
 
   --radius: 0.5rem;
 
+  /* ─── Semantic colors ─── */
   --color-success: #5D7A4F;
   --color-success-bg: #EEF3EB;
   --color-warning: #B8862F;
@@ -42,8 +43,26 @@
   --color-info: #3B6B96;
   --color-info-bg: #EDF4FA;
 
+  /* ─── Tinted shadows (warm, not pure-black) ─── */
+  --shadow-sm: 0 1px 2px rgba(45, 42, 38, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(45, 42, 38, 0.06), 0 1px 3px rgba(45, 42, 38, 0.04);
+  --shadow-lg: 0 8px 24px -4px rgba(45, 42, 38, 0.08), 0 2px 6px rgba(45, 42, 38, 0.04);
+  --shadow-xl: 0 16px 40px -8px rgba(45, 42, 38, 0.10), 0 4px 12px rgba(45, 42, 38, 0.04);
+
+  /* ─── Speaker identity colors ─── */
+  --speaker-1: #A85A2A;
+  --speaker-2: #3B6B96;
+  --speaker-3: #5D7A4F;
+  --speaker-4: #B8862F;
+  --speaker-5: #8B4F6F;
+  --speaker-6: #4F6B8B;
+  --speaker-mic: #8B4F6F;
+  --speaker-system: #3B6B96;
+
+  /* ─── Easings ─── */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .dark {
@@ -72,6 +91,11 @@
   --sidebar-active: #D4885A;
   --sidebar-hover: rgba(255, 255, 255, 0.04);
 
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.20), 0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 8px 24px -4px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.12);
+  --shadow-xl: 0 16px 40px -8px rgba(0, 0, 0, 0.36), 0 4px 12px rgba(0, 0, 0, 0.16);
+
   --color-success: #7A9C6A;
   --color-success-bg: #1E2A1A;
   --color-warning: #D4A060;
@@ -82,6 +106,16 @@
   --color-recording-bg: #2A1414;
   --color-info: #6A9FC5;
   --color-info-bg: #142230;
+
+  /* Brighten speaker colors for dark backgrounds */
+  --speaker-1: #D4885A;
+  --speaker-2: #6A9FC5;
+  --speaker-3: #7A9C6A;
+  --speaker-4: #D4A060;
+  --speaker-5: #B87A9A;
+  --speaker-6: #7A9FC0;
+  --speaker-mic: #B87A9A;
+  --speaker-system: #6A9FC5;
 }
 
 @theme inline {
@@ -130,8 +164,17 @@
 }
 
 /* ─── Font utilities ─── */
+
+/*
+ * .font-display — Display / headline font.
+ * Uses DM Sans at heavy weight with tight tracking for a bold, modern,
+ * tool-UI-appropriate feel. Replaces the previous Instrument Serif.
+ */
 .font-display {
-  font-family: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  font-style: normal;
 }
 
 .font-mono {
@@ -142,10 +185,50 @@
   font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
 }
 
+/* ─── Numeric utilities ─── */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.proportional-nums {
+  font-variant-numeric: proportional-nums;
+}
+
+/* ─── Tinted shadow utilities ─── */
+.shadow-tinted-sm {
+  box-shadow: var(--shadow-sm);
+}
+
+.shadow-tinted-md {
+  box-shadow: var(--shadow-md);
+}
+
+.shadow-tinted-lg {
+  box-shadow: var(--shadow-lg);
+}
+
+.shadow-tinted-xl {
+  box-shadow: var(--shadow-xl);
+}
+
+/* ─── Interactive feedback ─── */
+.press-scale {
+  transition: transform 120ms var(--ease-out-quart);
+}
+
+.press-scale:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
 /* ─── Animations ─── */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 @keyframes slideInRight {
@@ -176,6 +259,15 @@
   }
   to {
     transform: translateX(0);
+  }
+}
+
+@keyframes slideOverOut {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
   }
 }
 
@@ -210,6 +302,46 @@
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Skeleton loading shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Page-level content transition */
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ─── Skeleton component ─── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 25%,
+    color-mix(in oklch, var(--muted) 60%, var(--background)) 50%,
+    var(--muted) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: calc(var(--radius) - 2px);
+}
+
+/* Page enter animation — applied to each page root */
+.page-enter {
+  animation: pageEnter 200ms var(--ease-out-expo) both;
 }
 
 /* ─── Scrollbar styling ─── */
