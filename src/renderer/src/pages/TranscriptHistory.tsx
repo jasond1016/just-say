@@ -83,12 +83,12 @@ export function TranscriptHistory({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       <header
-        className="px-8 pb-3"
+        className="flex flex-col justify-end px-8 pb-2"
         style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
       >
         {/* Title row */}
         <div
-          className="flex items-baseline gap-4 pt-1"
+          className="flex items-baseline gap-4"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
           <h1 className="font-display text-2xl text-foreground italic">{m.history.title}</h1>
