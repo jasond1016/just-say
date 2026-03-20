@@ -34,15 +34,15 @@
         overflow: hidden;
         user-select: none;
         font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
 
       .indicator {
         display: none;
         align-items: center;
         gap: 8px;
-        width: fit-content;
-        max-width: 230px;
-        margin: 6px auto;
         padding: 8px 14px;
         border-radius: 10px;
         border: 1px solid var(--border);
@@ -51,6 +51,7 @@
         -webkit-backdrop-filter: blur(16px);
         box-shadow: var(--shadow);
         transition: opacity 150ms ease, transform 150ms ease;
+        white-space: nowrap;
       }
 
       .indicator.visible {
