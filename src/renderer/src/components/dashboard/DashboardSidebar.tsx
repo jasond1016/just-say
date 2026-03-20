@@ -37,20 +37,28 @@ export function DashboardSidebar({
   }
 
   return (
-    <aside className="flex h-full w-16 shrink-0 flex-col items-center bg-[var(--sidebar-bg)]">
-      {/* Drag region — fills the title-bar overlay height */}
+    <aside className="flex h-full w-[180px] shrink-0 flex-col bg-[var(--sidebar-bg)]">
+      {/* ─── Brand / drag region ─── */}
       <div
-        className="w-full pt-2 pb-4 flex items-end justify-center"
+        className="flex items-center gap-2.5 px-5 pt-3 pb-4"
         style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
       >
-        <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <Mic className="h-5 w-5 text-[var(--sidebar-active)]" />
+        <div
+          className="flex items-center gap-2.5"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--sidebar-active)]/15">
+            <Mic className="h-3.5 w-3.5 text-[var(--sidebar-active)]" strokeWidth={2.2} />
+          </div>
+          <span className="text-[14px] font-semibold tracking-tight text-[var(--sidebar-fg)]">
+            JustSay
+          </span>
         </div>
       </div>
 
-      {/* Navigation */}
+      {/* ─── Navigation ─── */}
       <nav
-        className="flex flex-1 flex-col items-center gap-1"
+        className="flex flex-1 flex-col gap-0.5 px-3"
         style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       >
         {navItems.map((item) => {
@@ -63,38 +71,48 @@ export function DashboardSidebar({
               key={item.id}
               type="button"
               onClick={() => onNavigate(item.id)}
-              title={labelMap[item.id]}
               aria-label={labelMap[item.id]}
+              aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'group relative flex h-10 w-10 items-center justify-center transition-colors duration-150',
+                'press-scale group relative flex h-9 w-full items-center gap-3 rounded-md px-3 text-[13px] font-medium transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-active)]/40',
                 isActive
-                  ? 'text-[var(--sidebar-active)]'
-                  : 'text-[var(--sidebar-muted)] hover:text-[var(--sidebar-fg)]'
+                  ? 'bg-[var(--sidebar-hover)] text-[var(--sidebar-active)]'
+                  : 'text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-fg)]'
               )}
             >
+              {/* Active indicator — left edge bar */}
               {isActive && (
-                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--sidebar-active)]" />
+                <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--sidebar-active)]" />
               )}
+
+              <Icon className="h-[16px] w-[16px] shrink-0" strokeWidth={isActive ? 2.2 : 1.8} />
+
+              <span className="truncate">{labelMap[item.id]}</span>
+
+              {/* Meeting-active dot */}
               {showMeetingDot && (
-                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
+                <span className="ml-auto flex h-2 w-2 shrink-0 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
               )}
-              <Icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
             </button>
           )
         })}
       </nav>
 
-      {/* Settings — pinned to bottom */}
-      <div className="pb-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      {/* ─── Settings — pinned to bottom ─── */}
+      <div className="px-3 pb-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         <button
           type="button"
           onClick={onOpenSettings}
-          title={m.settings.title}
           aria-label={m.header.openSettingsAria}
-          className="flex h-10 w-10 items-center justify-center text-[var(--sidebar-muted)] hover:text-[var(--sidebar-fg)] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-active)]/40"
+          className={cn(
+            'press-scale flex h-9 w-full items-center gap-3 rounded-md px-3 text-[13px] font-medium transition-colors duration-150',
+            'text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-fg)]',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-active)]/40'
+          )}
         >
-          <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
+          <Settings className="h-[16px] w-[16px] shrink-0" strokeWidth={1.8} />
+          <span className="truncate">{m.settings.title}</span>
         </button>
       </div>
     </aside>
