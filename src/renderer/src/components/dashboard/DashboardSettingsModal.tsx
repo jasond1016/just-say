@@ -6,207 +6,32 @@ import { AppLocale, resolveLocale } from '@/i18n'
 import { useI18n } from '@/i18n/useI18n'
 import { getMicrophoneDevices } from '../../microphone-capture'
 import type { TriggerKey } from '../../../../shared/hotkey'
+import { RecognitionTab } from '@/components/Settings/RecognitionTab'
+import { AppearanceTab } from '@/components/Settings/AppearanceTab'
+import { AboutTab } from '@/components/Settings/AboutTab'
+import { getApiKeyProvider } from '@/components/Settings/settings-types'
+import type {
+  ThemeOption,
+  Backend,
+  LocalEngine,
+  EngineOption,
+  ModelType,
+  GroqModelType,
+  LocalRecognitionMode,
+  LocalTranscriptionProfile,
+  TranslationProvider,
+  MicrophoneDevice,
+  RendererConfig
+} from '@/components/Settings/settings-types'
 
-type ThemeOption = 'system' | 'light' | 'dark'
 type ModalTab = 'recognition' | 'appearance' | 'about'
-type Backend = 'local' | 'api' | 'network' | 'soniox' | 'groq'
-type LocalEngine = 'faster-whisper' | 'sensevoice'
-type LocalRecognitionMode = 'auto' | 'streaming' | 'http_chunk'
-type LocalTranscriptionProfile = 'single_shot' | 'offline_segmented'
-type ModelType = 'tiny' | 'base' | 'small' | 'medium' | 'large-v3'
-type GroqModelType = 'whisper-large-v3-turbo' | 'whisper-large-v3'
-type TranslationProvider = 'openai-compatible'
-type ApiKeyProvider = 'openai' | 'soniox' | 'groq'
-
-interface RendererConfig {
-  general?: { language?: AppLocale; autostart?: boolean }
-  hotkey?: { triggerKey?: TriggerKey }
-  audio?: { device?: string }
-  recognition?: {
-    backend?: Backend
-    language?: string
-    meeting?: { includeMicrophone?: boolean }
-    translation?: {
-      provider?: TranslationProvider
-      enabledForPtt?: boolean
-      enabledForMeeting?: boolean
-      targetLanguage?: string
-      endpoint?: string
-      model?: string
-    }
-    local?: {
-      engine?: LocalEngine
-      mode?: LocalRecognitionMode
-      transcriptionProfile?: LocalTranscriptionProfile
-      modelType?: ModelType
-      serverMode?: 'local' | 'remote'
-      serverHost?: string
-      serverPort?: number
-      segmentation?: { holdMs?: number }
-    }
-    api?: { model?: string }
-    soniox?: { model?: string }
-    groq?: { model?: GroqModelType }
-  }
-  ui?: {
-    theme?: ThemeOption
-    indicatorEnabled?: boolean
-    soundFeedback?: boolean
-  }
-}
+const modalTabOrder: ModalTab[] = ['recognition', 'appearance', 'about']
 
 interface DashboardSettingsModalProps {
   closing?: boolean
   onClose: () => void
   onSaved: () => Promise<void> | void
   onThemeChange: (theme: ThemeOption) => void
-}
-
-type EngineOption = 'local-faster-whisper' | 'local-sensevoice' | 'soniox' | 'api' | 'groq'
-const modalTabOrder: ModalTab[] = ['recognition', 'appearance', 'about']
-type MicrophoneDevice = { id: string; name: string; isDefault?: boolean }
-
-function getApiKeyProvider(engine: EngineOption): ApiKeyProvider | null {
-  if (engine === 'api') return 'openai'
-  if (engine === 'soniox') return 'soniox'
-  if (engine === 'groq') return 'groq'
-  return null
-}
-
-/* ─── Toggle ─── */
-function Toggle({
-  checked,
-  onChange,
-  labelledBy
-}: {
-  checked: boolean
-  onChange: (checked: boolean) => void
-  labelledBy?: string
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-labelledby={labelledBy}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-[22px] w-10 items-center rounded-full border transition-colors duration-200 ${
-        checked ? 'border-primary bg-primary' : 'border-border bg-muted'
-      } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1`}
-    >
-      <span
-        className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
-          checked ? 'translate-x-[20px]' : 'translate-x-[2px]'
-        }`}
-      />
-    </button>
-  )
-}
-
-/* ─── Form field styles ─── */
-const fieldClass =
-  'h-9 rounded-md border border-input bg-card text-foreground px-3 text-[13px] outline-none transition-all focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:shadow-tinted-sm placeholder:text-muted-foreground/50 appearance-none'
-const fullFieldClass = `${fieldClass} w-full`
-
-/* ─── Row: label + value on same line ─── */
-function FieldRow({
-  label,
-  htmlFor,
-  children
-}: {
-  label: string
-  htmlFor: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <label className="text-[13px] font-medium shrink-0" htmlFor={htmlFor}>
-        {label}
-      </label>
-      <div className="w-[220px] shrink-0">{children}</div>
-    </div>
-  )
-}
-
-/* ─── Toggle row: label+desc on left, toggle on right ─── */
-function ToggleRow({
-  id,
-  label,
-  description,
-  checked,
-  onChange
-}: {
-  id: string
-  label: string
-  description?: string
-  checked: boolean
-  onChange: (checked: boolean) => void
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="min-w-0">
-        <p id={id} className="text-[13px] font-medium">{label}</p>
-        {description && <p className="text-[12px] text-muted-foreground mt-0.5">{description}</p>}
-      </div>
-      <Toggle checked={checked} onChange={onChange} labelledBy={id} />
-    </div>
-  )
-}
-
-/* ─── Section divider ─── */
-function SectionLabel({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="pt-4 pb-2 border-b border-border mb-3">
-      <p className="text-[11px] font-medium tracking-widest uppercase text-muted-foreground">
-        {children}
-      </p>
-    </div>
-  )
-}
-
-/* ─── Stacked field: label above, full-width input below ─── */
-function StackedField({
-  label,
-  htmlFor,
-  hint,
-  children
-}: {
-  label: string
-  htmlFor: string
-  hint?: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-[13px] font-medium" htmlFor={htmlFor}>{label}</label>
-      {children}
-      {hint && <p className="text-[11px] text-muted-foreground leading-relaxed">{hint}</p>}
-    </div>
-  )
-}
-
-/* ─── Status bar ─── */
-function StatusBar({
-  text,
-  action,
-  actionLabel,
-  actionDisabled
-}: {
-  text: string
-  action?: () => void
-  actionLabel?: string
-  actionDisabled?: boolean
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-md">
-      <p className="text-[12px] text-muted-foreground">{text}</p>
-      {action && actionLabel && (
-        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={action} disabled={actionDisabled}>
-          {actionLabel}
-        </Button>
-      )}
-    </div>
-  )
 }
 
 export function DashboardSettingsModal({
@@ -227,6 +52,7 @@ export function DashboardSettingsModal({
   })
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
 
+  // ─── State ───
   const [engine, setEngine] = useState<EngineOption>('local-faster-whisper')
   const [appLanguage, setAppLanguage] = useState<AppLocale>(locale)
   const [launchAtLogin, setLaunchAtLogin] = useState(false)
@@ -246,8 +72,7 @@ export function DashboardSettingsModal({
   const [localServerHost, setLocalServerHost] = useState('127.0.0.1')
   const [localServerPortInput, setLocalServerPortInput] = useState('8765')
   const [localRecognitionMode, setLocalRecognitionMode] = useState<LocalRecognitionMode>('auto')
-  const [localTranscriptionProfile, setLocalTranscriptionProfile] =
-    useState<LocalTranscriptionProfile>('single_shot')
+  const [localTranscriptionProfile, setLocalTranscriptionProfile] = useState<LocalTranscriptionProfile>('single_shot')
   const [localHoldMsInput, setLocalHoldMsInput] = useState('260')
   const [testingLocalServer, setTestingLocalServer] = useState(false)
   const [localServerTestResult, setLocalServerTestResult] = useState<boolean | null>(null)
@@ -256,8 +81,7 @@ export function DashboardSettingsModal({
   const [meetingTranslationEnabled, setMeetingTranslationEnabled] = useState(false)
   const [meetingIncludeMicrophone, setMeetingIncludeMicrophone] = useState(false)
   const [targetLanguage, setTargetLanguage] = useState('zh')
-  const [translationProvider, setTranslationProvider] =
-    useState<TranslationProvider>('openai-compatible')
+  const [translationProvider, setTranslationProvider] = useState<TranslationProvider>('openai-compatible')
   const [translationEndpoint, setTranslationEndpoint] = useState('https://api.openai.com/v1')
   const [translationModel, setTranslationModel] = useState('gpt-4o-mini')
   const [translationApiKeyInput, setTranslationApiKeyInput] = useState('')
@@ -267,6 +91,20 @@ export function DashboardSettingsModal({
   const [indicatorEnabled, setIndicatorEnabled] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(true)
 
+  // ─── Derived ───
+  const isLocalEngine = useMemo(() => engine === 'local-faster-whisper' || engine === 'local-sensevoice', [engine])
+  const isSenseVoiceEngine = engine === 'local-sensevoice'
+  const isOnlineEngine = engine === 'api' || engine === 'soniox' || engine === 'groq'
+  const isRemoteLocalServer = isLocalEngine && localServerMode === 'remote'
+  const isStreamingModeEnabled = isLocalEngine && localRecognitionMode !== 'http_chunk'
+  const onlineApiKeyProvider = useMemo(() => getApiKeyProvider(engine), [engine])
+  const anyTranslationEnabled = translationEnabled || meetingTranslationEnabled
+  const selectedAudioDeviceUnavailable = useMemo(
+    () => audioDevice !== 'default' && !microphoneDevices.some((d) => d.id === audioDevice),
+    [audioDevice, microphoneDevices]
+  )
+
+  // ─── Load config ───
   const loadMicrophoneDeviceOptions = useCallback(async (): Promise<void> => {
     setMicrophoneDevicesLoading(true)
     setMicrophoneDevicesError(false)
@@ -341,18 +179,7 @@ export function DashboardSettingsModal({
     return () => { mounted = false }
   }, [loadMicrophoneDeviceOptions])
 
-  const isLocalEngine = useMemo(() => engine === 'local-faster-whisper' || engine === 'local-sensevoice', [engine])
-  const isSenseVoiceEngine = engine === 'local-sensevoice'
-  const isOnlineEngine = engine === 'api' || engine === 'soniox' || engine === 'groq'
-  const isRemoteLocalServer = isLocalEngine && localServerMode === 'remote'
-  const isStreamingModeEnabled = isLocalEngine && localRecognitionMode !== 'http_chunk'
-  const onlineApiKeyProvider = useMemo(() => getApiKeyProvider(engine), [engine])
-  const anyTranslationEnabled = translationEnabled || meetingTranslationEnabled
-  const selectedAudioDeviceUnavailable = useMemo(
-    () => audioDevice !== 'default' && !microphoneDevices.some((d) => d.id === audioDevice),
-    [audioDevice, microphoneDevices]
-  )
-
+  // ─── Side effects ───
   useEffect(() => { if (isSenseVoiceEngine) setModelSize('small') }, [isSenseVoiceEngine])
   useEffect(() => { setLocalServerTestResult(null) }, [localServerMode, localServerHost, localServerPortInput, engine])
 
@@ -364,6 +191,7 @@ export function DashboardSettingsModal({
     return () => { mounted = false }
   }, [onlineApiKeyProvider])
 
+  // ─── Actions ───
   const clearTranslationApiKey = async (): Promise<void> => {
     if (updatingTranslationApiKey) return
     setUpdatingTranslationApiKey(true)
@@ -399,6 +227,7 @@ export function DashboardSettingsModal({
     } catch { setLocalServerTestResult(false) } finally { setTestingLocalServer(false) }
   }
 
+  // ─── Dialog keyboard ───
   const setTabRef = useCallback((tab: ModalTab) => (node: HTMLButtonElement | null): void => { tabRefs.current[tab] = node }, [])
 
   useEffect(() => {
@@ -439,6 +268,7 @@ export function DashboardSettingsModal({
     if (nextTab) { setActiveTab(nextTab); window.requestAnimationFrame(() => { tabRefs.current[nextTab]?.focus() }) }
   }, [])
 
+  // ─── Save ───
   const saveChanges = async (): Promise<void> => {
     if (saving) return
     setSaving(true)
@@ -498,16 +328,15 @@ export function DashboardSettingsModal({
     } finally { setSaving(false) }
   }
 
+  // ─── Render ───
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop — full screen for click-to-close */}
       <div
         aria-hidden="true"
         className={`absolute inset-0 bg-foreground/10 ${closing ? 'animate-[fadeOut_200ms_ease-in_forwards]' : 'animate-[fadeIn_120ms_ease-out]'}`}
         onClick={onClose}
       />
 
-      {/* Slide-over panel — starts below the title bar overlay (h-9 = 36px) */}
       <section
         ref={panelRef}
         role="dialog"
@@ -518,7 +347,6 @@ export function DashboardSettingsModal({
       >
         <p id="settings-panel-description" className="sr-only">{m.settings.modalDescription}</p>
 
-        {/* Panel header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h2 id="settings-panel-title" className="font-display text-xl text-foreground">
             {m.settings.title}
@@ -533,7 +361,6 @@ export function DashboardSettingsModal({
           </button>
         </header>
 
-        {/* Tabs + Content */}
         <div className="min-h-0 flex flex-1 flex-col overflow-hidden">
           {loading ? (
             <div className="flex flex-1 flex-col gap-5 p-5">
@@ -559,7 +386,6 @@ export function DashboardSettingsModal({
             </div>
           ) : (
             <>
-              {/* Tab bar — horizontal at top */}
               <div className="flex items-center gap-0 border-b border-border px-5">
                 {modalTabOrder.map((tab) => {
                   const labels: Record<ModalTab, string> = {
@@ -594,277 +420,66 @@ export function DashboardSettingsModal({
                 })}
               </div>
 
-              {/* Panel content */}
               <div className="min-w-0 flex-1 overflow-auto p-5">
-
-                {/* ─── Recognition ─── */}
                 {activeTab === 'recognition' && (
-                  <div role="tabpanel" id="settings-panel-recognition" aria-labelledby="settings-tab-recognition" className="space-y-4">
-
-                    <SectionLabel>{m.settings.recognitionEngine}</SectionLabel>
-
-                    <FieldRow label={m.settings.recognitionEngine} htmlFor="s-engine">
-                      <select id="s-engine" className={fullFieldClass} value={engine} onChange={(e) => setEngine(e.target.value as EngineOption)}>
-                        <option value="local-faster-whisper">{m.settings.engineFasterWhisperLocal}</option>
-                        <option value="local-sensevoice">{m.settings.engineSenseVoiceLocal}</option>
-                        <option value="soniox">{m.settings.engineSoniox}</option>
-                        <option value="api">{m.settings.engineOpenAiApi}</option>
-                        <option value="groq">{m.settings.engineGroq}</option>
-                      </select>
-                    </FieldRow>
-
-                    <FieldRow label={m.settings.language} htmlFor="s-lang">
-                      <select id="s-lang" className={fullFieldClass} value={language} onChange={(e) => setLanguage(e.target.value)}>
-                        <option value="auto">{m.settings.autoDetect}</option>
-                        <option value="zh">{m.settings.chinese}</option>
-                        <option value="en">{m.settings.english}</option>
-                        <option value="ja">{m.settings.japanese}</option>
-                        <option value="ko">{m.settings.korean}</option>
-                      </select>
-                    </FieldRow>
-
-                    <FieldRow label={m.settings.hotkey} htmlFor="s-hotkey">
-                      <select id="s-hotkey" className={fullFieldClass} value={hotkey} onChange={(e) => setHotkey(e.target.value as TriggerKey)}>
-                        <option value="RCtrl">{m.settings.rightCtrl}</option>
-                        <option value="RAlt">{m.settings.rightAlt}</option>
-                        <option value="F13">F13</option>
-                        <option value="F14">F14</option>
-                      </select>
-                    </FieldRow>
-
-                    {isLocalEngine && !isSenseVoiceEngine && (
-                      <FieldRow label={m.settings.modelSize} htmlFor="s-model">
-                        <select id="s-model" className={fullFieldClass} value={modelSize} onChange={(e) => setModelSize(e.target.value as ModelType)}>
-                          <option value="tiny">tiny</option>
-                          <option value="base">base</option>
-                          <option value="small">small</option>
-                          <option value="medium">medium</option>
-                          <option value="large-v3">large-v3</option>
-                        </select>
-                      </FieldRow>
-                    )}
-
-                    <ToggleRow
-                      id="s-mic-label"
-                      label={m.settings.meetingIncludeMicrophone}
-                      description={m.settings.meetingIncludeMicrophoneDescription}
-                      checked={meetingIncludeMicrophone}
-                      onChange={setMeetingIncludeMicrophone}
-                    />
-
-                    <StackedField label={m.settings.microphoneDevice} htmlFor="s-audio-device">
-                      <div className="flex items-center gap-2">
-                        <select id="s-audio-device" className={`${fieldClass} min-w-0 flex-1`} value={audioDevice} onChange={(e) => setAudioDevice(e.target.value)} disabled={microphoneDevicesLoading}>
-                          <option value="default">{m.settings.defaultDevice}</option>
-                          {selectedAudioDeviceUnavailable ? <option value={audioDevice}>{m.settings.savedDeviceUnavailable}</option> : null}
-                          {microphoneDevices.filter((d) => d.id && d.id !== 'default').map((d, i) => (
-                            <option key={`${d.id}-${i}`} value={d.id}>{d.name}</option>
-                          ))}
-                        </select>
-                        <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px] shrink-0" onClick={() => { void loadMicrophoneDeviceOptions() }} disabled={microphoneDevicesLoading || saving}>
-                          {microphoneDevicesLoading ? '…' : m.settings.refresh}
-                        </Button>
-                      </div>
-                    </StackedField>
-                    {microphoneDevicesError && <p className="text-[11px] text-muted-foreground pl-1">{m.settings.microphoneLoadFailed}</p>}
-
-                    {isLocalEngine && (
-                      <>
-                        <SectionLabel>Local Engine</SectionLabel>
-
-                        <FieldRow label={m.settings.localRecognitionMode} htmlFor="s-local-mode">
-                          <select id="s-local-mode" className={fullFieldClass} value={localRecognitionMode} onChange={(e) => setLocalRecognitionMode(e.target.value as LocalRecognitionMode)}>
-                            <option value="auto">{m.settings.localRecognitionModeAuto}</option>
-                            <option value="streaming">{m.settings.localRecognitionModeStreaming}</option>
-                            <option value="http_chunk">{m.settings.localRecognitionModeHttpChunk}</option>
-                          </select>
-                        </FieldRow>
-
-                        <StackedField label={m.settings.localTranscriptionProfile} htmlFor="s-local-profile" hint={m.settings.localTranscriptionProfileDescription}>
-                          <select id="s-local-profile" className={fullFieldClass} value={localTranscriptionProfile} onChange={(e) => setLocalTranscriptionProfile(e.target.value as LocalTranscriptionProfile)}>
-                            <option value="single_shot">{m.settings.localTranscriptionProfileSingleShot}</option>
-                            <option value="offline_segmented">{m.settings.localTranscriptionProfileOfflineSegmented}</option>
-                          </select>
-                        </StackedField>
-
-                        <StackedField label={m.settings.localHoldMs} htmlFor="s-hold-ms" hint={m.settings.localHoldMsDescription}>
-                          <input id="s-hold-ms" type="number" min={50} max={5000} className={`${fullFieldClass} disabled:opacity-40 w-[120px]`} value={localHoldMsInput} onChange={(e) => setLocalHoldMsInput(e.target.value)} onBlur={() => setLocalHoldMsInput(String(resolveLocalHoldMs()))} placeholder="260" disabled={!isStreamingModeEnabled} />
-                        </StackedField>
-
-                        <FieldRow label={m.settings.localServerMode} htmlFor="s-server-mode">
-                          <select id="s-server-mode" className={fullFieldClass} value={localServerMode} onChange={(e) => setLocalServerMode(e.target.value as 'local' | 'remote')}>
-                            <option value="local">{m.settings.localServerModeLocal}</option>
-                            <option value="remote">{m.settings.localServerModeRemote}</option>
-                          </select>
-                        </FieldRow>
-
-                        {isRemoteLocalServer && (
-                          <>
-                            <FieldRow label={m.settings.localServerHost} htmlFor="s-host">
-                              <input id="s-host" type="text" className={fullFieldClass} value={localServerHost} onChange={(e) => setLocalServerHost(e.target.value)} placeholder="127.0.0.1" />
-                            </FieldRow>
-                            <FieldRow label={m.settings.localServerPort} htmlFor="s-port">
-                              <input id="s-port" type="number" min={1} max={65535} className={fullFieldClass} value={localServerPortInput} onChange={(e) => setLocalServerPortInput(e.target.value)} placeholder="8765" />
-                            </FieldRow>
-                            <StatusBar
-                              text={localServerTestResult === null ? m.settings.localServerTestIdle : localServerTestResult ? m.settings.localServerTestSuccess : m.settings.localServerTestFailed}
-                              action={() => { void testRemoteLocalServer() }}
-                              actionLabel={testingLocalServer ? m.settings.localServerTesting : m.settings.testLocalServer}
-                              actionDisabled={testingLocalServer || saving}
-                            />
-                          </>
-                        )}
-                      </>
-                    )}
-
-                    {isOnlineEngine && (
-                      <>
-                        <SectionLabel>API</SectionLabel>
-
-                        <StackedField label={m.settings.recognitionApiKey} htmlFor="s-api-key">
-                          <input id="s-api-key" type="password" className={fullFieldClass} value={onlineApiKeyInput} onChange={(e) => setOnlineApiKeyInput(e.target.value)} placeholder={onlineApiKeyConfigured ? m.settings.storedKeyPlaceholder : m.settings.enterApiKey} />
-                        </StackedField>
-
-                        <FieldRow label={m.settings.modelType} htmlFor="s-model-type">
-                          {engine === 'groq' ? (
-                            <select id="s-model-type" className={fullFieldClass} value={groqModel} onChange={(e) => setGroqModel(e.target.value as GroqModelType)}>
-                              <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
-                              <option value="whisper-large-v3">whisper-large-v3</option>
-                            </select>
-                          ) : (
-                            <input id="s-model-type" type="text" className={fullFieldClass} value={engine === 'api' ? apiModel : sonioxModel} onChange={(e) => { if (engine === 'api') setApiModel(e.target.value); else if (engine === 'soniox') setSonioxModel(e.target.value) }} placeholder={engine === 'api' ? 'whisper-1' : 'stt-rt-v3'} />
-                          )}
-                        </FieldRow>
-
-                        <StatusBar
-                          text={`${m.settings.apiKeyStatus} ${onlineApiKeyConfigured ? m.settings.configured : m.settings.notConfigured}`}
-                          action={() => { void clearOnlineApiKey() }}
-                          actionLabel={m.settings.removeStoredKey}
-                          actionDisabled={!onlineApiKeyConfigured || updatingOnlineApiKey || saving}
-                        />
-                      </>
-                    )}
-
-                    <SectionLabel>Translation</SectionLabel>
-
-                    <ToggleRow
-                      id="s-t-ptt"
-                      label={m.settings.enableTranslationForPtt}
-                      description={m.settings.translationPttDescription}
-                      checked={translationEnabled}
-                      onChange={setTranslationEnabled}
-                    />
-                    <ToggleRow
-                      id="s-t-mtg"
-                      label={m.settings.enableTranslationForMeeting}
-                      description={m.settings.translationMeetingDescription}
-                      checked={meetingTranslationEnabled}
-                      onChange={setMeetingTranslationEnabled}
-                    />
-
-                    <FieldRow label={m.settings.targetLanguage} htmlFor="s-target-lang">
-                      <select id="s-target-lang" className={`${fullFieldClass} disabled:opacity-40`} value={targetLanguage} onChange={(e) => setTargetLanguage(e.target.value)} disabled={!anyTranslationEnabled}>
-                        <option value="zh">{m.settings.chineseSimplified}</option>
-                        <option value="en">{m.settings.english}</option>
-                        <option value="ja">{m.settings.japanese}</option>
-                        <option value="ko">{m.settings.korean}</option>
-                      </select>
-                    </FieldRow>
-
-                    {anyTranslationEnabled && (
-                      <>
-                        <FieldRow label={m.settings.translationProvider} htmlFor="s-t-provider">
-                          <select id="s-t-provider" className={fullFieldClass} value={translationProvider} onChange={(e) => setTranslationProvider(e.target.value as TranslationProvider)}>
-                            <option value="openai-compatible">{m.settings.openaiCompatible}</option>
-                          </select>
-                        </FieldRow>
-
-                        <FieldRow label={m.settings.translationModel} htmlFor="s-t-model">
-                          <input id="s-t-model" type="text" className={fullFieldClass} value={translationModel} onChange={(e) => setTranslationModel(e.target.value)} placeholder="gpt-4o-mini" />
-                        </FieldRow>
-
-                        <StackedField label={m.settings.translationEndpoint} htmlFor="s-t-endpoint">
-                          <input id="s-t-endpoint" type="text" className={fullFieldClass} value={translationEndpoint} onChange={(e) => setTranslationEndpoint(e.target.value)} placeholder="https://api.openai.com/v1" />
-                        </StackedField>
-
-                        <StackedField label={m.settings.translationApiKey} htmlFor="s-t-key">
-                          <input id="s-t-key" type="password" className={fullFieldClass} value={translationApiKeyInput} onChange={(e) => setTranslationApiKeyInput(e.target.value)} placeholder={translationApiKeyConfigured ? m.settings.storedKeyPlaceholder : m.settings.translationApiKeyPlaceholder} />
-                        </StackedField>
-
-                        <StatusBar
-                          text={`${m.settings.apiKeyStatus} ${translationApiKeyConfigured ? m.settings.configured : m.settings.notConfigured}`}
-                          action={() => { void clearTranslationApiKey() }}
-                          actionLabel={m.settings.removeStoredKey}
-                          actionDisabled={!translationApiKeyConfigured || updatingTranslationApiKey || saving}
-                        />
-                      </>
-                    )}
-                  </div>
+                  <RecognitionTab
+                    saving={saving}
+                    engine={engine} setEngine={setEngine}
+                    language={language} setLanguage={setLanguage}
+                    hotkey={hotkey} setHotkey={setHotkey}
+                    modelSize={modelSize} setModelSize={setModelSize}
+                    meetingIncludeMicrophone={meetingIncludeMicrophone} setMeetingIncludeMicrophone={setMeetingIncludeMicrophone}
+                    audioDevice={audioDevice} setAudioDevice={setAudioDevice}
+                    microphoneDevices={microphoneDevices}
+                    microphoneDevicesLoading={microphoneDevicesLoading}
+                    microphoneDevicesError={microphoneDevicesError}
+                    selectedAudioDeviceUnavailable={selectedAudioDeviceUnavailable}
+                    loadMicrophoneDeviceOptions={loadMicrophoneDeviceOptions}
+                    isLocalEngine={isLocalEngine} isSenseVoiceEngine={isSenseVoiceEngine}
+                    localRecognitionMode={localRecognitionMode} setLocalRecognitionMode={setLocalRecognitionMode}
+                    localTranscriptionProfile={localTranscriptionProfile} setLocalTranscriptionProfile={setLocalTranscriptionProfile}
+                    localHoldMsInput={localHoldMsInput} setLocalHoldMsInput={setLocalHoldMsInput}
+                    resolveLocalHoldMs={resolveLocalHoldMs} isStreamingModeEnabled={isStreamingModeEnabled}
+                    localServerMode={localServerMode} setLocalServerMode={setLocalServerMode}
+                    isRemoteLocalServer={isRemoteLocalServer}
+                    localServerHost={localServerHost} setLocalServerHost={setLocalServerHost}
+                    localServerPortInput={localServerPortInput} setLocalServerPortInput={setLocalServerPortInput}
+                    testingLocalServer={testingLocalServer} localServerTestResult={localServerTestResult}
+                    testRemoteLocalServer={testRemoteLocalServer}
+                    isOnlineEngine={isOnlineEngine}
+                    onlineApiKeyInput={onlineApiKeyInput} setOnlineApiKeyInput={setOnlineApiKeyInput}
+                    onlineApiKeyConfigured={onlineApiKeyConfigured} updatingOnlineApiKey={updatingOnlineApiKey}
+                    clearOnlineApiKey={clearOnlineApiKey}
+                    apiModel={apiModel} setApiModel={setApiModel}
+                    sonioxModel={sonioxModel} setSonioxModel={setSonioxModel}
+                    groqModel={groqModel} setGroqModel={setGroqModel}
+                    translationEnabled={translationEnabled} setTranslationEnabled={setTranslationEnabled}
+                    meetingTranslationEnabled={meetingTranslationEnabled} setMeetingTranslationEnabled={setMeetingTranslationEnabled}
+                    anyTranslationEnabled={anyTranslationEnabled}
+                    targetLanguage={targetLanguage} setTargetLanguage={setTargetLanguage}
+                    translationProvider={translationProvider} setTranslationProvider={setTranslationProvider}
+                    translationModel={translationModel} setTranslationModel={setTranslationModel}
+                    translationEndpoint={translationEndpoint} setTranslationEndpoint={setTranslationEndpoint}
+                    translationApiKeyInput={translationApiKeyInput} setTranslationApiKeyInput={setTranslationApiKeyInput}
+                    translationApiKeyConfigured={translationApiKeyConfigured} updatingTranslationApiKey={updatingTranslationApiKey}
+                    clearTranslationApiKey={clearTranslationApiKey}
+                  />
                 )}
-
-                {/* ─── Appearance ─── */}
                 {activeTab === 'appearance' && (
-                  <div role="tabpanel" id="settings-panel-appearance" aria-labelledby="settings-tab-appearance" className="space-y-4">
-                    <SectionLabel>{m.settings.tabAppearance}</SectionLabel>
-
-                    <FieldRow label={m.settings.theme} htmlFor="s-theme">
-                      <select id="s-theme" className={fullFieldClass} value={theme} onChange={(e) => setTheme(e.target.value as ThemeOption)}>
-                        <option value="system">{m.settings.system}</option>
-                        <option value="light">{m.settings.light}</option>
-                        <option value="dark">{m.settings.dark}</option>
-                      </select>
-                    </FieldRow>
-
-                    <FieldRow label={m.settings.interfaceLanguage} htmlFor="s-app-lang">
-                      <select id="s-app-lang" className={fullFieldClass} value={appLanguage} onChange={(e) => setAppLanguage(resolveLocale(e.target.value))}>
-                        <option value="zh-CN">{m.settings.languageOptionZhCn}</option>
-                        <option value="en-US">{m.settings.languageOptionEnUs}</option>
-                      </select>
-                    </FieldRow>
-
-                    <ToggleRow
-                      id="s-launch-label"
-                      label={m.settings.launchAtLogin}
-                      description={m.settings.launchAtLoginDescription}
-                      checked={launchAtLogin}
-                      onChange={setLaunchAtLogin}
-                    />
-
-                    <ToggleRow
-                      id="s-indicator-label"
-                      label={m.settings.recordingIndicator}
-                      description={m.settings.recordingIndicatorDescription}
-                      checked={indicatorEnabled}
-                      onChange={setIndicatorEnabled}
-                    />
-
-                    <ToggleRow
-                      id="s-sound-label"
-                      label={m.settings.soundFeedback}
-                      description={m.settings.soundFeedbackDescription}
-                      checked={soundEnabled}
-                      onChange={setSoundEnabled}
-                    />
-                  </div>
+                  <AppearanceTab
+                    theme={theme} setTheme={setTheme}
+                    appLanguage={appLanguage} setAppLanguage={setAppLanguage}
+                    launchAtLogin={launchAtLogin} setLaunchAtLogin={setLaunchAtLogin}
+                    indicatorEnabled={indicatorEnabled} setIndicatorEnabled={setIndicatorEnabled}
+                    soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled}
+                  />
                 )}
-
-                {/* ─── About ─── */}
-                {activeTab === 'about' && (
-                  <div role="tabpanel" id="settings-panel-about" aria-labelledby="settings-tab-about" className="space-y-4">
-                    <SectionLabel>{m.settings.tabAbout}</SectionLabel>
-                    <div className="border-l-2 border-primary pl-4 py-2">
-                      <p className="text-sm font-medium">{m.common.appName}</p>
-                      <p className="font-mono text-[12px] text-muted-foreground">{m.settings.version} 1.0.0</p>
-                      <p className="text-[13px] text-muted-foreground mt-1">{m.settings.aboutDescription}</p>
-                    </div>
-                  </div>
-                )}
+                {activeTab === 'about' && <AboutTab />}
               </div>
             </>
           )}
         </div>
 
-        {/* Footer */}
         <footer className="flex justify-end border-t border-border px-6 py-3">
           <Button
             type="button"
