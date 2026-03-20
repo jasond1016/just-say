@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Headphones, Play, Square } from 'lucide-react'
+import { Headphones, Play, Square } from 'lucide-react'
 import type { SpeakerSegment } from '../../../shared/transcription-types'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
@@ -27,7 +27,6 @@ interface MeetingTranscriptionProps {
   state: MeetingSessionState
   onStart: () => Promise<void>
   onStop: () => Promise<void>
-  onReturnToWorkspace: () => void
 }
 
 const speakerColors = ['#B8632F', '#3B6B96', '#5D7A4F', '#B8862F', '#8B4F6F', '#4F6B8B']
@@ -73,8 +72,7 @@ function getSegmentColor(segment: SpeakerSegment): string {
 export function MeetingTranscription({
   state,
   onStart,
-  onStop,
-  onReturnToWorkspace
+  onStop
 }: MeetingTranscriptionProps): React.JSX.Element {
   const { m } = useI18n()
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -147,15 +145,9 @@ export function MeetingTranscription({
           )}
         </div>
 
-        <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          {!isTranscribing && (
-            <Button variant="ghost" size="sm" onClick={onReturnToWorkspace}>
-              <ArrowLeft className="h-4 w-4" />
-              <span>{m.meeting.back}</span>
-            </Button>
-          )}
-
-          {isTranscribing ? (
+        {/* Only show Stop during recording — idle actions live in the content area */}
+        {isTranscribing && (
+          <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <Button
               type="button"
               variant="danger"
@@ -166,18 +158,8 @@ export function MeetingTranscription({
               <Square className="h-3.5 w-3.5" />
               <span>{m.meeting.stop}</span>
             </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void runAction(onStart)}
-              disabled={actionInProgress}
-            >
-              <Play className="h-3.5 w-3.5" />
-              <span>{m.meeting.startRecording}</span>
-            </Button>
-          )}
-        </div>
+          </div>
+        )}
       </header>
 
       <div className="mx-8 border-t border-border" />

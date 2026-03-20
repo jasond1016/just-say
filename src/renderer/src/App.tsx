@@ -401,7 +401,6 @@ function App(): React.JSX.Element {
                 state={meetingState}
                 onStart={startMeetingSession}
                 onStop={stopMeetingSession}
-                onReturnToWorkspace={() => setCurrentView('ptt')}
               />
             )}
           </div>

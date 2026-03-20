@@ -83,19 +83,26 @@ export function TranscriptHistory({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       <header
-        className="flex items-end justify-between px-8 pb-2 pr-[140px]"
+        className="px-8 pb-3"
         style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
       >
-        <div className="flex items-baseline gap-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        {/* Title row */}
+        <div
+          className="flex items-baseline gap-4 pt-1"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <h1 className="font-display text-2xl text-foreground italic">{m.history.title}</h1>
           <span className="font-mono text-[12px] text-muted-foreground">
             {pagination.total}
           </span>
         </div>
 
-        <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          {/* Filter tabs */}
-          <div className="flex items-center gap-0.5 mr-2">
+        {/* Filters + Search row */}
+        <div
+          className="flex items-center gap-4 mt-2"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
+          <div className="flex items-center gap-0.5">
             {filterOptions.map((option) => {
               const active = filterMode === option.id
               return (
@@ -118,7 +125,6 @@ export function TranscriptHistory({
             })}
           </div>
 
-          {/* Search */}
           <div className="relative w-[200px]">
             <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
