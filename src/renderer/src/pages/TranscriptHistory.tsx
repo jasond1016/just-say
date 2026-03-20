@@ -112,7 +112,7 @@ export function TranscriptHistory({
                   key={option.id}
                   type="button"
                   onClick={() => setFilterMode(option.id)}
-                  className={`press-scale px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-md ${
+                  className={`press-scale relative px-2.5 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-md ${
                     active
                       ? 'text-primary'
                       : 'text-muted-foreground hover:text-foreground'
@@ -120,7 +120,7 @@ export function TranscriptHistory({
                 >
                   {option.label}
                   {active && (
-                    <span className="block h-[2px] w-full bg-primary mt-0.5 rounded-full" />
+                    <span className="absolute bottom-0 left-2.5 right-2.5 h-[2px] bg-primary rounded-full" />
                   )}
                 </button>
               )

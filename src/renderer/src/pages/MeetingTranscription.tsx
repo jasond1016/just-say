@@ -8,6 +8,7 @@ import {
   toSentencePairsFromLive
 } from '@/lib/transcript-segmentation'
 import { Button } from '@/components/ui/button'
+import { formatClock } from '@/lib/format'
 import { useI18n } from '@/i18n/useI18n'
 
 export type TranscriptionStatus = 'idle' | 'starting' | 'transcribing' | 'stopping' | 'error'
@@ -39,12 +40,6 @@ const SPEAKER_COLOR_VARS = [
   'var(--speaker-6)'
 ]
 const BOTTOM_FOLLOW_THRESHOLD_PX = 24
-
-function formatClock(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
 
 function isNearBottom(element: HTMLDivElement, thresholdPx = BOTTOM_FOLLOW_THRESHOLD_PX): boolean {
   return element.scrollHeight - (element.scrollTop + element.clientHeight) <= thresholdPx

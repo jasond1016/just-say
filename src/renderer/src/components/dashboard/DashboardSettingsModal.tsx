@@ -56,6 +56,7 @@ interface RendererConfig {
 }
 
 interface DashboardSettingsModalProps {
+  closing?: boolean
   onClose: () => void
   onSaved: () => Promise<void> | void
   onThemeChange: (theme: ThemeOption) => void
@@ -209,6 +210,7 @@ function StatusBar({
 }
 
 export function DashboardSettingsModal({
+  closing = false,
   onClose,
   onSaved,
   onThemeChange
@@ -501,7 +503,7 @@ export function DashboardSettingsModal({
       {/* Backdrop — full screen for click-to-close */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-foreground/10 animate-[fadeIn_120ms_ease-out]"
+        className={`absolute inset-0 bg-foreground/10 ${closing ? 'animate-[fadeOut_200ms_ease-in_forwards]' : 'animate-[fadeIn_120ms_ease-out]'}`}
         onClick={onClose}
       />
 
@@ -512,7 +514,7 @@ export function DashboardSettingsModal({
         aria-modal="true"
         aria-labelledby="settings-panel-title"
         aria-describedby="settings-panel-description"
-        className="relative z-10 flex w-[520px] max-w-[calc(100vw-4rem)] flex-col bg-card border-l border-border shadow-tinted-xl animate-[slideOverIn_280ms_var(--ease-out-expo)] mt-9"
+        className={`relative z-10 flex w-[520px] max-w-[calc(100vw-4rem)] flex-col bg-card border-l border-border shadow-tinted-xl mt-9 ${closing ? 'animate-[slideOverOut_220ms_var(--ease-out-quart)_forwards]' : 'animate-[slideOverIn_280ms_var(--ease-out-expo)]'}`}
       >
         <p id="settings-panel-description" className="sr-only">{m.settings.modalDescription}</p>
 

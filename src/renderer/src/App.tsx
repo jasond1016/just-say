@@ -86,6 +86,7 @@ function App(): React.JSX.Element {
   const [appLocale, setAppLocale] = useState<AppLocale>('en-US')
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsClosing, setSettingsClosing] = useState(false)
   const [meetingState, setMeetingState] = useState<MeetingSessionState>(INITIAL_MEETING_STATE)
 
   const meetingStateRef = useRef<MeetingSessionState>(INITIAL_MEETING_STATE)
@@ -353,11 +354,26 @@ function App(): React.JSX.Element {
 
   const handleThemeChange = (newTheme: ThemeOption): void => { setTheme(newTheme) }
 
+  const settingsCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleSettingsClose = useCallback(() => {
+    if (settingsClosing) return
+    setSettingsClosing(true)
+    settingsCloseTimerRef.current = setTimeout(() => {
+      setSettingsOpen(false)
+      setSettingsClosing(false)
+      settingsCloseTimerRef.current = null
+    }, 220)
+  }, [settingsClosing])
+  useEffect(() => {
+    return () => { if (settingsCloseTimerRef.current) clearTimeout(settingsCloseTimerRef.current) }
+  }, [])
+
   const hotkey = getTriggerKeyLabel(config?.hotkey?.triggerKey || DEFAULT_TRIGGER_KEY)
   const dashboardHotkey = hotkey === 'Right Ctrl' ? 'R Ctrl' : hotkey
 
   const handleNavigate = useCallback((nextView: DashboardView) => {
     setSettingsOpen(false)
+    setSettingsClosing(false)
     setSelectedTranscriptId(null)
     setCurrentView(nextView)
   }, [])
@@ -401,7 +417,7 @@ function App(): React.JSX.Element {
               />
 
               {/* Page content fills remaining space */}
-              <div className="flex min-h-0 flex-1">
+              <div className="flex min-h-0 flex-1" key={currentView}>
                 {currentView === 'ptt' && (
                   <DashboardHome
                     hotkey={dashboardHotkey}
@@ -441,7 +457,8 @@ function App(): React.JSX.Element {
 
         {settingsOpen && (
           <DashboardSettingsModal
-            onClose={() => setSettingsOpen(false)}
+            closing={settingsClosing}
+            onClose={handleSettingsClose}
             onSaved={loadConfig}
             onThemeChange={handleThemeChange}
           />

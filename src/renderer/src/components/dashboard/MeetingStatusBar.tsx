@@ -1,17 +1,12 @@
 import type { JSX } from 'react'
 import { ArrowRight, Square } from 'lucide-react'
+import { formatClock } from '@/lib/format'
 import { useI18n } from '@/i18n/useI18n'
 
 interface MeetingStatusBarProps {
   seconds: number
   onReturn: () => void
   onStop: () => void
-}
-
-function formatClock(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
 export function MeetingStatusBar({
