@@ -130,15 +130,8 @@ export function MeetingTranscription({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       {/* ─── Header ─── */}
-      <header
-        className="flex items-end justify-between px-8 pb-2"
-        style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
-      >
-        <div
-          className="flex items-baseline gap-3"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
-          <h1 className="font-display text-2xl text-foreground italic">{m.meeting.title}</h1>
+      <header className="flex items-baseline gap-3 px-8 py-3">
+        <h1 className="font-display text-2xl text-foreground italic">{m.meeting.title}</h1>
 
           {/* Recording: timer + stop, grouped tightly with title */}
           {state.status === 'transcribing' && (
@@ -163,7 +156,6 @@ export function MeetingTranscription({
           {state.status === 'error' && (
             <span className="text-[13px] text-destructive">{m.meeting.connectionError}</span>
           )}
-        </div>
       </header>
 
       <div className="mx-8 border-t border-border" />

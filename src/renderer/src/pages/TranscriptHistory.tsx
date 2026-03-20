@@ -82,26 +82,15 @@ export function TranscriptHistory({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header
-        className="flex flex-col justify-end px-8 pb-2"
-        style={{ WebkitAppRegion: 'drag', minHeight: 80 } as React.CSSProperties}
-      >
-        {/* Title row */}
-        <div
-          className="flex items-baseline gap-4"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
+      <header className="px-8 py-3 space-y-2">
+        <div className="flex items-baseline gap-4">
           <h1 className="font-display text-2xl text-foreground italic">{m.history.title}</h1>
           <span className="font-mono text-[12px] text-muted-foreground">
             {pagination.total}
           </span>
         </div>
 
-        {/* Filters + Search row */}
-        <div
-          className="flex items-center gap-4 mt-2"
-          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
-        >
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-0.5">
             {filterOptions.map((option) => {
               const active = filterMode === option.id

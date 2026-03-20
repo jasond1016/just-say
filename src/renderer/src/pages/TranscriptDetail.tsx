@@ -234,18 +234,15 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
-      <header
-        className="flex flex-col justify-end px-8 pb-3 pr-[140px]"
-        style={{ WebkitAppRegion: 'drag', minHeight: 80 } as React.CSSProperties}
-      >
-        <div className="flex items-center gap-3 mb-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+      <header className="px-8 py-3 space-y-2">
+        <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5">
             <ArrowLeft className="h-4 w-4" />
             {m.detail.back}
           </Button>
         </div>
 
-        <div className="flex items-start justify-between" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-2xl italic text-foreground truncate">
               {currentTranscript.title}

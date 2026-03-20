@@ -372,38 +372,50 @@ function App(): React.JSX.Element {
               meetingActive={meetingActive}
             />
 
-            {currentView === 'ptt' && (
-              <DashboardHome
-                hotkey={dashboardHotkey}
-                onNavigate={handleNavigate}
-                onOpenTranscript={handleNavigateToDetail}
-                meetingActive={meetingActive}
-                meetingSeconds={meetingState.seconds}
-                onReturnToMeeting={handleReturnToMeeting}
-                onStopMeeting={() => { void stopMeetingSession() }}
+            {/* Content column: drag bar + page */}
+            <div className="flex min-w-0 flex-1 flex-col">
+              {/* Fixed drag bar — always at top, matches titleBarOverlay height */}
+              <div
+                className="h-9 w-full shrink-0"
+                style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
               />
-            )}
 
-            {currentView === 'history' && (
-              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
-            )}
+              {/* Page content fills remaining space */}
+              <div className="flex min-h-0 flex-1">
+                {currentView === 'ptt' && (
+                  <DashboardHome
+                    hotkey={dashboardHotkey}
+                    onNavigate={handleNavigate}
+                    onOpenTranscript={handleNavigateToDetail}
+                    meetingActive={meetingActive}
+                    meetingSeconds={meetingState.seconds}
+                    onReturnToMeeting={handleReturnToMeeting}
+                    onStopMeeting={() => { void stopMeetingSession() }}
+                  />
+                )}
 
-            {currentView === 'detail' && selectedTranscriptId && (
-              <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
-            )}
+                {currentView === 'history' && (
+                  <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+                )}
 
-            {currentView === 'detail' && !selectedTranscriptId && (
-              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
-            )}
+                {currentView === 'detail' && selectedTranscriptId && (
+                  <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
+                )}
 
-            {currentView === 'meeting' && (
-              <MeetingTranscription
-                state={meetingState}
-                onStart={startMeetingSession}
-                onStop={stopMeetingSession}
-                onViewLastTranscript={() => setCurrentView('history')}
-              />
-            )}
+                {currentView === 'detail' && !selectedTranscriptId && (
+                  <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+                )}
+
+                {currentView === 'meeting' && (
+                  <MeetingTranscription
+                    state={meetingState}
+                    onStart={startMeetingSession}
+                    onStop={stopMeetingSession}
+                    onViewLastTranscript={() => setCurrentView('history')}
+                  />
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
