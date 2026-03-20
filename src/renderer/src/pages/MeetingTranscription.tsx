@@ -27,7 +27,7 @@ interface MeetingTranscriptionProps {
   state: MeetingSessionState
   onOpenSettings?: () => void
   onStart: () => Promise<void>
-  onStopAndReturn: () => Promise<void>
+  onStop: () => Promise<void>
   onReturnToWorkspace: () => void
 }
 
@@ -75,7 +75,7 @@ export function MeetingTranscription({
   state,
   onOpenSettings,
   onStart,
-  onStopAndReturn,
+  onStop,
   onReturnToWorkspace
 }: MeetingTranscriptionProps): React.JSX.Element {
   const { m } = useI18n()
@@ -149,28 +149,27 @@ export function MeetingTranscription({
 
         <div className="flex items-center gap-2">
           {!isTranscribing && (
-            <>
-              <Button variant="ghost" size="sm" onClick={onReturnToWorkspace}>
-                <ArrowLeft className="h-4 w-4" />
-                <span>{m.meeting.back}</span>
-              </Button>
-              <Button variant="ghost" size="sm" onClick={onOpenSettings}>
-                <Settings className="h-4 w-4" strokeWidth={1.8} />
-                <span>{m.meeting.settings}</span>
-              </Button>
-            </>
+            <Button variant="ghost" size="sm" onClick={onReturnToWorkspace}>
+              <ArrowLeft className="h-4 w-4" />
+              <span>{m.meeting.back}</span>
+            </Button>
           )}
+
+          <Button variant="ghost" size="sm" onClick={onOpenSettings}>
+            <Settings className="h-4 w-4" strokeWidth={1.8} />
+            <span>{m.meeting.settings}</span>
+          </Button>
 
           {isTranscribing ? (
             <Button
               type="button"
               variant="danger"
               size="sm"
-              onClick={() => void runAction(onStopAndReturn)}
+              onClick={() => void runAction(onStop)}
               disabled={actionInProgress || state.status === 'starting'}
             >
               <Square className="h-3.5 w-3.5" />
-              <span>{m.meeting.stopAndReturn}</span>
+              <span>{m.meeting.stop}</span>
             </Button>
           ) : (
             <Button
@@ -195,21 +194,31 @@ export function MeetingTranscription({
         onScroll={handleTranscriptScroll}
       >
         {!hasContent && !isTranscribing ? (
-          <div className="flex h-full min-h-[280px] flex-col items-start justify-center gap-6">
-            <div className="space-y-2 max-w-md">
-              <Headphones className="h-6 w-6 text-primary mb-4" strokeWidth={1.6} />
+          /* ─── Empty state: guided setup ─── */
+          <div className="flex h-full min-h-[280px] flex-col items-start justify-center gap-6 max-w-lg">
+            <div className="space-y-3">
+              <Headphones className="h-6 w-6 text-primary mb-2" strokeWidth={1.6} />
               <p className="font-display text-xl italic text-foreground">{m.meeting.emptyTitle}</p>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {m.meeting.emptyDescription}
               </p>
-              {state.isPreconnecting && !state.preconnectFailed && (
-                <p className="text-xs text-muted-foreground">{m.meeting.warmingUp}</p>
-              )}
-              {state.preconnectFailed && (
-                <p className="text-xs text-[var(--color-warning)]">{m.meeting.warmupFailed}</p>
-              )}
-              {state.lastError && <p className="text-xs text-destructive">{state.lastError}</p>}
             </div>
+
+            {/* Setup steps */}
+            <div className="space-y-2 text-[13px] text-muted-foreground leading-relaxed">
+              <p>{m.meeting.emptyStep1}</p>
+              <p>{m.meeting.emptyStep2}</p>
+              <p>{m.meeting.emptyStep3}</p>
+            </div>
+
+            {state.isPreconnecting && !state.preconnectFailed && (
+              <p className="text-xs text-muted-foreground">{m.meeting.warmingUp}</p>
+            )}
+            {state.preconnectFailed && (
+              <p className="text-xs text-[var(--color-warning)]">{m.meeting.warmupFailed}</p>
+            )}
+            {state.lastError && <p className="text-xs text-destructive">{state.lastError}</p>}
+
             <Button
               type="button"
               size="sm"
@@ -221,8 +230,8 @@ export function MeetingTranscription({
             </Button>
           </div>
         ) : (
+          /* ─── Transcript timeline ─── */
           <div className="relative">
-            {/* Timeline rail */}
             <div className="absolute left-[52px] top-0 bottom-0 w-px bg-border" />
 
             <div className="space-y-0">
@@ -238,15 +247,9 @@ export function MeetingTranscription({
                     <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground">
                       {formatSegmentTime(segment.timestamp)}
                     </span>
-
-                    {/* Timeline dot */}
                     <div className="relative flex shrink-0 items-start pt-1.5">
-                      <span
-                        className="h-2 w-2 rounded-full"
-                        style={{ backgroundColor: speakerColor }}
-                      />
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: speakerColor }} />
                     </div>
-
                     <div className="min-w-0 flex-1 space-y-0.5">
                       <p className="text-[12px] font-semibold tracking-wide uppercase" style={{ color: speakerColor }}>
                         {getSegmentLabel(segment, segmentLabels)}
@@ -262,14 +265,12 @@ export function MeetingTranscription({
                   <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground">
                     {formatSegmentTime(state.currentSegment.timestamp)}
                   </span>
-
                   <div className="relative flex shrink-0 items-start pt-1.5">
                     <span
                       className="h-2 w-2 rounded-full animate-[pulseRecord_1.5s_ease-in-out_infinite]"
                       style={{ backgroundColor: getSegmentColor(state.currentSegment) }}
                     />
                   </div>
-
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <p
                       className="text-[12px] font-semibold tracking-wide uppercase"

@@ -148,12 +148,19 @@ export function TranscriptHistory({
         )}
 
         {!loading && !error && items.length === 0 && (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {isSearching
-              ? m.history.emptySearch
-              : isFiltering
-                ? m.history.emptyFilter
-                : m.history.emptyDefault}
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
+            <p className="text-sm text-muted-foreground">
+              {isSearching
+                ? m.history.emptySearch
+                : isFiltering
+                  ? m.history.emptyFilter
+                  : m.history.emptyDefault}
+            </p>
+            {!isSearching && !isFiltering && (
+              <p className="text-[13px] text-muted-foreground/70 max-w-xs">
+                {m.history.emptyDefaultGuide}
+              </p>
+            )}
           </div>
         )}
 

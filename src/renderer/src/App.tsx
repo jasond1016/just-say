@@ -13,28 +13,16 @@ import { I18nProvider } from './i18n/I18nProvider'
 import { AppLocale, resolveLocale } from './i18n'
 
 type ThemeOption = 'system' | 'light' | 'dark'
-type AppView = 'workspace' | 'meeting-session'
-type WorkspaceView = 'ptt' | 'history' | 'detail'
+type AppView = 'ptt' | 'meeting' | 'history' | 'detail'
 
 interface AppConfig {
-  general?: {
-    language?: AppLocale
-  }
-  ui?: {
-    theme?: ThemeOption
-  }
-  hotkey?: {
-    triggerKey?: string
-  }
+  general?: { language?: AppLocale }
+  ui?: { theme?: ThemeOption }
+  hotkey?: { triggerKey?: string }
   recognition?: {
     backend?: string
-    meeting?: {
-      includeMicrophone?: boolean
-    }
-    translation?: {
-      enabledForMeeting?: boolean
-      targetLanguage?: string
-    }
+    meeting?: { includeMicrophone?: boolean }
+    translation?: { enabledForMeeting?: boolean; targetLanguage?: string }
   }
 }
 
@@ -75,7 +63,6 @@ function mergeSpeakerSegments(
   for (let i = 0; i < incoming.length; i += 1) {
     const incomingSegment = incoming[i]
     if (!incomingSegment.text.trim()) continue
-
     const baseIdentity =
       typeof incomingSegment.timestamp === 'number'
         ? `timestamp:${incomingSegment.timestamp}`
@@ -89,24 +76,25 @@ function mergeSpeakerSegments(
       timestamp: existing?.timestamp ?? incomingSegment.timestamp ?? Date.now()
     })
   }
-
   return nextSegments
 }
 
 function App(): React.JSX.Element {
-  const [appView, setAppView] = useState<AppView>('workspace')
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('ptt')
+  const [currentView, setCurrentView] = useState<AppView>('ptt')
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null)
   const [theme, setTheme] = useState<ThemeOption>('system')
   const [appLocale, setAppLocale] = useState<AppLocale>('en-US')
   const [config, setConfig] = useState<AppConfig | null>(null)
-  const [dashboardSettingsOpen, setDashboardSettingsOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [meetingState, setMeetingState] = useState<MeetingSessionState>(INITIAL_MEETING_STATE)
 
   const meetingStateRef = useRef<MeetingSessionState>(INITIAL_MEETING_STATE)
   const meetingSecondsTimerRef = useRef<NodeJS.Timeout | null>(null)
-
   meetingStateRef.current = meetingState
+
+  const meetingActive = isMeetingActiveStatus(meetingState.status)
+
+  // ─── Config ───
 
   const loadConfig = useCallback(async (): Promise<void> => {
     try {
@@ -118,6 +106,8 @@ function App(): React.JSX.Element {
       console.error('Failed to load config:', err)
     }
   }, [])
+
+  // ─── Meeting timer ───
 
   const stopMeetingSecondsTimer = useCallback((): void => {
     if (meetingSecondsTimerRef.current) {
@@ -133,13 +123,14 @@ function App(): React.JSX.Element {
     }, 1000)
   }, [stopMeetingSecondsTimer])
 
+  // ─── Meeting transcript handling ───
+
   const handleMeetingTranscript = useCallback((segment: MeetingTranscriptEvent) => {
     setMeetingState((prev) => {
       const speakerSegments = segment.speakerSegments || []
 
       if (segment.isFinal) {
         const nextSegments = mergeSpeakerSegments(prev.segments, speakerSegments)
-
         if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
           const lastSegment = nextSegments[nextSegments.length - 1]
           const isSameAsLast =
@@ -147,7 +138,6 @@ function App(): React.JSX.Element {
             lastSegment.source === segment.currentSpeakerSegment.source &&
             lastSegment.speaker === segment.currentSpeakerSegment.speaker &&
             lastSegment.text === segment.currentSpeakerSegment.text
-
           if (isSameAsLast) {
             nextSegments[nextSegments.length - 1] = {
               ...lastSegment,
@@ -165,7 +155,6 @@ function App(): React.JSX.Element {
       }
 
       const nextSegments = mergeSpeakerSegments(prev.segments, speakerSegments)
-
       let nextCurrentSegment: SpeakerSegment | null = null
       if (segment.currentSpeakerSegment && segment.currentSpeakerSegment.text.trim()) {
         const previousCurrentSegment =
@@ -179,7 +168,6 @@ function App(): React.JSX.Element {
           timestamp: previousCurrentSegment?.timestamp ?? segment.currentSpeakerSegment.timestamp ?? Date.now()
         }
       }
-
       return { ...prev, segments: nextSegments, currentSegment: nextCurrentSegment }
     })
   }, [])
@@ -187,13 +175,11 @@ function App(): React.JSX.Element {
   const handleMeetingStatus = useCallback(
     (nextStatusRaw: string) => {
       const nextStatus = nextStatusRaw as MeetingSessionState['status']
-
       if (nextStatus === 'error') {
         stopMeetingSecondsTimer()
         setMeetingState((prev) => ({ ...prev, status: 'error' }))
         return
       }
-
       if (nextStatus === 'transcribing') {
         startMeetingSecondsTimer()
       } else if (nextStatus === 'idle') {
@@ -201,17 +187,16 @@ function App(): React.JSX.Element {
         stopSystemAudioCapture()
         stopMicrophoneCapture()
       }
-
       setMeetingState((prev) => ({ ...prev, status: nextStatus }))
     },
     [startMeetingSecondsTimer, stopMeetingSecondsTimer]
   )
 
+  // ─── Meeting actions ───
+
   const runMeetingPreconnect = useCallback(async (): Promise<void> => {
     if (isMeetingActiveStatus(meetingStateRef.current.status)) return
-
     setMeetingState((prev) => ({ ...prev, isPreconnecting: true, preconnectFailed: false }))
-
     try {
       const ok = await window.api.preconnectMeetingTranscription()
       if (!ok) throw new Error('Preconnect unavailable')
@@ -223,7 +208,6 @@ function App(): React.JSX.Element {
 
   const startMeetingSession = useCallback(async (): Promise<void> => {
     if (isMeetingActiveStatus(meetingStateRef.current.status)) return
-
     setMeetingState((prev) => ({
       ...prev,
       status: 'starting',
@@ -233,7 +217,6 @@ function App(): React.JSX.Element {
       currentSegment: null,
       lastError: null
     }))
-
     try {
       const runtimeConfig = (await window.api.getConfig()) as AppConfig
       const translationEnabled = runtimeConfig.recognition?.translation?.enabledForMeeting === true
@@ -261,14 +244,13 @@ function App(): React.JSX.Element {
     }
   }, [startMeetingSecondsTimer, stopMeetingSecondsTimer])
 
+  /** Stop meeting — stays on current page */
   const stopMeetingSession = useCallback(async (): Promise<void> => {
     if (!isMeetingActiveStatus(meetingStateRef.current.status)) return
-
     setMeetingState((prev) => ({ ...prev, status: 'stopping' }))
     stopSystemAudioCapture()
     stopMicrophoneCapture()
     stopMeetingSecondsTimer()
-
     try {
       await window.api.stopMeetingTranscription()
       setMeetingState((prev) => ({ ...prev, status: 'idle' }))
@@ -281,17 +263,7 @@ function App(): React.JSX.Element {
     }
   }, [stopMeetingSecondsTimer])
 
-  const stopAndReturnToWorkspace = useCallback(async (): Promise<void> => {
-    await stopMeetingSession()
-    setAppView('workspace')
-    setWorkspaceView('ptt')
-  }, [stopMeetingSession])
-
-  const returnToWorkspace = useCallback((): void => {
-    if (isMeetingActiveStatus(meetingStateRef.current.status)) return
-    setAppView('workspace')
-    setWorkspaceView('ptt')
-  }, [])
+  // ─── Effects ───
 
   useEffect(() => { void loadConfig() }, [loadConfig])
 
@@ -329,16 +301,18 @@ function App(): React.JSX.Element {
     }
   }, [handleMeetingStatus, handleMeetingTranscript, stopMeetingSecondsTimer])
 
+  // Preconnect when navigating TO meeting view
   useEffect(() => {
-    if (appView === 'meeting-session') void runMeetingPreconnect()
-  }, [appView, runMeetingPreconnect])
+    if (currentView === 'meeting') void runMeetingPreconnect()
+  }, [currentView, runMeetingPreconnect])
 
+  // Restore meeting state on app restart
   useEffect(() => {
     void window.api
       .getMeetingRuntimeState()
       .then((runtime) => {
         if (runtime.status && runtime.status !== 'idle') {
-          setAppView('meeting-session')
+          setCurrentView('meeting')
           setMeetingState((prev) => ({
             ...prev,
             status: runtime.status as MeetingSessionState['status'],
@@ -349,45 +323,36 @@ function App(): React.JSX.Element {
       .catch((err) => { console.warn('Failed to read meeting runtime state:', err) })
   }, [])
 
+  // ─── Navigation ───
+
   const handleThemeChange = (newTheme: ThemeOption): void => { setTheme(newTheme) }
 
   const hotkey = getTriggerKeyLabel(config?.hotkey?.triggerKey || DEFAULT_TRIGGER_KEY)
   const dashboardHotkey = hotkey === 'Right Ctrl' ? 'R Ctrl' : hotkey
 
-  const handleDashboardNavigate = useCallback(
-    (nextView: DashboardView) => {
-      if (nextView === 'meeting') {
-        setAppView('meeting-session')
-        setDashboardSettingsOpen(false)
-        return
-      }
-      if (appView === 'meeting-session' && isMeetingActiveStatus(meetingStateRef.current.status)) return
-      setAppView('workspace')
-      setSelectedTranscriptId(null)
-      setDashboardSettingsOpen(false)
-      setWorkspaceView(nextView === 'history' ? 'history' : 'ptt')
-    },
-    [appView]
-  )
+  const handleNavigate = useCallback((nextView: DashboardView) => {
+    setSettingsOpen(false)
+    setSelectedTranscriptId(null)
+    setCurrentView(nextView)
+  }, [])
 
   const handleNavigateToDetail = useCallback((id: string) => {
     setSelectedTranscriptId(id)
-    setAppView('workspace')
-    setWorkspaceView('detail')
+    setCurrentView('detail')
   }, [])
 
   const handleBackFromDetail = useCallback(() => {
     setSelectedTranscriptId(null)
-    setAppView('workspace')
-    setWorkspaceView('history')
+    setCurrentView('history')
   }, [])
 
+  const handleReturnToMeeting = useCallback(() => {
+    setCurrentView('meeting')
+  }, [])
+
+  // Sidebar active view (detail → history highlight)
   const sidebarActiveView: DashboardView =
-    appView === 'meeting-session'
-      ? 'meeting'
-      : workspaceView === 'history' || workspaceView === 'detail'
-        ? 'history'
-        : 'ptt'
+    currentView === 'detail' ? 'history' : currentView === 'meeting' ? 'meeting' : currentView === 'history' ? 'history' : 'ptt'
 
   return (
     <I18nProvider locale={appLocale}>
@@ -396,46 +361,50 @@ function App(): React.JSX.Element {
           <div className="flex h-full w-full">
             <DashboardSidebar
               activeView={sidebarActiveView}
-              onNavigate={handleDashboardNavigate}
-              meetingSessionLocked={appView === 'meeting-session'}
+              onNavigate={handleNavigate}
+              meetingActive={meetingActive}
             />
 
-            {appView === 'workspace' && workspaceView === 'ptt' && (
+            {currentView === 'ptt' && (
               <DashboardHome
                 hotkey={dashboardHotkey}
-                onNavigate={handleDashboardNavigate}
-                onOpenSettings={() => setDashboardSettingsOpen(true)}
+                onNavigate={handleNavigate}
+                onOpenSettings={() => setSettingsOpen(true)}
                 onOpenTranscript={handleNavigateToDetail}
+                meetingActive={meetingActive}
+                meetingSeconds={meetingState.seconds}
+                onReturnToMeeting={handleReturnToMeeting}
+                onStopMeeting={() => { void stopMeetingSession() }}
               />
             )}
 
-            {appView === 'workspace' && workspaceView === 'history' && (
+            {currentView === 'history' && (
               <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
             )}
 
-            {appView === 'workspace' && workspaceView === 'detail' && selectedTranscriptId && (
+            {currentView === 'detail' && selectedTranscriptId && (
               <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
             )}
 
-            {appView === 'workspace' && workspaceView === 'detail' && !selectedTranscriptId && (
+            {currentView === 'detail' && !selectedTranscriptId && (
               <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
             )}
 
-            {appView === 'meeting-session' && (
+            {currentView === 'meeting' && (
               <MeetingTranscription
                 state={meetingState}
-                onOpenSettings={() => setDashboardSettingsOpen(true)}
+                onOpenSettings={() => setSettingsOpen(true)}
                 onStart={startMeetingSession}
-                onStopAndReturn={stopAndReturnToWorkspace}
-                onReturnToWorkspace={returnToWorkspace}
+                onStop={stopMeetingSession}
+                onReturnToWorkspace={() => setCurrentView('ptt')}
               />
             )}
           </div>
         </div>
 
-        {dashboardSettingsOpen && (
+        {settingsOpen && (
           <DashboardSettingsModal
-            onClose={() => setDashboardSettingsOpen(false)}
+            onClose={() => setSettingsOpen(false)}
             onSaved={loadConfig}
             onThemeChange={handleThemeChange}
           />

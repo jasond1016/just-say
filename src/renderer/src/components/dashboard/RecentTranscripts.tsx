@@ -60,9 +60,14 @@ export function RecentTranscripts({
       )}
 
       {!loading && items.length === 0 && (
-        <p className="text-[13px] text-muted-foreground py-4">
-          {m.recentTranscripts.empty}
-        </p>
+        <div className="py-4 space-y-1">
+          <p className="text-[13px] text-muted-foreground">
+            {m.recentTranscripts.empty}
+          </p>
+          <p className="text-[12px] text-muted-foreground/70">
+            {m.recentTranscripts.emptyGuide}
+          </p>
+        </div>
       )}
 
       {!loading && items.length > 0 && (

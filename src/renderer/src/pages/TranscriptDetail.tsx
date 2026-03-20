@@ -6,7 +6,7 @@ import {
   Download,
   FileText,
   Loader2,
-  RefreshCw,
+  MoreHorizontal,
   Trash2,
   User
 } from 'lucide-react'
@@ -96,6 +96,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   } = useTranscripts()
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [actionItemsLoading, setActionItemsLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -256,41 +257,8 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             </p>
           </div>
 
+          {/* Primary action: Copy (most common read-mode action) */}
           <div className="flex items-center gap-1.5 shrink-0 ml-4">
-            {isMeeting && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleGenerateSummary()}
-                  disabled={summaryLoading}
-                >
-                  {summaryLoading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : currentTranscript.summary ? (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  ) : (
-                    <FileText className="h-3.5 w-3.5" />
-                  )}
-                  {summaryLoading ? m.detail.generating : currentTranscript.summary ? m.detail.regenerate : m.detail.generateSummary}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleGenerateActionItems()}
-                  disabled={actionItemsLoading}
-                >
-                  {actionItemsLoading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : hasGeneratedActionItems ? (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  ) : (
-                    <CheckSquare className="h-3.5 w-3.5" />
-                  )}
-                  {actionItemsLoading ? m.detail.generating : hasGeneratedActionItems ? m.detail.regenerate : m.detail.generateActionItems}
-                </Button>
-              </>
-            )}
             <Button
               variant="outline"
               size="sm"
@@ -306,14 +274,66 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
               <Copy className="h-3.5 w-3.5" />
               {copyStatus === 'success' ? m.detail.copySuccess : copyStatus === 'error' ? m.detail.copyFailed : m.detail.copy}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => { void handleExport() }}>
-              <Download className="h-3.5 w-3.5" />
-              {m.detail.export}
-            </Button>
-            <Button variant="danger" size="sm" onClick={handleDelete}>
-              <Trash2 className="h-3.5 w-3.5" />
-              {m.detail.delete}
-            </Button>
+
+            {/* Secondary actions — dropdown */}
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setMoreMenuOpen((prev) => !prev)}
+                className="text-muted-foreground"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+
+              {moreMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-card border border-border py-1 rounded-md shadow-lg animate-[slideInUp_150ms_var(--ease-out-expo)]">
+                    {isMeeting && (
+                      <>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-accent transition-colors disabled:opacity-40"
+                          onClick={() => { setMoreMenuOpen(false); void handleGenerateSummary() }}
+                          disabled={summaryLoading}
+                        >
+                          {summaryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {summaryLoading ? m.detail.generating : currentTranscript.summary ? m.detail.regenerate + ' ' + m.detail.generateSummary : m.detail.generateSummary}
+                        </button>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-accent transition-colors disabled:opacity-40"
+                          onClick={() => { setMoreMenuOpen(false); void handleGenerateActionItems() }}
+                          disabled={actionItemsLoading}
+                        >
+                          {actionItemsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckSquare className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {actionItemsLoading ? m.detail.generating : hasGeneratedActionItems ? m.detail.regenerate + ' ' + m.detail.generateActionItems : m.detail.generateActionItems}
+                        </button>
+                        <div className="my-1 border-t border-border" />
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-foreground hover:bg-accent transition-colors"
+                      onClick={() => { setMoreMenuOpen(false); void handleExport() }}
+                    >
+                      <Download className="h-3.5 w-3.5 text-muted-foreground" />
+                      {m.detail.export}
+                    </button>
+                    <div className="my-1 border-t border-border" />
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-destructive hover:bg-accent transition-colors"
+                      onClick={() => { setMoreMenuOpen(false); handleDelete() }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      {m.detail.delete}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </header>

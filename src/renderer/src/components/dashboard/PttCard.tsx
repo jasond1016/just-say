@@ -24,7 +24,6 @@ function getDayLabel(startMs: number, locale: string): string {
 }
 
 export function PttCard({
-  hotkey,
   todayCount,
   todayChars,
   todayCountDelta,
@@ -77,70 +76,49 @@ export function PttCard({
   }, [updatedAt])
 
   return (
-    <div className="animate-[slideInUp_400ms_var(--ease-out-expo)]">
-      {/* Hotkey & status */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-3">
-          <p className="text-sm font-medium text-muted-foreground tracking-wide uppercase">
-            {m.pttCard.title}
-          </p>
-
-          {/* Stats row */}
-          <div className="flex items-baseline gap-6">
-            <div className="flex items-baseline gap-2">
-              <span
-                className={`font-display text-4xl text-foreground transition-transform duration-200 ${
-                  flash ? 'scale-[1.03]' : ''
-                }`}
-              >
-                {countLabel}
-              </span>
-              <span className="text-xs text-muted-foreground">{m.pttCard.today}</span>
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span
-                className={`font-display text-4xl text-foreground transition-transform duration-200 ${
-                  flash ? 'scale-[1.03]' : ''
-                }`}
-              >
-                {charsLabel}
-              </span>
-              <span className="text-xs text-muted-foreground">{m.pttCard.chars}</span>
-            </div>
-          </div>
-
-          {!loading && (
-            <div className="flex items-center gap-4 text-[12px] text-muted-foreground">
-              <span>{formatDelta(todayCountDelta)}</span>
-              <span>{formatDelta(todayCharsDelta, m.pttCard.chars)}</span>
-            </div>
-          )}
+    <div>
+      {/* Stats row */}
+      <div className="flex items-baseline gap-6 mb-2">
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`font-display text-3xl text-foreground transition-transform duration-200 ${
+              flash ? 'scale-[1.03]' : ''
+            }`}
+          >
+            {countLabel}
+          </span>
+          <span className="text-xs text-muted-foreground">{m.pttCard.today}</span>
         </div>
-
-        {/* Hotkey display */}
-        <div className="flex flex-col items-center gap-1.5">
-          <div className="flex items-center justify-center border border-border bg-background px-5 py-3 rounded-md">
-            <span className="font-mono text-sm font-medium text-foreground tracking-tight">
-              {hotkey}
-            </span>
-          </div>
-          <span className="text-[11px] text-muted-foreground">{m.pttCard.holdToRecord}</span>
+        <div className="flex items-baseline gap-2">
+          <span
+            className={`font-display text-3xl text-foreground transition-transform duration-200 ${
+              flash ? 'scale-[1.03]' : ''
+            }`}
+          >
+            {charsLabel}
+          </span>
+          <span className="text-xs text-muted-foreground">{m.pttCard.chars}</span>
         </div>
       </div>
 
+      {!loading && (
+        <div className="flex items-center gap-4 text-[12px] text-muted-foreground mb-4">
+          <span>{formatDelta(todayCountDelta)}</span>
+          <span>{formatDelta(todayCharsDelta, m.pttCard.chars)}</span>
+        </div>
+      )}
+
       {/* 7-day activity */}
-      <div className="mt-6 flex items-end gap-2">
+      <div className="flex items-end gap-2">
         {bars.map((day, index) => {
           const isToday = index === bars.length - 1
           return (
             <div key={day.key} className="flex flex-col items-center gap-1.5 flex-1">
-              <div className="flex h-12 w-full items-end justify-center">
+              <div className="flex h-10 w-full items-end justify-center">
                 <div
                   title={m.pttCard.barTooltip(day.label, day.pttCount)}
                   className={`w-full max-w-[20px] rounded-sm transition-all duration-500 ${
-                    isToday
-                      ? 'bg-primary'
-                      : 'bg-border'
+                    isToday ? 'bg-primary' : 'bg-border'
                   }`}
                   style={{ height: `${day.heightPercent}%` }}
                 />

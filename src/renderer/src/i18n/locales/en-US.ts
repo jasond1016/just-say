@@ -18,8 +18,20 @@ export const enUS = {
     meetingInProgress: 'Meeting In Progress',
     meetingLockedHint: 'Home and History are locked while Meeting transcription is active.'
   },
+  meetingBar: {
+    recording: 'Meeting recording',
+    returnToMeeting: 'Return to meeting',
+    stop: 'Stop'
+  },
+  pttLive: {
+    recording: 'Listening…',
+    processing: 'Transcribing…',
+    lastResult: 'Last result',
+    noResultsYet: 'Your transcribed text will appear here after you use Push to Talk.'
+  },
   quickActions: {
     startMeetingTranscription: 'Start Meeting Transcription',
+    startMeetingDescription: 'Capture system audio and microphone in real time.',
     changeHotkey: 'Change Hotkey'
   },
   pttCard: {
@@ -41,6 +53,7 @@ export const enUS = {
     viewAll: 'View all →',
     loading: 'Loading recent transcripts...',
     empty: 'No transcripts yet.',
+    emptyGuide: 'Try Push to Talk or start a meeting to create your first transcript.',
     meetingBadge: 'Meeting',
     pttBadge: 'PTT'
   },
@@ -50,11 +63,15 @@ export const enUS = {
     connectionError: 'Connection error',
     back: 'Back',
     settings: 'Settings',
+    stop: 'Stop',
     stopAndReturn: 'Stop & Return',
     startRecording: 'Start Recording',
-    emptyTitle: 'No active transcription',
+    emptyTitle: 'Ready to transcribe',
     emptyDescription:
-      'Click Start Recording to begin capturing audio from your microphone and system audio.',
+      'Captures system audio (and optionally your microphone) to produce a real-time transcript.',
+    emptyStep1: '1. Check that your recognition engine is configured in Settings.',
+    emptyStep2: '2. Make sure the audio you want to capture is playing on this device.',
+    emptyStep3: '3. Click Start Recording below.',
     warmingUp: 'Warming up in background. You can start now, but the first response may be slower.',
     warmupFailed: 'Warm-up failed, first start may take longer.',
     endpointLabel: 'Endpoint',
@@ -69,13 +86,15 @@ export const enUS = {
     filterAll: 'All',
     filterPtt: 'PTT',
     filterMeeting: 'Meeting',
-    searchPlaceholder: 'Search transcripts...',
+    searchPlaceholder: 'Search transcripts…',
     searchAria: 'Search transcripts',
-    loading: 'Loading transcripts...',
+    searchHint: 'Press / to search',
+    loading: 'Loading transcripts…',
     loadFailedPrefix: 'Failed to load transcripts',
     emptySearch: 'No matching transcripts.',
     emptyFilter: 'No transcripts in this filter.',
     emptyDefault: 'No transcripts yet.',
+    emptyDefaultGuide: 'Use Push to Talk or start a meeting — transcripts will appear here.',
     meetingBadge: 'Meeting',
     pttBadge: 'PTT',
     previous: 'Previous',
@@ -83,7 +102,7 @@ export const enUS = {
     pageLabel: (page: number, totalPages: number): string => `Page ${page} / ${totalPages}`
   },
   detail: {
-    loading: 'Loading transcript...',
+    loading: 'Loading transcript…',
     notFound: 'Transcript not found.',
     back: 'Back',
     microphoneLabel: 'You',
@@ -95,11 +114,12 @@ export const enUS = {
     copyFailed: 'Copy failed',
     export: 'Export',
     delete: 'Delete',
+    more: 'More',
     deleteDialogTitle: 'Delete Transcript',
     deleteConfirm: 'Delete this transcript? This action cannot be undone.',
     generateSummary: 'Summary',
     generateActionItems: 'Action Items',
-    generating: 'Generating...',
+    generating: 'Generating…',
     regenerate: 'Regenerate',
     summaryTitle: 'Meeting Summary',
     actionItemsTitle: 'Action Items',
@@ -112,7 +132,7 @@ export const enUS = {
     modalDescription: 'Configure recognition, appearance, and application behavior.',
     title: 'Settings',
     closeAria: 'Close settings',
-    loading: 'Loading settings...',
+    loading: 'Loading settings…',
     sectionsAria: 'Settings sections',
     tabRecognition: 'Recognition',
     tabAppearance: 'Appearance',
@@ -134,7 +154,7 @@ export const enUS = {
       'Capture your microphone as a separate transcript stream during meeting transcription.',
     microphoneDevice: 'Microphone Device',
     refresh: 'Refresh',
-    refreshing: 'Refreshing...',
+    refreshing: 'Refreshing…',
     defaultDevice: 'Default',
     savedDeviceUnavailable: 'Saved device (unavailable)',
     microphoneLoadFailed: 'Failed to load microphone devices. You can still use Default.',
@@ -156,7 +176,7 @@ export const enUS = {
     localServerHost: 'Server Host',
     localServerPort: 'Server Port',
     testLocalServer: 'Test Connection',
-    localServerTesting: 'Testing...',
+    localServerTesting: 'Testing…',
     localServerTestIdle: 'Remote service status: Not tested',
     localServerTestSuccess: 'Remote service status: Connected',
     localServerTestFailed: 'Remote service status: Unreachable',
@@ -182,7 +202,7 @@ export const enUS = {
     translationModel: 'Translation Model',
     translationEndpoint: 'Translation Endpoint',
     translationApiKey: 'Translation API Key',
-    translationApiKeyPlaceholder: 'sk-...',
+    translationApiKeyPlaceholder: 'sk-…',
     theme: 'Theme',
     system: 'System',
     light: 'Light',
@@ -202,6 +222,6 @@ export const enUS = {
     version: 'Version',
     aboutDescription: 'Push-to-talk and meeting transcription assistant.',
     saveChanges: 'Save Changes',
-    saving: 'Saving...'
+    saving: 'Saving…'
   }
 }

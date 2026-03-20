@@ -20,8 +20,20 @@ export const zhCN: typeof enUS = {
     meetingInProgress: '会议进行中',
     meetingLockedHint: '会议转录进行中时，首页和历史页面会被锁定。'
   },
+  meetingBar: {
+    recording: '会议录制中',
+    returnToMeeting: '返回会议',
+    stop: '停止'
+  },
+  pttLive: {
+    recording: '正在收听…',
+    processing: '正在转录…',
+    lastResult: '上次结果',
+    noResultsYet: '使用按键说话后，转录文本会显示在这里。'
+  },
   quickActions: {
     startMeetingTranscription: '开始会议转录',
+    startMeetingDescription: '实时采集系统音频和麦克风。',
     changeHotkey: '修改快捷键'
   },
   pttCard: {
@@ -40,8 +52,9 @@ export const zhCN: typeof enUS = {
   recentTranscripts: {
     title: '最近转录',
     viewAll: '查看全部 →',
-    loading: '正在加载最近转录...',
+    loading: '正在加载最近转录…',
     empty: '暂无转录记录。',
+    emptyGuide: '试试按键说话或开始一次会议，创建你的第一条转录。',
     meetingBadge: '会议',
     pttBadge: 'PTT'
   },
@@ -51,10 +64,14 @@ export const zhCN: typeof enUS = {
     connectionError: '连接异常',
     back: '返回',
     settings: '设置',
+    stop: '停止',
     stopAndReturn: '停止并返回',
     startRecording: '开始录音',
-    emptyTitle: '暂无进行中的转录',
-    emptyDescription: '点击“开始录音”即可采集麦克风与系统音频并开始转录。',
+    emptyTitle: '准备就绪',
+    emptyDescription: '采集系统音频（可选麦克风）生成实时转录。',
+    emptyStep1: '1. 在设置中确认识别引擎已配置。',
+    emptyStep2: '2. 确保要采集的音频正在本设备上播放。',
+    emptyStep3: '3. 点击下方"开始录音"。',
     warmingUp: '后台预热中。可以立即开始，但首次响应可能稍慢。',
     warmupFailed: '预热失败，首次启动可能更慢。',
     endpointLabel: '切分点',
@@ -69,13 +86,15 @@ export const zhCN: typeof enUS = {
     filterAll: '全部',
     filterPtt: 'PTT',
     filterMeeting: '会议',
-    searchPlaceholder: '搜索转录...',
+    searchPlaceholder: '搜索转录…',
     searchAria: '搜索转录',
-    loading: '正在加载转录...',
+    searchHint: '按 / 搜索',
+    loading: '正在加载转录…',
     loadFailedPrefix: '加载转录失败',
     emptySearch: '没有匹配的转录记录。',
     emptyFilter: '该筛选条件下暂无转录记录。',
     emptyDefault: '暂无转录记录。',
+    emptyDefaultGuide: '使用按键说话或开始一次会议——转录会出现在这里。',
     meetingBadge: '会议',
     pttBadge: 'PTT',
     previous: '上一页',
@@ -83,7 +102,7 @@ export const zhCN: typeof enUS = {
     pageLabel: (page: number, totalPages: number): string => `第 ${page} / ${totalPages} 页`
   },
   detail: {
-    loading: '正在加载转录...',
+    loading: '正在加载转录…',
     notFound: '未找到该转录记录。',
     back: '返回',
     microphoneLabel: '我',
@@ -95,11 +114,12 @@ export const zhCN: typeof enUS = {
     copyFailed: '复制失败',
     export: '导出',
     delete: '删除',
+    more: '更多',
     deleteDialogTitle: '删除转录',
     deleteConfirm: '删除此转录？此操作不可撤销。',
     generateSummary: '摘要',
     generateActionItems: '待办',
-    generating: '生成中...',
+    generating: '生成中…',
     regenerate: '重新生成',
     summaryTitle: '会议摘要',
     actionItemsTitle: '会议待办',
@@ -112,7 +132,7 @@ export const zhCN: typeof enUS = {
     modalDescription: '配置识别、外观和应用行为。',
     title: '设置',
     closeAria: '关闭设置',
-    loading: '正在加载设置...',
+    loading: '正在加载设置…',
     sectionsAria: '设置分区',
     tabRecognition: '识别',
     tabAppearance: '外观',
@@ -133,7 +153,7 @@ export const zhCN: typeof enUS = {
     meetingIncludeMicrophoneDescription: '会议转录时单独采集麦克风，并与系统音频分开展示。',
     microphoneDevice: '麦克风设备',
     refresh: '刷新',
-    refreshing: '刷新中...',
+    refreshing: '刷新中…',
     defaultDevice: '默认',
     savedDeviceUnavailable: '已保存设备（当前不可用）',
     microphoneLoadFailed: '无法加载麦克风设备，仍可使用默认设备。',
@@ -154,7 +174,7 @@ export const zhCN: typeof enUS = {
     localServerHost: '服务地址',
     localServerPort: '服务端口',
     testLocalServer: '测试连接',
-    localServerTesting: '测试中...',
+    localServerTesting: '测试中…',
     localServerTestIdle: '远程服务状态：未测试',
     localServerTestSuccess: '远程服务状态：连接成功',
     localServerTestFailed: '远程服务状态：无法连接',
@@ -180,7 +200,7 @@ export const zhCN: typeof enUS = {
     translationModel: '翻译模型',
     translationEndpoint: '翻译端点',
     translationApiKey: '翻译 API Key',
-    translationApiKeyPlaceholder: 'sk-...',
+    translationApiKeyPlaceholder: 'sk-…',
     theme: '主题',
     system: '跟随系统',
     light: '浅色',
@@ -196,10 +216,10 @@ export const zhCN: typeof enUS = {
     soundFeedbackDescription: '录音开始和结束时播放提示音',
     deleteModelDialogTitle: '删除模型',
     deleteModelDialogDescription: (model: string): string =>
-      `删除模型“${model}”？此操作将释放磁盘空间。`,
+      `删除模型"${model}"？此操作将释放磁盘空间。`,
     version: '版本',
     aboutDescription: '按键说话与会议转录助手。',
     saveChanges: '保存更改',
-    saving: '保存中...'
+    saving: '保存中…'
   }
 }
