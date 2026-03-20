@@ -12,7 +12,7 @@ export function DashboardHeader({
   return (
     <header className="flex items-baseline gap-3 px-8 py-3">
       {title && (
-        <h1 className="font-display text-2xl text-foreground italic">{title}</h1>
+        <h1 className="font-display text-2xl text-foreground">{title}</h1>
       )}
       {subtitle && (
         <span className="text-[13px] text-muted-foreground">{subtitle}</span>

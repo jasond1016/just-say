@@ -14,7 +14,6 @@ export function PttLiveIndicator({ hotkey }: PttLiveIndicatorProps): JSX.Element
   const [lastResult, setLastResult] = useState<string | null>(null)
 
   useEffect(() => {
-    // Listen for PTT recording state
     window.api.onRecordingState((state) => {
       if (state.processing) {
         setPttState('processing')
@@ -25,14 +24,12 @@ export function PttLiveIndicator({ hotkey }: PttLiveIndicatorProps): JSX.Element
       }
     })
 
-    // Listen for indicator feedback (contains transcribed text)
     window.api.onIndicatorFeedback((payload) => {
       if (payload.message && payload.message.trim()) {
         setLastResult(payload.message.trim())
       }
     })
 
-    // Check initial state
     void window.api.getPttRuntimeState().then((state) => {
       if (state.processing) setPttState('processing')
       else if (state.recording) setPttState('recording')
@@ -47,11 +44,11 @@ export function PttLiveIndicator({ hotkey }: PttLiveIndicatorProps): JSX.Element
   const isActive = pttState !== 'idle'
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Live state indicator */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3.5">
         <div
-          className={`relative flex h-12 w-12 items-center justify-center rounded-full transition-colors duration-200 ${
+          className={`relative flex h-10 w-10 items-center justify-center rounded-xl transition-colors duration-200 ${
             pttState === 'recording'
               ? 'bg-[var(--color-recording-bg)]'
               : pttState === 'processing'
@@ -60,10 +57,10 @@ export function PttLiveIndicator({ hotkey }: PttLiveIndicatorProps): JSX.Element
           }`}
         >
           {pttState === 'recording' && (
-            <span className="absolute inset-0 rounded-full bg-[var(--color-recording)]/10 animate-[breathe_1.5s_ease-in-out_infinite]" />
+            <span className="absolute inset-0 rounded-xl bg-[var(--color-recording)]/10 animate-[breathe_1.5s_ease-in-out_infinite]" />
           )}
           <Mic
-            className={`h-5 w-5 relative z-10 transition-colors duration-200 ${
+            className={`h-[18px] w-[18px] relative z-10 transition-colors duration-200 ${
               pttState === 'recording'
                 ? 'text-[var(--color-recording)]'
                 : pttState === 'processing'
@@ -83,9 +80,9 @@ export function PttLiveIndicator({ hotkey }: PttLiveIndicatorProps): JSX.Element
             </p>
           ) : (
             <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center border border-border bg-background px-4 py-2 rounded-md">
-                <span className="font-mono text-[13px] font-medium text-foreground">{hotkey}</span>
-              </div>
+              <kbd className="inline-flex items-center justify-center border border-border bg-background px-3 py-1.5 rounded-md shadow-tinted-sm">
+                <span className="font-mono text-[12px] font-medium text-foreground">{hotkey}</span>
+              </kbd>
               <span className="text-[13px] text-muted-foreground">{m.pttCard.holdToRecord}</span>
             </div>
           )}
@@ -94,11 +91,11 @@ export function PttLiveIndicator({ hotkey }: PttLiveIndicatorProps): JSX.Element
 
       {/* Last result */}
       {lastResult ? (
-        <div className="border-l-2 border-primary/40 pl-4 py-1">
+        <div className="border-l-2 border-primary/30 pl-4 py-1">
           <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
             {m.pttLive.lastResult}
           </p>
-          <p className="text-sm text-foreground leading-relaxed line-clamp-3">
+          <p className="text-[14px] text-foreground leading-relaxed line-clamp-3">
             {lastResult}
           </p>
         </div>

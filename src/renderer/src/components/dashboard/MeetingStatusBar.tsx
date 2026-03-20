@@ -28,16 +28,16 @@ export function MeetingStatusBar({
         <span className="text-[13px] font-medium text-[var(--color-recording)]">
           {m.meetingBar.recording}
         </span>
-        <span className="font-mono text-[13px] text-[var(--color-recording)]">
+        <span className="font-mono tabular-nums text-[13px] text-[var(--color-recording)]">
           {formatClock(seconds)}
         </span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1">
         <button
           type="button"
           onClick={onStop}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium text-[var(--color-recording)] hover:bg-[var(--color-recording)]/10 transition-colors rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-recording)]/30"
+          className="press-scale inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium text-[var(--color-recording)] hover:bg-[var(--color-recording)]/10 transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-recording)]/30"
         >
           <Square className="h-3 w-3" />
           {m.meetingBar.stop}
@@ -45,7 +45,7 @@ export function MeetingStatusBar({
         <button
           type="button"
           onClick={onReturn}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium text-[var(--color-recording)] hover:bg-[var(--color-recording)]/10 transition-colors rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-recording)]/30"
+          className="press-scale inline-flex items-center gap-1.5 px-2.5 py-1 text-[12px] font-medium text-[var(--color-recording)] hover:bg-[var(--color-recording)]/10 transition-colors rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-recording)]/30"
         >
           {m.meetingBar.returnToMeeting}
           <ArrowRight className="h-3 w-3" />

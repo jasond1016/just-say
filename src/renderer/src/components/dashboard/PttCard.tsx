@@ -75,13 +75,33 @@ export function PttCard({
     return () => clearTimeout(timer)
   }, [updatedAt])
 
+  if (loading) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-baseline gap-6">
+          <div className="skeleton h-8 w-16 rounded-md" />
+          <div className="skeleton h-8 w-20 rounded-md" />
+        </div>
+        <div className="skeleton h-3 w-48 rounded" />
+        <div className="flex items-end gap-2 pt-1">
+          {Array.from({ length: 7 }, (_, i) => (
+            <div key={i} className="flex flex-col items-center gap-1.5 flex-1">
+              <div className="skeleton h-10 w-full max-w-[20px] rounded-sm" />
+              <div className="skeleton h-3 w-6 rounded" />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div>
       {/* Stats row */}
-      <div className="flex items-baseline gap-6 mb-2">
+      <div className="flex items-baseline gap-6 mb-1.5">
         <div className="flex items-baseline gap-2">
           <span
-            className={`font-display text-3xl text-foreground transition-transform duration-200 ${
+            className={`font-display text-3xl tabular-nums text-foreground transition-transform duration-200 ${
               flash ? 'scale-[1.03]' : ''
             }`}
           >
@@ -91,7 +111,7 @@ export function PttCard({
         </div>
         <div className="flex items-baseline gap-2">
           <span
-            className={`font-display text-3xl text-foreground transition-transform duration-200 ${
+            className={`font-display text-3xl tabular-nums text-foreground transition-transform duration-200 ${
               flash ? 'scale-[1.03]' : ''
             }`}
           >
@@ -101,15 +121,13 @@ export function PttCard({
         </div>
       </div>
 
-      {!loading && (
-        <div className="flex items-center gap-4 text-[12px] text-muted-foreground mb-4">
-          <span>{formatDelta(todayCountDelta)}</span>
-          <span>{formatDelta(todayCharsDelta, m.pttCard.chars)}</span>
-        </div>
-      )}
+      <div className="flex items-center gap-4 text-[12px] text-muted-foreground mb-3">
+        <span>{formatDelta(todayCountDelta)}</span>
+        <span>{formatDelta(todayCharsDelta, m.pttCard.chars)}</span>
+      </div>
 
       {/* 7-day activity */}
-      <div className="flex items-end gap-2">
+      <div className="flex items-end gap-2" role="img" aria-label="7-day PTT activity chart">
         {bars.map((day, index) => {
           const isToday = index === bars.length - 1
           return (
@@ -117,13 +135,14 @@ export function PttCard({
               <div className="flex h-10 w-full items-end justify-center">
                 <div
                   title={m.pttCard.barTooltip(day.label, day.pttCount)}
+                  aria-label={m.pttCard.barTooltip(day.label, day.pttCount)}
                   className={`w-full max-w-[20px] rounded-sm transition-all duration-500 ${
                     isToday ? 'bg-primary' : 'bg-border'
                   }`}
                   style={{ height: `${day.heightPercent}%` }}
                 />
               </div>
-              <span className={`font-mono text-[10px] ${isToday ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+              <span className={`font-mono text-[10px] tabular-nums ${isToday ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
                 {day.label}
               </span>
             </div>
