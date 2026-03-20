@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Headphones, Play, Square } from 'lucide-react'
+import { Check, Headphones, Play, Square } from 'lucide-react'
 import type { SpeakerSegment } from '../../../shared/transcription-types'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
@@ -27,6 +27,7 @@ interface MeetingTranscriptionProps {
   state: MeetingSessionState
   onStart: () => Promise<void>
   onStop: () => Promise<void>
+  onViewLastTranscript?: () => void
 }
 
 const speakerColors = ['#B8632F', '#3B6B96', '#5D7A4F', '#B8862F', '#8B4F6F', '#4F6B8B']
@@ -72,7 +73,8 @@ function getSegmentColor(segment: SpeakerSegment): string {
 export function MeetingTranscription({
   state,
   onStart,
-  onStop
+  onStop,
+  onViewLastTranscript
 }: MeetingTranscriptionProps): React.JSX.Element {
   const { m } = useI18n()
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -81,6 +83,7 @@ export function MeetingTranscription({
   const isTranscribing =
     state.status === 'starting' || state.status === 'transcribing' || state.status === 'stopping'
   const hasContent = state.segments.length > 0 || state.currentSegment
+  const isStoppedWithContent = !isTranscribing && hasContent
   const currentInlinePreviewText = state.currentSegment
     ? getInlinePreviewText(state.currentSegment)
     : undefined
@@ -126,52 +129,53 @@ export function MeetingTranscription({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+      {/* ─── Header ─── */}
       <header
-        className="flex items-end justify-between px-8 pb-2 pr-[140px]"
+        className="px-8 pb-2"
         style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
       >
-        <div className="flex items-baseline gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div
+          className="flex items-baseline gap-3 pt-1"
+          style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+        >
           <h1 className="font-display text-2xl text-foreground italic">{m.meeting.title}</h1>
 
+          {/* Recording: timer + stop, grouped tightly with title */}
           {state.status === 'transcribing' && (
-            <span className="inline-flex items-center gap-2 text-[13px] text-[var(--color-recording)]">
-              <span className="h-2 w-2 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
-              <span className="font-mono">{formatClock(state.seconds)}</span>
-            </span>
+            <>
+              <span className="inline-flex items-center gap-2 text-[13px] text-[var(--color-recording)]">
+                <span className="h-2 w-2 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
+                <span className="font-mono">{formatClock(state.seconds)}</span>
+              </span>
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => void runAction(onStop)}
+                disabled={actionInProgress}
+              >
+                <Square className="h-3 w-3" />
+                <span>{m.meeting.stop}</span>
+              </Button>
+            </>
           )}
 
           {state.status === 'error' && (
             <span className="text-[13px] text-destructive">{m.meeting.connectionError}</span>
           )}
         </div>
-
-        {/* Only show Stop during recording — idle actions live in the content area */}
-        {isTranscribing && (
-          <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <Button
-              type="button"
-              variant="danger"
-              size="sm"
-              onClick={() => void runAction(onStop)}
-              disabled={actionInProgress || state.status === 'starting'}
-            >
-              <Square className="h-3.5 w-3.5" />
-              <span>{m.meeting.stop}</span>
-            </Button>
-          </div>
-        )}
       </header>
 
       <div className="mx-8 border-t border-border" />
 
-      {/* Transcript body */}
+      {/* ─── Content ─── */}
       <div
         className="min-h-0 flex-1 overflow-auto px-8 py-6"
         ref={transcriptRef}
         onScroll={handleTranscriptScroll}
       >
         {!hasContent && !isTranscribing ? (
-          /* ─── Empty state: guided setup ─── */
+          /* ─── State 1: Empty — guided setup ─── */
           <div className="flex h-full min-h-[280px] flex-col items-start justify-center gap-6 max-w-lg">
             <div className="space-y-3">
               <Headphones className="h-6 w-6 text-primary mb-2" strokeWidth={1.6} />
@@ -181,7 +185,6 @@ export function MeetingTranscription({
               </p>
             </div>
 
-            {/* Setup steps */}
             <div className="space-y-2 text-[13px] text-muted-foreground leading-relaxed">
               <p>{m.meeting.emptyStep1}</p>
               <p>{m.meeting.emptyStep2}</p>
@@ -207,7 +210,7 @@ export function MeetingTranscription({
             </Button>
           </div>
         ) : (
-          /* ─── Transcript timeline ─── */
+          /* ─── State 2 & 3: Timeline (recording or stopped-with-content) ─── */
           <div className="relative">
             <div className="absolute left-[52px] top-0 bottom-0 w-px bg-border" />
 
@@ -271,6 +274,33 @@ export function MeetingTranscription({
           </div>
         )}
       </div>
+
+      {/* ─── State 3: Stopped-with-content footer ─── */}
+      {isStoppedWithContent && (
+        <footer className="flex items-center gap-3 border-t border-border px-8 py-3 animate-[slideInUp_200ms_var(--ease-out-expo)]">
+          <span className="inline-flex items-center gap-1.5 text-[13px] text-[var(--color-success)]">
+            <Check className="h-3.5 w-3.5" />
+            {m.meeting.savedToHistory}
+          </span>
+
+          <div className="flex items-center gap-2 ml-auto">
+            {onViewLastTranscript && (
+              <Button variant="outline" size="sm" onClick={onViewLastTranscript}>
+                {m.meeting.viewTranscript}
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void runAction(onStart)}
+              disabled={actionInProgress}
+            >
+              <Play className="h-3.5 w-3.5" />
+              <span>{m.meeting.newRecording}</span>
+            </Button>
+          </div>
+        </footer>
+      )}
     </div>
   )
 }

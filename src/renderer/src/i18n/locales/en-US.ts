@@ -66,6 +66,9 @@ export const enUS = {
     stop: 'Stop',
     stopAndReturn: 'Stop & Return',
     startRecording: 'Start Recording',
+    newRecording: 'New Recording',
+    savedToHistory: 'Saved to history',
+    viewTranscript: 'View transcript',
     emptyTitle: 'Ready to transcribe',
     emptyDescription:
       'Captures system audio (and optionally your microphone) to produce a real-time transcript.',

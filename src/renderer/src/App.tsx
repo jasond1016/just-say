@@ -401,6 +401,7 @@ function App(): React.JSX.Element {
                 state={meetingState}
                 onStart={startMeetingSession}
                 onStop={stopMeetingSession}
+                onViewLastTranscript={() => setCurrentView('history')}
               />
             )}
           </div>
