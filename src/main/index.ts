@@ -49,8 +49,8 @@ let indicatorWindow: BrowserWindow | null = null
 let outputWindow: BrowserWindow | null = null
 let pendingOutputText: string | null = null
 
-const INDICATOR_WINDOW_WIDTH = 220
-const INDICATOR_WINDOW_HEIGHT = 52
+const INDICATOR_WINDOW_WIDTH = 240
+const INDICATOR_WINDOW_HEIGHT = 56
 
 const OUTPUT_WINDOW_WIDTH = 500
 const OUTPUT_WINDOW_HEIGHT = 230
