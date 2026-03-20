@@ -498,21 +498,21 @@ export function DashboardSettingsModal({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      {/* Backdrop */}
+      {/* Backdrop — full screen for click-to-close */}
       <div
         aria-hidden="true"
         className="absolute inset-0 bg-foreground/10 animate-[fadeIn_120ms_ease-out]"
         onClick={onClose}
       />
 
-      {/* Slide-over panel */}
+      {/* Slide-over panel — starts below the title bar overlay (h-9 = 36px) */}
       <section
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-panel-title"
         aria-describedby="settings-panel-description"
-        className="relative z-10 flex h-full w-[520px] max-w-[calc(100vw-4rem)] flex-col bg-card border-l border-border animate-[slideOverIn_280ms_var(--ease-out-expo)]"
+        className="relative z-10 flex w-[520px] max-w-[calc(100vw-4rem)] flex-col bg-card border-l border-border animate-[slideOverIn_280ms_var(--ease-out-expo)] mt-9"
       >
         <p id="settings-panel-description" className="sr-only">{m.settings.modalDescription}</p>
 
