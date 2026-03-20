@@ -1,11 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="123" y="123" width="778" height="778" rx="225" fill="#7C3AED" />
-  <polygon
-    fill="#FFFFFF"
-    points="512,266 725,389 725,635 512,758 299,635 299,389"
+  <!-- Warm charcoal rounded square background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#2D2A26" />
+
+  <!-- Microphone body -->
+  <rect x="432" y="240" width="160" height="280" rx="80" fill="#B8632F" />
+
+  <!-- Microphone arc (using a path for the U-shape) -->
+  <path
+    d="M 352 480 L 352 540 C 352 628 424 700 512 700 C 600 700 672 628 672 540 L 672 480"
+    fill="none"
+    stroke="#B8632F"
+    stroke-width="56"
+    stroke-linecap="round"
   />
-  <polygon
-    fill="#7C3AED"
-    points="512,338 663,425 663,599 512,686 361,599 361,425"
-  />
+
+  <!-- Microphone stand (vertical line) -->
+  <line x1="512" y1="700" x2="512" y2="800" stroke="#B8632F" stroke-width="56" stroke-linecap="round" />
+
+  <!-- Microphone base (horizontal line) -->
+  <line x1="412" y1="800" x2="612" y2="800" stroke="#B8632F" stroke-width="56" stroke-linecap="round" />
 </svg>
