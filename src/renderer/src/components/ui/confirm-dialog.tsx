@@ -107,7 +107,7 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-description"
-        className="relative z-10 w-[440px] max-w-[calc(100vw-2rem)] bg-card border border-border animate-[slideInUp_200ms_var(--ease-out-expo)]"
+        className="relative z-10 w-[440px] max-w-[calc(100vw-2rem)] bg-card border border-border rounded-md shadow-tinted-lg animate-[slideInUp_200ms_var(--ease-out-expo)]"
       >
         <header className="flex items-center justify-between border-b border-border px-5 py-4">
           <h3 id="confirm-dialog-title" className="text-[15px] font-semibold">

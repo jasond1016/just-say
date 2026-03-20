@@ -12,6 +12,19 @@ interface TranscriptHistoryProps {
   onNavigateToDetail: (id: string) => void
 }
 
+function ListItemSkeleton(): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-4 py-4">
+      <span className="skeleton h-10 w-[3px] rounded-full shrink-0" />
+      <div className="min-w-0 flex-1 space-y-2">
+        <div className="skeleton h-4 w-2/3 rounded" />
+        <div className="skeleton h-3 w-1/4 rounded" />
+      </div>
+      <div className="skeleton h-5 w-14 rounded-sm shrink-0" />
+    </div>
+  )
+}
+
 export function TranscriptHistory({
   onNavigateToDetail
 }: TranscriptHistoryProps): React.JSX.Element {
@@ -81,11 +94,11 @@ export function TranscriptHistory({
   ]
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
       <header className="px-8 py-3 space-y-2">
-        <div className="flex items-baseline gap-4">
-          <h1 className="font-display text-2xl text-foreground italic">{m.history.title}</h1>
-          <span className="font-mono text-[12px] text-muted-foreground">
+        <div className="flex items-center gap-3">
+          <h1 className="font-display text-2xl text-foreground">{m.history.title}</h1>
+          <span className="font-mono tabular-nums text-[12px] text-muted-foreground">
             {pagination.total}
           </span>
         </div>
@@ -99,7 +112,7 @@ export function TranscriptHistory({
                   key={option.id}
                   type="button"
                   onClick={() => setFilterMode(option.id)}
-                  className={`px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-sm ${
+                  className={`press-scale px-2.5 py-1 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded-md ${
                     active
                       ? 'text-primary'
                       : 'text-muted-foreground hover:text-foreground'
@@ -122,7 +135,7 @@ export function TranscriptHistory({
               onChange={(event) => setQuery(event.target.value)}
               placeholder={m.history.searchPlaceholder}
               aria-label={m.history.searchAria}
-              className="h-8 w-full border border-border bg-transparent pr-3 pl-9 text-[13px] rounded-md outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="h-8 w-full border border-border bg-transparent pr-3 pl-9 text-[13px] rounded-md outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:shadow-tinted-sm transition-shadow"
             />
           </div>
         </div>
@@ -133,8 +146,12 @@ export function TranscriptHistory({
       {/* List */}
       <div className="min-h-0 flex-1 overflow-auto px-8">
         {loading && (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            {m.history.loading}
+          <div className="divide-y divide-border">
+            <ListItemSkeleton />
+            <ListItemSkeleton />
+            <ListItemSkeleton />
+            <ListItemSkeleton />
+            <ListItemSkeleton />
           </div>
         )}
 
@@ -163,7 +180,7 @@ export function TranscriptHistory({
 
         {!loading && !error && items.length > 0 && (
           <div className="divide-y divide-border">
-            {items.map((transcript) => {
+            {items.map((transcript, index) => {
               const mode = getTranscriptSourceMode(transcript)
               const kind = mode === 'meeting' ? m.history.meetingBadge : m.history.pttBadge
               const isMeeting = mode === 'meeting'
@@ -172,7 +189,14 @@ export function TranscriptHistory({
                   key={transcript.id}
                   type="button"
                   onClick={() => onNavigateToDetail(transcript.id)}
-                  className="group flex w-full items-center gap-4 py-4 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 -mx-2 px-2 rounded-sm"
+                  className="press-scale group flex w-full items-center gap-4 py-4 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 -mx-2 px-2 rounded-sm"
+                  style={{
+                    animationName: 'staggerIn',
+                    animationDuration: '250ms',
+                    animationTimingFunction: 'var(--ease-out-expo)',
+                    animationDelay: `${index * 40}ms`,
+                    animationFillMode: 'backwards'
+                  }}
                 >
                   {/* Color indicator */}
                   <span
@@ -188,7 +212,7 @@ export function TranscriptHistory({
                     <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
                       {transcript.title}
                     </p>
-                    <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+                    <p className="mt-1 font-mono tabular-nums text-[11px] text-muted-foreground">
                       {formatRelativeDateTime(transcript.created_at, locale)}
                       <span className="mx-1.5 opacity-40">·</span>
                       {formatDurationShort(transcript.duration_seconds, locale)}
@@ -218,7 +242,7 @@ export function TranscriptHistory({
           >
             {m.history.previous}
           </Button>
-          <span className="font-mono text-[11px] text-muted-foreground">
+          <span className="font-mono tabular-nums text-[11px] text-muted-foreground">
             {m.history.pageLabel(pagination.page, pagination.totalPages)}
           </span>
           <Button

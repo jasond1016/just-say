@@ -29,7 +29,14 @@ interface ActionItem {
   assignee?: string
 }
 
-const speakerColors = ['#B8632F', '#3B6B96', '#5D7A4F', '#B8862F', '#8B4F6F', '#4F6B8B']
+const SPEAKER_COLOR_VARS = [
+  'var(--speaker-1)',
+  'var(--speaker-2)',
+  'var(--speaker-3)',
+  'var(--speaker-4)',
+  'var(--speaker-5)',
+  'var(--speaker-6)'
+]
 
 function getStoredSegmentLabel(
   segment: { source: 'system' | 'microphone' | null; speaker: number },
@@ -48,9 +55,9 @@ function getStoredSegmentColor(segment: {
   source: 'system' | 'microphone' | null
   speaker: number
 }): string {
-  if (segment.source === 'microphone') return '#8B4F6F'
-  if (segment.source === 'system') return '#3B6B96'
-  return speakerColors[segment.speaker % speakerColors.length]
+  if (segment.source === 'microphone') return 'var(--speaker-mic)'
+  if (segment.source === 'system') return 'var(--speaker-system)'
+  return SPEAKER_COLOR_VARS[segment.speaker % SPEAKER_COLOR_VARS.length]
 }
 
 function formatSegmentTime(index: number, total: number, durationSeconds: number): string {
@@ -81,6 +88,34 @@ function parseStoredActionItems(json: string | null): ActionItem[] {
     }
   } catch { /* ignore */ }
   return []
+}
+
+function DetailSkeleton(): React.JSX.Element {
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
+      <header className="px-8 py-3 space-y-3">
+        <div className="skeleton h-8 w-16 rounded-md" />
+        <div className="space-y-2">
+          <div className="skeleton h-7 w-2/3 rounded-md" />
+          <div className="skeleton h-4 w-1/3 rounded" />
+        </div>
+      </header>
+      <div className="mx-8 border-t border-border" />
+      <div className="flex-1 px-8 py-6 space-y-5">
+        {Array.from({ length: 4 }, (_, i) => (
+          <div key={i} className="flex gap-4">
+            <div className="skeleton h-4 w-[44px] rounded shrink-0" />
+            <div className="skeleton h-2 w-2 rounded-full shrink-0 mt-1" />
+            <div className="flex-1 space-y-2">
+              <div className="skeleton h-3 w-20 rounded" />
+              <div className="skeleton h-4 w-full rounded" />
+              <div className="skeleton h-4 w-3/4 rounded" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.JSX.Element {
@@ -214,16 +249,12 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   }, [id, actionItemsLoading, m, setCurrentTranscript])
 
   if (loading) {
-    return (
-      <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
-        {m.detail.loading}
-      </div>
-    )
+    return <DetailSkeleton />
   }
 
   if (error || !currentTranscript) {
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+      <div className="flex h-full min-h-0 flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground page-enter">
         <p>{error || m.detail.notFound}</p>
         <Button variant="outline" size="sm" onClick={onBack}>{m.detail.back}</Button>
       </div>
@@ -233,7 +264,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   const isMeeting = currentTranscript.source_mode === 'meeting'
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
       <header className="px-8 py-3 space-y-2">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={onBack} className="gap-1.5">
@@ -244,10 +275,10 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
 
         <div className="flex items-start justify-between">
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-2xl italic text-foreground truncate">
+            <h1 className="font-display text-2xl text-foreground truncate">
               {currentTranscript.title}
             </h1>
-            <p className="mt-1 font-mono text-[12px] text-muted-foreground">
+            <p className="mt-1 font-mono tabular-nums text-[12px] text-muted-foreground">
               {formatRelativeDateTime(currentTranscript.created_at, locale)}
               <span className="mx-1.5 opacity-40">·</span>
               {formatDurationShort(currentTranscript.duration_seconds, locale)}
@@ -256,7 +287,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
             </p>
           </div>
 
-          {/* Primary action: Copy (most common read-mode action) */}
+          {/* Primary action: Copy */}
           <div className="flex items-center gap-1.5 shrink-0 ml-4">
             <Button
               variant="outline"
@@ -288,7 +319,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
               {moreMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-card border border-border py-1 rounded-md shadow-lg animate-[slideInUp_150ms_var(--ease-out-expo)]">
+                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-card border border-border py-1 rounded-md shadow-tinted-lg animate-[slideInUp_150ms_var(--ease-out-expo)]">
                     {isMeeting && (
                       <>
                         <button
@@ -341,121 +372,123 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
 
       {/* Content */}
       <div className="min-h-0 flex-1 overflow-auto px-8 py-6">
-        {/* AI error banner */}
-        {aiError && (
-          <div className="mb-5 border-l-2 border-destructive bg-[var(--color-danger-bg)] px-4 py-3 text-sm text-destructive">
-            {aiError}
-          </div>
-        )}
-
-        {/* Summary */}
-        {currentTranscript.summary && (
-          <div className="mb-6 border-l-2 border-primary bg-primary/5 px-5 py-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-primary">
-                <FileText className="h-3.5 w-3.5" />
-                {m.detail.summaryTitle}
-              </h3>
-              {currentTranscript.summary_ai_model && (
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {m.detail.aiGeneratedAt(currentTranscript.summary_ai_model)}
-                </span>
-              )}
+        <div className="max-w-3xl">
+          {/* AI error banner */}
+          {aiError && (
+            <div className="mb-5 border-l-2 border-destructive bg-[var(--color-danger-bg)] px-4 py-3 text-sm text-destructive rounded-r-md">
+              {aiError}
             </div>
-            <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
-              {currentTranscript.summary}
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Action items */}
-        {hasGeneratedActionItems && (
-          <div className="mb-6 border-l-2 border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-5 py-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-warning)]">
-                <CheckSquare className="h-3.5 w-3.5" />
-                {m.detail.actionItemsTitle}
-              </h3>
-              {currentTranscript.action_items_ai_model && (
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {m.detail.aiGeneratedAt(currentTranscript.action_items_ai_model)}
-                </span>
-              )}
-            </div>
-            {storedActionItems.length > 0 ? (
-              <ul className="space-y-2">
-                {storedActionItems.map((item, index) => (
-                  <li key={index} className="flex items-start gap-3 text-sm">
-                    <span className="font-mono text-[12px] text-[var(--color-warning)] font-medium shrink-0 pt-0.5 w-5 text-right">
-                      {index + 1}.
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <span className="text-foreground">{item.content}</span>
-                      {item.assignee && (
-                        <span className="ml-2 inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
-                          <User className="h-3 w-3" />
-                          {m.detail.assignee}: {item.assignee}
-                        </span>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">{m.detail.noActionItems}</p>
-            )}
-          </div>
-        )}
-
-        {/* Transcript segments — screenplay format */}
-        <div className="relative">
-          {/* Timeline rail */}
-          <div className="absolute left-[52px] top-0 bottom-0 w-px bg-border" />
-
-          <div className="space-y-0">
-            {currentTranscript.segments.map((segment, index) => (
-              <div
-                key={segment.id}
-                className="flex gap-4 py-3"
-                style={{
-                  animationName: 'staggerIn',
-                  animationDuration: '300ms',
-                  animationTimingFunction: 'var(--ease-out-expo)',
-                  animationDelay: `${Math.min(index * 30, 600)}ms`,
-                  animationFillMode: 'backwards'
-                }}
-              >
-                <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground">
-                  {formatSegmentTime(index, currentTranscript.segments.length, currentTranscript.duration_seconds)}
-                </span>
-
-                {/* Timeline dot */}
-                <div className="relative flex shrink-0 items-start pt-1.5">
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: getStoredSegmentColor(segment) }}
-                  />
-                </div>
-
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <p
-                    className="text-[12px] font-semibold tracking-wide uppercase"
-                    style={{ color: getStoredSegmentColor(segment) }}
-                  >
-                    {getStoredSegmentLabel(segment, {
-                      microphone: m.detail.microphoneLabel,
-                      system: m.detail.systemLabel,
-                      speakerLabel: m.detail.speakerLabel
-                    })}
-                  </p>
-                  <BilingualSegment
-                    pairs={toSentencePairsFromStored(segment)}
-                    originalText={segment.text}
-                    translatedText={segment.translated_text}
-                  />
-                </div>
+          {/* Summary */}
+          {currentTranscript.summary && (
+            <div className="mb-6 border-l-2 border-primary bg-primary/5 px-5 py-4 rounded-r-md">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-primary">
+                  <FileText className="h-3.5 w-3.5" />
+                  {m.detail.summaryTitle}
+                </h3>
+                {currentTranscript.summary_ai_model && (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {m.detail.aiGeneratedAt(currentTranscript.summary_ai_model)}
+                  </span>
+                )}
               </div>
-            ))}
+              <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                {currentTranscript.summary}
+              </div>
+            </div>
+          )}
+
+          {/* Action items */}
+          {hasGeneratedActionItems && (
+            <div className="mb-6 border-l-2 border-[var(--color-warning)] bg-[var(--color-warning-bg)] px-5 py-4 rounded-r-md">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold text-[var(--color-warning)]">
+                  <CheckSquare className="h-3.5 w-3.5" />
+                  {m.detail.actionItemsTitle}
+                </h3>
+                {currentTranscript.action_items_ai_model && (
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {m.detail.aiGeneratedAt(currentTranscript.action_items_ai_model)}
+                  </span>
+                )}
+              </div>
+              {storedActionItems.length > 0 ? (
+                <ul className="space-y-2">
+                  {storedActionItems.map((item, index) => (
+                    <li key={index} className="flex items-start gap-3 text-sm">
+                      <span className="font-mono tabular-nums text-[12px] text-[var(--color-warning)] font-medium shrink-0 pt-0.5 w-5 text-right">
+                        {index + 1}.
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="text-foreground">{item.content}</span>
+                        {item.assignee && (
+                          <span className="ml-2 inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
+                            <User className="h-3 w-3" />
+                            {m.detail.assignee}: {item.assignee}
+                          </span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-muted-foreground">{m.detail.noActionItems}</p>
+              )}
+            </div>
+          )}
+
+          {/* Transcript segments — timeline format */}
+          <div className="relative">
+            {/* Timeline rail */}
+            <div className="absolute left-[52px] top-0 bottom-0 w-px bg-border" />
+
+            <div className="space-y-0">
+              {currentTranscript.segments.map((segment, index) => (
+                <div
+                  key={segment.id}
+                  className="flex gap-4 py-3"
+                  style={{
+                    animationName: 'staggerIn',
+                    animationDuration: '300ms',
+                    animationTimingFunction: 'var(--ease-out-expo)',
+                    animationDelay: `${Math.min(index * 30, 600)}ms`,
+                    animationFillMode: 'backwards'
+                  }}
+                >
+                  <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
+                    {formatSegmentTime(index, currentTranscript.segments.length, currentTranscript.duration_seconds)}
+                  </span>
+
+                  {/* Timeline dot */}
+                  <div className="relative flex shrink-0 items-start pt-1.5">
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: getStoredSegmentColor(segment) }}
+                    />
+                  </div>
+
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p
+                      className="text-[12px] font-semibold tracking-wide uppercase"
+                      style={{ color: getStoredSegmentColor(segment) }}
+                    >
+                      {getStoredSegmentLabel(segment, {
+                        microphone: m.detail.microphoneLabel,
+                        system: m.detail.systemLabel,
+                        speakerLabel: m.detail.speakerLabel
+                      })}
+                    </p>
+                    <BilingualSegment
+                      pairs={toSentencePairsFromStored(segment)}
+                      originalText={segment.text}
+                      translatedText={segment.translated_text}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
