@@ -84,7 +84,7 @@ export function TranscriptHistory({
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       <header
         className="flex flex-col justify-end px-8 pb-2"
-        style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
+        style={{ WebkitAppRegion: 'drag', minHeight: 80 } as React.CSSProperties}
       >
         {/* Title row */}
         <div
