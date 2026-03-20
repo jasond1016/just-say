@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Headphones, Play, Settings, Square } from 'lucide-react'
+import { ArrowLeft, Headphones, Play, Square } from 'lucide-react'
 import type { SpeakerSegment } from '../../../shared/transcription-types'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
@@ -25,7 +25,6 @@ export interface MeetingSessionState {
 
 interface MeetingTranscriptionProps {
   state: MeetingSessionState
-  onOpenSettings?: () => void
   onStart: () => Promise<void>
   onStop: () => Promise<void>
   onReturnToWorkspace: () => void
@@ -73,7 +72,6 @@ function getSegmentColor(segment: SpeakerSegment): string {
 
 export function MeetingTranscription({
   state,
-  onOpenSettings,
   onStart,
   onStop,
   onReturnToWorkspace
@@ -154,11 +152,6 @@ export function MeetingTranscription({
               <span>{m.meeting.back}</span>
             </Button>
           )}
-
-          <Button variant="ghost" size="sm" onClick={onOpenSettings}>
-            <Settings className="h-4 w-4" strokeWidth={1.8} />
-            <span>{m.meeting.settings}</span>
-          </Button>
 
           {isTranscribing ? (
             <Button

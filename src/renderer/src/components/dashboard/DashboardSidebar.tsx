@@ -1,5 +1,5 @@
 import type { JSX } from 'react'
-import { Clock3, Headphones, Home, Mic } from 'lucide-react'
+import { Clock3, Headphones, Home, Mic, Settings } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { useI18n } from '@/i18n/useI18n'
@@ -9,6 +9,7 @@ export type DashboardView = 'ptt' | 'meeting' | 'history'
 interface DashboardSidebarProps {
   activeView: DashboardView
   onNavigate: (view: DashboardView) => void
+  onOpenSettings: () => void
   meetingActive?: boolean
 }
 
@@ -24,6 +25,7 @@ const navItems: Array<{
 export function DashboardSidebar({
   activeView,
   onNavigate,
+  onOpenSettings,
   meetingActive = false
 }: DashboardSidebarProps): JSX.Element {
   const { m } = useI18n()
@@ -44,7 +46,7 @@ export function DashboardSidebar({
         <Mic className="h-5 w-5 text-[var(--sidebar-active)]" />
       </div>
 
-      {/* Navigation — always unlocked */}
+      {/* Navigation */}
       <nav className="flex flex-1 flex-col items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         {navItems.map((item) => {
           const Icon = item.icon
@@ -66,23 +68,30 @@ export function DashboardSidebar({
                   : 'text-[var(--sidebar-muted)] hover:text-[var(--sidebar-fg)]'
               )}
             >
-              {/* Active indicator — left bar */}
               {isActive && (
                 <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--sidebar-active)]" />
               )}
-
-              {/* Meeting recording dot — when meeting is active but we're on another page */}
               {showMeetingDot && (
                 <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
               )}
-
               <Icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
             </button>
           )
         })}
       </nav>
 
-      <div className="h-9" />
+      {/* Settings — global, pinned to bottom */}
+      <div style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          title={m.settings.title}
+          aria-label={m.header.openSettingsAria}
+          className="flex h-10 w-10 items-center justify-center text-[var(--sidebar-muted)] hover:text-[var(--sidebar-fg)] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-active)]/40"
+        >
+          <Settings className="h-[18px] w-[18px]" strokeWidth={1.8} />
+        </button>
+      </div>
     </aside>
   )
 }

@@ -11,7 +11,6 @@ import { useI18n } from '@/i18n/useI18n'
 interface DashboardHomeProps {
   hotkey: string
   onNavigate: (view: 'ptt' | 'meeting' | 'history') => void
-  onOpenSettings: () => void
   onOpenTranscript: (id: string) => void
   meetingActive?: boolean
   meetingSeconds?: number
@@ -22,7 +21,6 @@ interface DashboardHomeProps {
 export function DashboardHome({
   hotkey,
   onNavigate,
-  onOpenSettings,
   onOpenTranscript,
   meetingActive = false,
   meetingSeconds = 0,
@@ -37,7 +35,6 @@ export function DashboardHome({
       <DashboardHeader
         title={m.header.homeTitle}
         subtitle={m.header.readyHint}
-        onOpenSettings={onOpenSettings}
       />
 
       {/* Meeting in background — persistent status bar */}

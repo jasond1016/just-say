@@ -362,6 +362,7 @@ function App(): React.JSX.Element {
             <DashboardSidebar
               activeView={sidebarActiveView}
               onNavigate={handleNavigate}
+              onOpenSettings={() => setSettingsOpen(true)}
               meetingActive={meetingActive}
             />
 
@@ -369,7 +370,6 @@ function App(): React.JSX.Element {
               <DashboardHome
                 hotkey={dashboardHotkey}
                 onNavigate={handleNavigate}
-                onOpenSettings={() => setSettingsOpen(true)}
                 onOpenTranscript={handleNavigateToDetail}
                 meetingActive={meetingActive}
                 meetingSeconds={meetingState.seconds}
@@ -393,7 +393,6 @@ function App(): React.JSX.Element {
             {currentView === 'meeting' && (
               <MeetingTranscription
                 state={meetingState}
-                onOpenSettings={() => setSettingsOpen(true)}
                 onStart={startMeetingSession}
                 onStop={stopMeetingSession}
                 onReturnToWorkspace={() => setCurrentView('ptt')}
