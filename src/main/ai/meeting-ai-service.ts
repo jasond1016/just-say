@@ -37,28 +37,35 @@ function resolveChatCompletionsUrl(endpoint: string): string {
   return `${normalized}/chat/completions`
 }
 
-function resolveEndpointAndKey(): { endpoint: string; apiKey: string; model: string } {
+function resolveEndpointAndKey(): {
+  endpoint: string
+  apiKey: string
+  model: string
+  timeoutMs: number
+} {
   const config = getConfig()
   const translation = config.recognition?.translation
   const ai = config.ai
 
   const endpoint = (ai?.endpoint || translation?.endpoint || 'https://api.openai.com/v1').trim()
   const model = (ai?.model || translation?.model || 'gpt-4o-mini').trim()
+  const timeoutMs =
+    typeof ai?.timeoutMs === 'number' && ai.timeoutMs > 0
+      ? ai.timeoutMs
+      : typeof translation?.timeoutMs === 'number' && translation.timeoutMs > 0
+        ? translation.timeoutMs
+        : 60_000
   const apiKey = getApiKey('openai') || config.recognition?.api?.apiKey || ''
 
   if (!apiKey) {
     throw new Error('Missing API key. Please configure a translation API key in Settings.')
   }
 
-  return { endpoint, apiKey, model }
+  return { endpoint, apiKey, model, timeoutMs }
 }
 
-async function callChatCompletion(
-  systemPrompt: string,
-  userPrompt: string,
-  timeoutMs = 60_000
-): Promise<string> {
-  const { endpoint, apiKey, model } = resolveEndpointAndKey()
+async function callChatCompletion(systemPrompt: string, userPrompt: string): Promise<string> {
+  const { endpoint, apiKey, model, timeoutMs } = resolveEndpointAndKey()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
 

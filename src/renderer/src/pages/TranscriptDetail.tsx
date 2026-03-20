@@ -157,6 +157,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
     () => parseStoredActionItems(currentTranscript?.action_items ?? null),
     [currentTranscript?.action_items]
   )
+  const hasGeneratedActionItems = currentTranscript?.action_items != null
 
   const handleCopy = useCallback(async () => {
     if (!fullText) return
@@ -208,8 +209,8 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
         return {
           ...prev,
           summary: result.summary,
-          ai_generated_at: result.generatedAt,
-          ai_model: result.model
+          summary_generated_at: result.generatedAt,
+          summary_ai_model: result.model
         }
       })
     } catch (err) {
@@ -231,8 +232,8 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
         return {
           ...prev,
           action_items: JSON.stringify(result.items),
-          ai_generated_at: result.generatedAt,
-          ai_model: result.model
+          action_items_generated_at: result.generatedAt,
+          action_items_ai_model: result.model
         }
       })
     } catch (err) {
@@ -317,14 +318,14 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
               >
                 {actionItemsLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
-                ) : storedActionItems.length > 0 ? (
+                ) : hasGeneratedActionItems ? (
                   <RefreshCw className="h-4 w-4" />
                 ) : (
                   <CheckSquare className="h-4 w-4" />
                 )}
                 {actionItemsLoading
                   ? m.detail.generating
-                  : storedActionItems.length > 0
+                  : hasGeneratedActionItems
                     ? m.detail.regenerate
                     : m.detail.generateActionItems}
               </Button>
@@ -388,9 +389,9 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
                 <FileText className="h-4 w-4" />
                 {m.detail.summaryTitle}
               </h3>
-              {currentTranscript.ai_model && (
+              {currentTranscript.summary_ai_model && (
                 <span className="text-xs text-muted-foreground">
-                  {m.detail.aiGeneratedAt(currentTranscript.ai_model)}
+                  {m.detail.aiGeneratedAt(currentTranscript.summary_ai_model)}
                 </span>
               )}
             </div>
@@ -401,37 +402,41 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
         )}
 
         {/* Action items card */}
-        {storedActionItems.length > 0 && (
+        {hasGeneratedActionItems && (
           <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50/50 p-4">
             <div className="mb-2 flex items-center justify-between">
               <h3 className="flex items-center gap-1.5 text-sm font-semibold text-amber-700">
                 <CheckSquare className="h-4 w-4" />
                 {m.detail.actionItemsTitle}
               </h3>
-              {currentTranscript.ai_model && (
+              {currentTranscript.action_items_ai_model && (
                 <span className="text-xs text-muted-foreground">
-                  {m.detail.aiGeneratedAt(currentTranscript.ai_model)}
+                  {m.detail.aiGeneratedAt(currentTranscript.action_items_ai_model)}
                 </span>
               )}
             </div>
-            <ul className="space-y-2">
-              {storedActionItems.map((item, index) => (
-                <li key={index} className="flex items-start gap-2 text-sm">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-amber-300 bg-white text-xs font-medium text-amber-600">
-                    {index + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <span className="text-foreground">{item.content}</span>
-                    {item.assignee && (
-                      <span className="ml-2 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
-                        <User className="h-3 w-3" />
-                        {item.assignee}
-                      </span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+            {storedActionItems.length > 0 ? (
+              <ul className="space-y-2">
+                {storedActionItems.map((item, index) => (
+                  <li key={index} className="flex items-start gap-2 text-sm">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-amber-300 bg-white text-xs font-medium text-amber-600">
+                      {index + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="text-foreground">{item.content}</span>
+                      {item.assignee && (
+                        <span className="ml-2 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                          <User className="h-3 w-3" />
+                          {m.detail.assignee}: {item.assignee}
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">{m.detail.noActionItems}</p>
+            )}
           </div>
         )}
 

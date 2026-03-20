@@ -313,7 +313,7 @@ export function updateTranscriptSummary(id: string, summary: string, model: stri
   const now = new Date().toISOString()
   const result = db
     .prepare(
-      'UPDATE transcripts SET summary = ?, ai_model = ?, ai_generated_at = ?, updated_at = ? WHERE id = ?'
+      'UPDATE transcripts SET summary = ?, summary_ai_model = ?, summary_generated_at = ?, updated_at = ? WHERE id = ?'
     )
     .run(summary, model, now, now, id)
   return result.changes > 0
@@ -329,7 +329,7 @@ export function updateTranscriptActionItems(
   const now = new Date().toISOString()
   const result = db
     .prepare(
-      'UPDATE transcripts SET action_items = ?, ai_model = ?, ai_generated_at = ?, updated_at = ? WHERE id = ?'
+      'UPDATE transcripts SET action_items = ?, action_items_ai_model = ?, action_items_generated_at = ?, updated_at = ? WHERE id = ?'
     )
     .run(actionItemsJson, model, now, now, id)
   return result.changes > 0
@@ -341,7 +341,7 @@ export function clearTranscriptAiContent(id: string): boolean {
   const now = new Date().toISOString()
   const result = db
     .prepare(
-      'UPDATE transcripts SET summary = NULL, action_items = NULL, ai_generated_at = NULL, ai_model = NULL, updated_at = ? WHERE id = ?'
+      'UPDATE transcripts SET summary = NULL, action_items = NULL, summary_generated_at = NULL, summary_ai_model = NULL, action_items_generated_at = NULL, action_items_ai_model = NULL, updated_at = ? WHERE id = ?'
     )
     .run(now, id)
   return result.changes > 0

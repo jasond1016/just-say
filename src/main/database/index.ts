@@ -30,7 +30,13 @@ export function initDatabase(): Database.Database {
       translation_enabled INTEGER DEFAULT 0,
       target_language TEXT,
       include_microphone INTEGER DEFAULT 0,
-      source_mode TEXT NOT NULL DEFAULT 'meeting'
+      source_mode TEXT NOT NULL DEFAULT 'meeting',
+      summary TEXT,
+      action_items TEXT,
+      summary_generated_at TEXT,
+      summary_ai_model TEXT,
+      action_items_generated_at TEXT,
+      action_items_ai_model TEXT
     );
 
     -- Speaker segments table
@@ -93,8 +99,10 @@ export function initDatabase(): Database.Database {
   for (const col of [
     'summary TEXT',
     'action_items TEXT',
-    'ai_generated_at TEXT',
-    'ai_model TEXT'
+    'summary_generated_at TEXT',
+    'summary_ai_model TEXT',
+    'action_items_generated_at TEXT',
+    'action_items_ai_model TEXT'
   ]) {
     try {
       db.exec(`ALTER TABLE transcripts ADD COLUMN ${col};`)

@@ -13,8 +13,10 @@ export interface Transcript {
   source_mode?: 'ptt' | 'meeting'
   summary: string | null
   action_items: string | null
-  ai_generated_at: string | null
-  ai_model: string | null
+  summary_generated_at: string | null
+  summary_ai_model: string | null
+  action_items_generated_at: string | null
+  action_items_ai_model: string | null
 }
 
 export interface TranscriptSegment {
