@@ -41,14 +41,18 @@ export function BilingualSegment({
 
         return (
           <div key={pairIndex} className="space-y-1">
-            <p className="whitespace-pre-wrap text-sm leading-[1.5]">
+            <p className="whitespace-pre-wrap text-[14px] leading-[1.65] text-foreground">
               <span>{pair.original}</span>
-              {shouldShowPreview && <span className="text-muted-foreground">{previewText}</span>}
+              {shouldShowPreview && (
+                <span className="text-muted-foreground/60">{previewText}</span>
+              )}
             </p>
             {translated && (
-              <div className="flex items-start gap-2 rounded-md bg-emerald-50 px-3 py-2 text-emerald-600">
-                <Languages className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <p className="whitespace-pre-wrap text-sm leading-[1.5]">{translated}</p>
+              <div className="flex items-start gap-2 border-l-2 border-[var(--color-success)]/40 pl-3 py-1">
+                <Languages className="mt-0.5 h-3 w-3 shrink-0 text-[var(--color-success)]" />
+                <p className="whitespace-pre-wrap text-[13px] leading-[1.65] text-[var(--color-success)]">
+                  {translated}
+                </p>
               </div>
             )}
           </div>

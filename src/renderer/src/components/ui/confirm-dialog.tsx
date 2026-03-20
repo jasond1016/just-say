@@ -50,16 +50,12 @@ export function ConfirmDialog({
         return
       }
 
-      if (event.key !== 'Tab' || !dialogRef.current) {
-        return
-      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
 
       const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
       )
-      if (focusable.length === 0) {
-        return
-      }
+      if (focusable.length === 0) return
 
       const first = focusable[0]
       const last = focusable[focusable.length - 1]
@@ -83,9 +79,7 @@ export function ConfirmDialog({
     }
   }, [confirming, onClose, open])
 
-  if (!open) {
-    return null
-  }
+  if (!open) return null
 
   const handleConfirm = async (): Promise<void> => {
     if (confirming) return
@@ -103,12 +97,8 @@ export function ConfirmDialog({
     <div className="fixed inset-0 z-[80] flex items-center justify-center">
       <div
         aria-hidden="true"
-        className="animate-[fadeIn_140ms_ease-out] absolute inset-0 bg-black/40"
-        onClick={() => {
-          if (!confirming) {
-            onClose()
-          }
-        }}
+        className="absolute inset-0 bg-foreground/20 animate-[fadeIn_120ms_ease-out]"
+        onClick={() => { if (!confirming) onClose() }}
       />
 
       <section
@@ -117,35 +107,34 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
         aria-describedby="confirm-dialog-description"
-        className="animate-[fadeInUp_180ms_var(--ease-out-expo)] relative z-10 w-[460px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border bg-background shadow-lg"
+        className="relative z-10 w-[440px] max-w-[calc(100vw-2rem)] bg-card border border-border animate-[slideInUp_200ms_var(--ease-out-expo)]"
       >
-        <header className="flex items-center justify-between border-b px-5 py-4">
-          <h3 id="confirm-dialog-title" className="text-base font-semibold">
+        <header className="flex items-center justify-between border-b border-border px-5 py-4">
+          <h3 id="confirm-dialog-title" className="text-[15px] font-semibold">
             {title}
           </h3>
           <button
             type="button"
             onClick={onClose}
             disabled={confirming}
-            className="inline-flex h-[26px] w-[26px] items-center justify-center rounded-[4px] text-muted-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/40 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             aria-label={closeAriaLabel}
           >
-            <X className="h-[18px] w-[18px]" />
+            <X className="h-4 w-4" />
           </button>
         </header>
 
         <div className="px-5 py-4">
-          <p id="confirm-dialog-description" className="text-sm text-foreground">
+          <p id="confirm-dialog-description" className="text-sm text-foreground leading-relaxed">
             {description}
           </p>
         </div>
 
-        <footer className="flex justify-end gap-2 border-t px-5 py-3">
+        <footer className="flex justify-end gap-2 border-t border-border px-5 py-3">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-9 px-4 text-sm"
             onClick={onClose}
             disabled={confirming}
           >
@@ -153,11 +142,9 @@ export function ConfirmDialog({
           </Button>
           <Button
             type="button"
+            variant="danger"
             size="sm"
-            className="h-9 bg-red-500 px-4 text-sm text-white hover:bg-red-600"
-            onClick={() => {
-              void handleConfirm()
-            }}
+            onClick={() => { void handleConfirm() }}
             disabled={confirming}
           >
             {confirmLabel}

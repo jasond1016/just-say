@@ -60,9 +60,7 @@ function mergeSpeakerSegments(
   const previousByIdentity = new Map<string, SpeakerSegment>()
   const previousIdentityCounts = new Map<string, number>()
   for (const segment of prevSegments) {
-    if (!segment.text.trim()) {
-      continue
-    }
+    if (!segment.text.trim()) continue
     const baseIdentity =
       typeof segment.timestamp === 'number'
         ? `timestamp:${segment.timestamp}`
@@ -76,9 +74,7 @@ function mergeSpeakerSegments(
   const incomingIdentityCounts = new Map<string, number>()
   for (let i = 0; i < incoming.length; i += 1) {
     const incomingSegment = incoming[i]
-    if (!incomingSegment.text.trim()) {
-      continue
-    }
+    if (!incomingSegment.text.trim()) continue
 
     const baseIdentity =
       typeof incomingSegment.timestamp === 'number'
@@ -117,9 +113,7 @@ function App(): React.JSX.Element {
       const cfg = (await window.api.getConfig()) as AppConfig
       setConfig(cfg)
       setAppLocale(resolveLocale(cfg.general?.language))
-      if (cfg.ui?.theme) {
-        setTheme(cfg.ui.theme)
-      }
+      if (cfg.ui?.theme) setTheme(cfg.ui.theme)
     } catch (err) {
       console.error('Failed to load config:', err)
     }
@@ -158,8 +152,7 @@ function App(): React.JSX.Element {
             nextSegments[nextSegments.length - 1] = {
               ...lastSegment,
               ...segment.currentSpeakerSegment,
-              timestamp:
-                lastSegment.timestamp ?? segment.currentSpeakerSegment.timestamp ?? Date.now()
+              timestamp: lastSegment.timestamp ?? segment.currentSpeakerSegment.timestamp ?? Date.now()
             }
           } else {
             nextSegments.push({
@@ -182,20 +175,12 @@ function App(): React.JSX.Element {
             : null
         nextCurrentSegment = {
           ...segment.currentSpeakerSegment,
-          wordTimings:
-            segment.currentSpeakerSegment.wordTimings ?? segment.currentWordTimings ?? undefined,
-          timestamp:
-            previousCurrentSegment?.timestamp ??
-            segment.currentSpeakerSegment.timestamp ??
-            Date.now()
+          wordTimings: segment.currentSpeakerSegment.wordTimings ?? segment.currentWordTimings ?? undefined,
+          timestamp: previousCurrentSegment?.timestamp ?? segment.currentSpeakerSegment.timestamp ?? Date.now()
         }
       }
 
-      return {
-        ...prev,
-        segments: nextSegments,
-        currentSegment: nextCurrentSegment
-      }
+      return { ...prev, segments: nextSegments, currentSegment: nextCurrentSegment }
     })
   }, [])
 
@@ -223,21 +208,13 @@ function App(): React.JSX.Element {
   )
 
   const runMeetingPreconnect = useCallback(async (): Promise<void> => {
-    if (isMeetingActiveStatus(meetingStateRef.current.status)) {
-      return
-    }
+    if (isMeetingActiveStatus(meetingStateRef.current.status)) return
 
-    setMeetingState((prev) => ({
-      ...prev,
-      isPreconnecting: true,
-      preconnectFailed: false
-    }))
+    setMeetingState((prev) => ({ ...prev, isPreconnecting: true, preconnectFailed: false }))
 
     try {
       const ok = await window.api.preconnectMeetingTranscription()
-      if (!ok) {
-        throw new Error('Preconnect unavailable')
-      }
+      if (!ok) throw new Error('Preconnect unavailable')
       setMeetingState((prev) => ({ ...prev, isPreconnecting: false, preconnectFailed: false }))
     } catch {
       setMeetingState((prev) => ({ ...prev, isPreconnecting: false, preconnectFailed: true }))
@@ -268,24 +245,13 @@ function App(): React.JSX.Element {
         targetLanguage: translationEnabled ? targetLanguage : undefined
       })
       await startSystemAudioCapture(null)
-      if (includeMicrophone) {
-        await startMicrophoneCapture()
-      }
-      setMeetingState((prev) => ({
-        ...prev,
-        status: 'transcribing',
-        seconds: 0,
-        startedAt: Date.now()
-      }))
+      if (includeMicrophone) await startMicrophoneCapture()
+      setMeetingState((prev) => ({ ...prev, status: 'transcribing', seconds: 0, startedAt: Date.now() }))
       startMeetingSecondsTimer()
     } catch (err) {
       stopSystemAudioCapture()
       stopMicrophoneCapture()
-      try {
-        await window.api.stopMeetingTranscription()
-      } catch {
-        // Ignore cleanup failures during startup rollback.
-      }
+      try { await window.api.stopMeetingTranscription() } catch { /* ignore */ }
       stopMeetingSecondsTimer()
       setMeetingState((prev) => ({
         ...prev,
@@ -327,22 +293,15 @@ function App(): React.JSX.Element {
     setWorkspaceView('ptt')
   }, [])
 
-  // Load config on mount
-  useEffect(() => {
-    void loadConfig()
-  }, [loadConfig])
+  useEffect(() => { void loadConfig() }, [loadConfig])
 
-  // Apply theme based on preference
   const applyTheme = useCallback((themeOption: ThemeOption) => {
     let effectiveTheme: 'light' | 'dark'
-
     if (themeOption === 'system') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-      effectiveTheme = prefersDark ? 'dark' : 'light'
+      effectiveTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
     } else {
       effectiveTheme = themeOption
     }
-
     document.documentElement.classList.toggle('dark', effectiveTheme === 'dark')
     if (effectiveTheme === 'light') {
       document.documentElement.setAttribute('data-theme', 'light')
@@ -351,18 +310,11 @@ function App(): React.JSX.Element {
     }
   }, [])
 
-  useEffect(() => {
-    applyTheme(theme)
-  }, [theme, applyTheme])
+  useEffect(() => { applyTheme(theme) }, [theme, applyTheme])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    const handleChange = (): void => {
-      if (theme === 'system') {
-        applyTheme('system')
-      }
-    }
-
+    const handleChange = (): void => { if (theme === 'system') applyTheme('system') }
     mediaQuery.addEventListener('change', handleChange)
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [theme, applyTheme])
@@ -370,7 +322,6 @@ function App(): React.JSX.Element {
   useEffect(() => {
     window.api.onMeetingTranscript(handleMeetingTranscript)
     window.api.onMeetingStatus(handleMeetingStatus)
-
     return () => {
       window.api.removeAllListeners('meeting-transcript')
       window.api.removeAllListeners('meeting-status')
@@ -379,9 +330,7 @@ function App(): React.JSX.Element {
   }, [handleMeetingStatus, handleMeetingTranscript, stopMeetingSecondsTimer])
 
   useEffect(() => {
-    if (appView === 'meeting-session') {
-      void runMeetingPreconnect()
-    }
+    if (appView === 'meeting-session') void runMeetingPreconnect()
   }, [appView, runMeetingPreconnect])
 
   useEffect(() => {
@@ -397,14 +346,10 @@ function App(): React.JSX.Element {
           }))
         }
       })
-      .catch((err) => {
-        console.warn('Failed to read meeting runtime state:', err)
-      })
+      .catch((err) => { console.warn('Failed to read meeting runtime state:', err) })
   }, [])
 
-  const handleThemeChange = (newTheme: ThemeOption): void => {
-    setTheme(newTheme)
-  }
+  const handleThemeChange = (newTheme: ThemeOption): void => { setTheme(newTheme) }
 
   const hotkey = getTriggerKeyLabel(config?.hotkey?.triggerKey || DEFAULT_TRIGGER_KEY)
   const dashboardHotkey = hotkey === 'Right Ctrl' ? 'R Ctrl' : hotkey
@@ -416,11 +361,7 @@ function App(): React.JSX.Element {
         setDashboardSettingsOpen(false)
         return
       }
-
-      if (appView === 'meeting-session' && isMeetingActiveStatus(meetingStateRef.current.status)) {
-        return
-      }
-
+      if (appView === 'meeting-session' && isMeetingActiveStatus(meetingStateRef.current.status)) return
       setAppView('workspace')
       setSelectedTranscriptId(null)
       setDashboardSettingsOpen(false)
@@ -452,45 +393,43 @@ function App(): React.JSX.Element {
     <I18nProvider locale={appLocale}>
       <>
         <div className="h-full w-full bg-background">
-          <div className="mx-auto h-full w-full max-w-[1200px] overflow-hidden bg-background">
-            <div className="flex h-full w-full">
-              <DashboardSidebar
-                activeView={sidebarActiveView}
+          <div className="flex h-full w-full">
+            <DashboardSidebar
+              activeView={sidebarActiveView}
+              onNavigate={handleDashboardNavigate}
+              meetingSessionLocked={appView === 'meeting-session'}
+            />
+
+            {appView === 'workspace' && workspaceView === 'ptt' && (
+              <DashboardHome
+                hotkey={dashboardHotkey}
                 onNavigate={handleDashboardNavigate}
-                meetingSessionLocked={appView === 'meeting-session'}
+                onOpenSettings={() => setDashboardSettingsOpen(true)}
+                onOpenTranscript={handleNavigateToDetail}
               />
+            )}
 
-              {appView === 'workspace' && workspaceView === 'ptt' && (
-                <DashboardHome
-                  hotkey={dashboardHotkey}
-                  onNavigate={handleDashboardNavigate}
-                  onOpenSettings={() => setDashboardSettingsOpen(true)}
-                  onOpenTranscript={handleNavigateToDetail}
-                />
-              )}
+            {appView === 'workspace' && workspaceView === 'history' && (
+              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+            )}
 
-              {appView === 'workspace' && workspaceView === 'history' && (
-                <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
-              )}
+            {appView === 'workspace' && workspaceView === 'detail' && selectedTranscriptId && (
+              <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
+            )}
 
-              {appView === 'workspace' && workspaceView === 'detail' && selectedTranscriptId && (
-                <TranscriptDetail id={selectedTranscriptId} onBack={handleBackFromDetail} />
-              )}
+            {appView === 'workspace' && workspaceView === 'detail' && !selectedTranscriptId && (
+              <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
+            )}
 
-              {appView === 'workspace' && workspaceView === 'detail' && !selectedTranscriptId && (
-                <TranscriptHistory onNavigateToDetail={handleNavigateToDetail} />
-              )}
-
-              {appView === 'meeting-session' && (
-                <MeetingTranscription
-                  state={meetingState}
-                  onOpenSettings={() => setDashboardSettingsOpen(true)}
-                  onStart={startMeetingSession}
-                  onStopAndReturn={stopAndReturnToWorkspace}
-                  onReturnToWorkspace={returnToWorkspace}
-                />
-              )}
-            </div>
+            {appView === 'meeting-session' && (
+              <MeetingTranscription
+                state={meetingState}
+                onOpenSettings={() => setDashboardSettingsOpen(true)}
+                onStart={startMeetingSession}
+                onStopAndReturn={stopAndReturnToWorkspace}
+                onReturnToWorkspace={returnToWorkspace}
+              />
+            )}
           </div>
         </div>
 

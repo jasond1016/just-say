@@ -1,5 +1,5 @@
-import type { ComponentType, JSX } from 'react'
-import { Clock3, Headphones, Hexagon, Home } from 'lucide-react'
+import type { JSX } from 'react'
+import { Clock3, Headphones, Home, Mic } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import { useI18n } from '@/i18n/useI18n'
@@ -12,87 +12,76 @@ interface DashboardSidebarProps {
   meetingSessionLocked?: boolean
 }
 
+const navItems: Array<{
+  id: DashboardView
+  icon: typeof Home
+}> = [
+  { id: 'ptt', icon: Home },
+  { id: 'meeting', icon: Headphones },
+  { id: 'history', icon: Clock3 }
+]
+
 export function DashboardSidebar({
   activeView,
   onNavigate,
   meetingSessionLocked = false
 }: DashboardSidebarProps): JSX.Element {
   const { m } = useI18n()
-  const navItems: Array<{
-    id: DashboardView
-    label: string
-    icon: ComponentType<{ className?: string }>
-  }> = [
-    { id: 'ptt', label: m.sidebar.navHome, icon: Home },
-    { id: 'meeting', label: m.sidebar.navMeeting, icon: Headphones },
-    { id: 'history', label: m.sidebar.navHistory, icon: Clock3 }
-  ]
 
-  if (meetingSessionLocked) {
-    return (
-      <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-2">
-        <div className="flex items-center gap-2 rounded-md p-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#7C3AED] text-white">
-            <Hexagon className="h-4 w-4" />
-          </div>
-          <span className="text-sidebar-foreground text-sm font-semibold">{m.common.appName}</span>
-        </div>
-
-        <div className="mt-4 px-2">
-          <span className="text-muted-foreground text-xs font-medium tracking-wide">
-            {m.sidebar.sectionSession}
-          </span>
-        </div>
-
-        <nav className="mt-2 flex flex-col gap-0.5">
-          <div className="text-sidebar-foreground bg-sidebar-accent flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium">
-            <Headphones className="h-4 w-4" />
-            <span>{m.sidebar.meetingInProgress}</span>
-          </div>
-          <p className="text-muted-foreground px-2 pt-2 text-xs leading-5">
-            {m.sidebar.meetingLockedHint}
-          </p>
-        </nav>
-      </aside>
-    )
+  const labelMap: Record<DashboardView, string> = {
+    ptt: m.sidebar.navHome,
+    meeting: m.sidebar.navMeeting,
+    history: m.sidebar.navHistory
   }
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-2">
-      <div className="flex items-center gap-2 rounded-md p-2">
-        <div className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[#7C3AED] text-white">
-          <Hexagon className="h-4 w-4" />
-        </div>
-        <span className="text-sidebar-foreground text-sm font-semibold">{m.common.appName}</span>
+    <aside
+      className="flex h-full w-16 shrink-0 flex-col items-center bg-[var(--sidebar-bg)] py-5"
+      style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+    >
+      {/* Logo mark */}
+      <div className="mb-8 flex h-9 w-9 items-center justify-center" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <Mic className="h-5 w-5 text-[var(--sidebar-active)]" />
       </div>
 
-      <div className="mt-4 px-2">
-        <span className="text-muted-foreground text-xs font-medium tracking-wide">
-          {m.sidebar.sectionNavigation}
-        </span>
-      </div>
-
-      <nav className="mt-2 flex flex-col gap-0.5">
+      {/* Navigation */}
+      <nav className="flex flex-1 flex-col items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
         {navItems.map((item) => {
           const Icon = item.icon
           const isActive = activeView === item.id
+          const isLocked = meetingSessionLocked && item.id !== 'meeting'
 
           return (
             <button
               key={item.id}
               type="button"
-              onClick={() => onNavigate(item.id)}
+              onClick={() => {
+                if (!isLocked) onNavigate(item.id)
+              }}
+              disabled={isLocked}
+              title={labelMap[item.id]}
+              aria-label={labelMap[item.id]}
               className={cn(
-                'text-sidebar-foreground flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/35',
-                isActive ? 'bg-sidebar-accent' : 'hover:bg-sidebar-accent/60'
+                'group relative flex h-10 w-10 items-center justify-center transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sidebar-active)]/40',
+                'disabled:opacity-30 disabled:cursor-not-allowed',
+                isActive
+                  ? 'text-[var(--sidebar-active)]'
+                  : 'text-[var(--sidebar-muted)] hover:text-[var(--sidebar-fg)]'
               )}
             >
-              <Icon className="h-4 w-4" />
-              <span>{item.label}</span>
+              {/* Active indicator — left bar */}
+              {isActive && (
+                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--sidebar-active)]" />
+              )}
+              <Icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2.2 : 1.8} />
             </button>
           )
         })}
       </nav>
+
+      {/* Bottom spacer — keeps nav vertically centered */}
+      <div className="h-9" />
     </aside>
   )
 }
