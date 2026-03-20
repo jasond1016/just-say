@@ -96,7 +96,17 @@ export const zhCN: typeof enUS = {
     export: '导出',
     delete: '删除',
     deleteDialogTitle: '删除转录',
-    deleteConfirm: '删除此转录？此操作不可撤销。'
+    deleteConfirm: '删除此转录？此操作不可撤销。',
+    generateSummary: '摘要',
+    generateActionItems: '待办',
+    generating: '生成中...',
+    regenerate: '重新生成',
+    summaryTitle: '会议摘要',
+    actionItemsTitle: '会议待办',
+    noActionItems: '本次会议未发现待办事项。',
+    aiGeneratedAt: (model: string): string => `由 ${model} 生成`,
+    aiError: 'AI 生成失败，请检查 API Key 后重试。',
+    assignee: '负责人'
   },
   settings: {
     modalDescription: '配置识别、外观和应用行为。',

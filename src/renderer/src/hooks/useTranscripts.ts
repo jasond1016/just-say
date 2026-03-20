@@ -11,6 +11,10 @@ export interface Transcript {
   target_language: string | null
   include_microphone: 0 | 1
   source_mode?: 'ptt' | 'meeting'
+  summary: string | null
+  action_items: string | null
+  ai_generated_at: string | null
+  ai_model: string | null
 }
 
 export interface TranscriptSegment {

@@ -228,6 +228,19 @@ const api = {
   exportTranscript: (id: string): Promise<string | null> =>
     ipcRenderer.invoke('export-transcript', id),
 
+  generateMeetingSummary: (
+    id: string
+  ): Promise<{ summary: string; generatedAt: string; model: string }> =>
+    ipcRenderer.invoke('generate-meeting-summary', id),
+
+  generateMeetingActionItems: (
+    id: string
+  ): Promise<{
+    items: Array<{ content: string; assignee?: string }>
+    generatedAt: string
+    model: string
+  }> => ipcRenderer.invoke('generate-meeting-action-items', id),
+
   getHomeStats: (): Promise<{
     todayPttCount: number
     todayChars: number

@@ -89,6 +89,20 @@ export function initDatabase(): Database.Database {
     // Ignore duplicate-column errors for already migrated databases.
   }
 
+  // AI summary & action items columns
+  for (const col of [
+    'summary TEXT',
+    'action_items TEXT',
+    'ai_generated_at TEXT',
+    'ai_model TEXT'
+  ]) {
+    try {
+      db.exec(`ALTER TABLE transcripts ADD COLUMN ${col};`)
+    } catch {
+      // Ignore duplicate-column errors for already migrated databases.
+    }
+  }
+
   db.exec(`
     UPDATE transcripts
     SET source_mode = CASE

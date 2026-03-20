@@ -24,7 +24,9 @@ import {
   searchTranscripts,
   updateTranscript,
   deleteTranscript,
-  exportTranscript
+  exportTranscript,
+  updateTranscriptSummary,
+  updateTranscriptActionItems
 } from './database/transcriptStore'
 import { getHomeStats, recordUsageEvent } from './database/statsStore'
 import { WebAudioRecorder } from './audio/web-recorder'
@@ -39,6 +41,7 @@ import { StreamingSonioxConfig } from './recognition/streaming-soniox'
 import { StreamingLocalConfig } from './recognition/streaming-local'
 import { TranslationService } from './translation/service'
 import { processPttRecognitionResult } from './ptt/postProcess'
+import { generateSummary, generateActionItems } from './ai/meeting-ai-service'
 
 // Window references
 let mainWindow: BrowserWindow | null = null
@@ -1247,6 +1250,36 @@ ipcMain.handle('delete-transcript', (_event, id: string) => {
 
 ipcMain.handle('export-transcript', (_event, id: string) => {
   return exportTranscript(id)
+})
+
+ipcMain.handle('generate-meeting-summary', async (_event, id: string) => {
+  const transcript = getTranscriptWithSegments(id)
+  if (!transcript) {
+    throw new Error('Transcript not found')
+  }
+  const segments = transcript.segments.map((seg) => ({
+    speaker: seg.speaker,
+    source: seg.source,
+    text: seg.text
+  }))
+  const result = await generateSummary(segments)
+  updateTranscriptSummary(id, result.summary, result.model)
+  return result
+})
+
+ipcMain.handle('generate-meeting-action-items', async (_event, id: string) => {
+  const transcript = getTranscriptWithSegments(id)
+  if (!transcript) {
+    throw new Error('Transcript not found')
+  }
+  const segments = transcript.segments.map((seg) => ({
+    speaker: seg.speaker,
+    source: seg.source,
+    text: seg.text
+  }))
+  const result = await generateActionItems(segments)
+  updateTranscriptActionItems(id, JSON.stringify(result.items), result.model)
+  return result
 })
 
 ipcMain.handle('get-home-stats', () => {

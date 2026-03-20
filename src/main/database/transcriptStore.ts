@@ -306,3 +306,43 @@ function formatDateTime(date: Date): string {
   const minutes = date.getMinutes().toString().padStart(2, '0')
   return `${year}-${month}-${day} ${hours}:${minutes}`
 }
+
+// Update AI-generated summary
+export function updateTranscriptSummary(id: string, summary: string, model: string): boolean {
+  const db = getDatabase()
+  const now = new Date().toISOString()
+  const result = db
+    .prepare(
+      'UPDATE transcripts SET summary = ?, ai_model = ?, ai_generated_at = ?, updated_at = ? WHERE id = ?'
+    )
+    .run(summary, model, now, now, id)
+  return result.changes > 0
+}
+
+// Update AI-generated action items (stored as JSON string)
+export function updateTranscriptActionItems(
+  id: string,
+  actionItemsJson: string,
+  model: string
+): boolean {
+  const db = getDatabase()
+  const now = new Date().toISOString()
+  const result = db
+    .prepare(
+      'UPDATE transcripts SET action_items = ?, ai_model = ?, ai_generated_at = ?, updated_at = ? WHERE id = ?'
+    )
+    .run(actionItemsJson, model, now, now, id)
+  return result.changes > 0
+}
+
+// Clear AI-generated content for a transcript
+export function clearTranscriptAiContent(id: string): boolean {
+  const db = getDatabase()
+  const now = new Date().toISOString()
+  const result = db
+    .prepare(
+      'UPDATE transcripts SET summary = NULL, action_items = NULL, ai_generated_at = NULL, ai_model = NULL, updated_at = ? WHERE id = ?'
+    )
+    .run(now, id)
+  return result.changes > 0
+}

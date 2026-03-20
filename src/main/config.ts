@@ -116,6 +116,11 @@ export interface AppConfig {
     indicatorOpacity?: number
     soundFeedback?: boolean
   }
+  ai?: {
+    endpoint?: string
+    model?: string
+    timeoutMs?: number
+  }
 }
 
 const defaultConfig: AppConfig = {

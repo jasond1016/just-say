@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Copy, Download, Trash2 } from 'lucide-react'
+import {
+  ArrowLeft,
+  CheckSquare,
+  Copy,
+  Download,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  User
+} from 'lucide-react'
 
 import { BilingualSegment } from '@/components/transcript/BilingualSegment'
 import { toSentencePairsFromStored } from '@/lib/transcript-segmentation'
@@ -12,6 +22,11 @@ import { useI18n } from '@/i18n/useI18n'
 interface TranscriptDetailProps {
   id: string
   onBack: () => void
+}
+
+interface ActionItem {
+  content: string
+  assignee?: string
 }
 
 const speakerColors = ['#7C3AED', '#0EA5E9', '#16A34A', '#F97316', '#E11D48', '#2563EB']
@@ -56,12 +71,46 @@ function formatSegmentTime(index: number, total: number, durationSeconds: number
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+function parseStoredActionItems(json: string | null): ActionItem[] {
+  if (!json) return []
+  try {
+    const parsed = JSON.parse(json)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item: unknown) => {
+          if (typeof item === 'object' && item !== null) {
+            const obj = item as Record<string, unknown>
+            return {
+              content: String(obj.content || ''),
+              assignee: obj.assignee ? String(obj.assignee) : undefined
+            }
+          }
+          return { content: String(item) }
+        })
+        .filter((item) => item.content.trim().length > 0)
+    }
+  } catch {
+    // ignore
+  }
+  return []
+}
+
 export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.JSX.Element {
   const { m, locale } = useI18n()
-  const { currentTranscript, loading, error, getTranscript, deleteTranscript, exportTranscript } =
-    useTranscripts()
+  const {
+    currentTranscript,
+    loading,
+    error,
+    getTranscript,
+    deleteTranscript,
+    exportTranscript,
+    setCurrentTranscript
+  } = useTranscripts()
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [summaryLoading, setSummaryLoading] = useState(false)
+  const [actionItemsLoading, setActionItemsLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -104,6 +153,11 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
     ).size
   }, [currentTranscript])
 
+  const storedActionItems = useMemo(
+    () => parseStoredActionItems(currentTranscript?.action_items ?? null),
+    [currentTranscript?.action_items]
+  )
+
   const handleCopy = useCallback(async () => {
     if (!fullText) return
 
@@ -143,6 +197,52 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
     await exportTranscript(id)
   }, [exportTranscript, id])
 
+  const handleGenerateSummary = useCallback(async () => {
+    if (summaryLoading) return
+    setSummaryLoading(true)
+    setAiError(null)
+    try {
+      const result = await window.api.generateMeetingSummary(id)
+      setCurrentTranscript((prev) => {
+        if (!prev || prev.id !== id) return prev
+        return {
+          ...prev,
+          summary: result.summary,
+          ai_generated_at: result.generatedAt,
+          ai_model: result.model
+        }
+      })
+    } catch (err) {
+      console.error('Failed to generate summary:', err)
+      setAiError(m.detail.aiError)
+    } finally {
+      setSummaryLoading(false)
+    }
+  }, [id, summaryLoading, m, setCurrentTranscript])
+
+  const handleGenerateActionItems = useCallback(async () => {
+    if (actionItemsLoading) return
+    setActionItemsLoading(true)
+    setAiError(null)
+    try {
+      const result = await window.api.generateMeetingActionItems(id)
+      setCurrentTranscript((prev) => {
+        if (!prev || prev.id !== id) return prev
+        return {
+          ...prev,
+          action_items: JSON.stringify(result.items),
+          ai_generated_at: result.generatedAt,
+          ai_model: result.model
+        }
+      })
+    } catch (err) {
+      console.error('Failed to generate action items:', err)
+      setAiError(m.detail.aiError)
+    } finally {
+      setActionItemsLoading(false)
+    }
+  }, [id, actionItemsLoading, m, setCurrentTranscript])
+
   if (loading) {
     return (
       <div className="flex h-full min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
@@ -159,6 +259,8 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
       </div>
     )
   }
+
+  const isMeeting = currentTranscript.source_mode === 'meeting'
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
@@ -184,6 +286,50 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
         </div>
 
         <div className="flex items-center gap-2">
+          {isMeeting && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                onClick={() => void handleGenerateSummary()}
+                disabled={summaryLoading}
+              >
+                {summaryLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : currentTranscript.summary ? (
+                  <RefreshCw className="h-4 w-4" />
+                ) : (
+                  <FileText className="h-4 w-4" />
+                )}
+                {summaryLoading
+                  ? m.detail.generating
+                  : currentTranscript.summary
+                    ? m.detail.regenerate
+                    : m.detail.generateSummary}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 px-4 text-sm font-medium shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                onClick={() => void handleGenerateActionItems()}
+                disabled={actionItemsLoading}
+              >
+                {actionItemsLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : storedActionItems.length > 0 ? (
+                  <RefreshCw className="h-4 w-4" />
+                ) : (
+                  <CheckSquare className="h-4 w-4" />
+                )}
+                {actionItemsLoading
+                  ? m.detail.generating
+                  : storedActionItems.length > 0
+                    ? m.detail.regenerate
+                    : m.detail.generateActionItems}
+              </Button>
+            </>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -227,6 +373,69 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+        {/* AI error banner */}
+        {aiError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            {aiError}
+          </div>
+        )}
+
+        {/* Summary card */}
+        {currentTranscript.summary && (
+          <div className="mb-5 rounded-lg border border-violet-200 bg-violet-50/50 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-violet-700">
+                <FileText className="h-4 w-4" />
+                {m.detail.summaryTitle}
+              </h3>
+              {currentTranscript.ai_model && (
+                <span className="text-xs text-muted-foreground">
+                  {m.detail.aiGeneratedAt(currentTranscript.ai_model)}
+                </span>
+              )}
+            </div>
+            <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+              {currentTranscript.summary}
+            </div>
+          </div>
+        )}
+
+        {/* Action items card */}
+        {storedActionItems.length > 0 && (
+          <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50/50 p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-amber-700">
+                <CheckSquare className="h-4 w-4" />
+                {m.detail.actionItemsTitle}
+              </h3>
+              {currentTranscript.ai_model && (
+                <span className="text-xs text-muted-foreground">
+                  {m.detail.aiGeneratedAt(currentTranscript.ai_model)}
+                </span>
+              )}
+            </div>
+            <ul className="space-y-2">
+              {storedActionItems.map((item, index) => (
+                <li key={index} className="flex items-start gap-2 text-sm">
+                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-amber-300 bg-white text-xs font-medium text-amber-600">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-foreground">{item.content}</span>
+                    {item.assignee && (
+                      <span className="ml-2 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">
+                        <User className="h-3 w-3" />
+                        {item.assignee}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Transcript segments */}
         <div className="space-y-5">
           {currentTranscript.segments.map((segment, index) => (
             <div key={segment.id} className="flex gap-3">

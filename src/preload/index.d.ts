@@ -143,6 +143,16 @@ interface JustSayAPI {
 
   exportTranscript: (id: string) => Promise<string | null>
 
+  generateMeetingSummary: (
+    id: string
+  ) => Promise<{ summary: string; generatedAt: string; model: string }>
+
+  generateMeetingActionItems: (id: string) => Promise<{
+    items: Array<{ content: string; assignee?: string }>
+    generatedAt: string
+    model: string
+  }>
+
   getHomeStats: () => Promise<{
     todayPttCount: number
     todayChars: number
