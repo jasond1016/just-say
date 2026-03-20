@@ -632,9 +632,9 @@ export function DashboardSettingsModal({
                       onChange={setMeetingIncludeMicrophone}
                     />
 
-                    <FieldRow label={m.settings.microphoneDevice} htmlFor="s-audio-device">
+                    <StackedField label={m.settings.microphoneDevice} htmlFor="s-audio-device">
                       <div className="flex items-center gap-2">
-                        <select id="s-audio-device" className={`${fieldClass} flex-1`} value={audioDevice} onChange={(e) => setAudioDevice(e.target.value)} disabled={microphoneDevicesLoading}>
+                        <select id="s-audio-device" className={`${fieldClass} min-w-0 flex-1`} value={audioDevice} onChange={(e) => setAudioDevice(e.target.value)} disabled={microphoneDevicesLoading}>
                           <option value="default">{m.settings.defaultDevice}</option>
                           {selectedAudioDeviceUnavailable ? <option value={audioDevice}>{m.settings.savedDeviceUnavailable}</option> : null}
                           {microphoneDevices.filter((d) => d.id && d.id !== 'default').map((d, i) => (
@@ -645,7 +645,7 @@ export function DashboardSettingsModal({
                           {microphoneDevicesLoading ? '…' : m.settings.refresh}
                         </Button>
                       </div>
-                    </FieldRow>
+                    </StackedField>
                     {microphoneDevicesError && <p className="text-[11px] text-muted-foreground pl-1">{m.settings.microphoneLoadFailed}</p>}
 
                     {isLocalEngine && (
