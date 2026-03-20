@@ -30,7 +30,14 @@ interface MeetingTranscriptionProps {
   onViewLastTranscript?: () => void
 }
 
-const speakerColors = ['#B8632F', '#3B6B96', '#5D7A4F', '#B8862F', '#8B4F6F', '#4F6B8B']
+const SPEAKER_COLOR_VARS = [
+  'var(--speaker-1)',
+  'var(--speaker-2)',
+  'var(--speaker-3)',
+  'var(--speaker-4)',
+  'var(--speaker-5)',
+  'var(--speaker-6)'
+]
 const BOTTOM_FOLLOW_THRESHOLD_PX = 24
 
 function formatClock(totalSeconds: number): string {
@@ -65,9 +72,9 @@ function getSegmentLabel(
 }
 
 function getSegmentColor(segment: SpeakerSegment): string {
-  if (segment.source === 'microphone') return '#8B4F6F'
-  if (segment.source === 'system') return '#3B6B96'
-  return speakerColors[segment.speaker % speakerColors.length]
+  if (segment.source === 'microphone') return 'var(--speaker-mic)'
+  if (segment.source === 'system') return 'var(--speaker-system)'
+  return SPEAKER_COLOR_VARS[segment.speaker % SPEAKER_COLOR_VARS.length]
 }
 
 export function MeetingTranscription({
@@ -128,34 +135,34 @@ export function MeetingTranscription({
   )
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-background page-enter">
       {/* ─── Header ─── */}
-      <header className="flex items-baseline gap-3 px-8 py-3">
-        <h1 className="font-display text-2xl text-foreground italic">{m.meeting.title}</h1>
+      <header className="flex items-center gap-3 px-8 py-3">
+        <h1 className="font-display text-2xl text-foreground">{m.meeting.title}</h1>
 
-          {/* Recording: timer + stop, grouped tightly with title */}
-          {state.status === 'transcribing' && (
-            <>
-              <span className="inline-flex items-center gap-2 text-[13px] text-[var(--color-recording)]">
-                <span className="h-2 w-2 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
-                <span className="font-mono">{formatClock(state.seconds)}</span>
-              </span>
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                onClick={() => void runAction(onStop)}
-                disabled={actionInProgress}
-              >
-                <Square className="h-3 w-3" />
-                <span>{m.meeting.stop}</span>
-              </Button>
-            </>
-          )}
+        {/* Recording: timer + stop */}
+        {state.status === 'transcribing' && (
+          <>
+            <span className="inline-flex items-center gap-2 text-[13px] text-[var(--color-recording)]">
+              <span className="h-2 w-2 rounded-full bg-[var(--color-recording)] animate-[pulseRecord_1.5s_ease-in-out_infinite]" />
+              <span className="font-mono tabular-nums">{formatClock(state.seconds)}</span>
+            </span>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={() => void runAction(onStop)}
+              disabled={actionInProgress}
+            >
+              <Square className="h-3 w-3" />
+              <span>{m.meeting.stop}</span>
+            </Button>
+          </>
+        )}
 
-          {state.status === 'error' && (
-            <span className="text-[13px] text-destructive">{m.meeting.connectionError}</span>
-          )}
+        {state.status === 'error' && (
+          <span className="text-[13px] text-destructive">{m.meeting.connectionError}</span>
+        )}
       </header>
 
       <div className="mx-8 border-t border-border" />
@@ -168,20 +175,32 @@ export function MeetingTranscription({
       >
         {!hasContent && !isTranscribing ? (
           /* ─── State 1: Empty — guided setup ─── */
-          <div className="flex h-full min-h-[280px] flex-col items-start justify-center gap-6 max-w-lg">
-            <div className="space-y-3">
-              <Headphones className="h-6 w-6 text-primary mb-2" strokeWidth={1.6} />
-              <p className="font-display text-xl italic text-foreground">{m.meeting.emptyTitle}</p>
-              <p className="text-sm text-muted-foreground leading-relaxed">
+          <div className="flex h-full min-h-[280px] flex-col items-start justify-center gap-5 max-w-md">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+              <Headphones className="h-5 w-5 text-primary" strokeWidth={1.8} />
+            </div>
+
+            <div className="space-y-2">
+              <p className="font-display text-xl text-foreground">{m.meeting.emptyTitle}</p>
+              <p className="text-[14px] text-muted-foreground leading-relaxed">
                 {m.meeting.emptyDescription}
               </p>
             </div>
 
-            <div className="space-y-2 text-[13px] text-muted-foreground leading-relaxed">
-              <p>{m.meeting.emptyStep1}</p>
-              <p>{m.meeting.emptyStep2}</p>
-              <p>{m.meeting.emptyStep3}</p>
-            </div>
+            <ol className="space-y-1.5 text-[13px] text-muted-foreground leading-relaxed list-none">
+              <li className="flex gap-2">
+                <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0">1.</span>
+                <span>{m.meeting.emptyStep1.replace(/^1\.\s*/, '')}</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0">2.</span>
+                <span>{m.meeting.emptyStep2.replace(/^2\.\s*/, '')}</span>
+              </li>
+              <li className="flex gap-2">
+                <span className="font-mono tabular-nums text-muted-foreground/60 shrink-0">3.</span>
+                <span>{m.meeting.emptyStep3.replace(/^3\.\s*/, '')}</span>
+              </li>
+            </ol>
 
             {state.isPreconnecting && !state.preconnectFailed && (
               <p className="text-xs text-muted-foreground">{m.meeting.warmingUp}</p>
@@ -203,7 +222,7 @@ export function MeetingTranscription({
           </div>
         ) : (
           /* ─── State 2 & 3: Timeline (recording or stopped-with-content) ─── */
-          <div className="relative">
+          <div className="relative max-w-3xl">
             <div className="absolute left-[52px] top-0 bottom-0 w-px bg-border" />
 
             <div className="space-y-0">
@@ -216,7 +235,7 @@ export function MeetingTranscription({
 
                 return (
                   <div key={segmentKey} className="flex gap-4 py-3 animate-[staggerIn_300ms_var(--ease-out-expo)] animate-fill-backwards">
-                    <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground">
+                    <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
                       {formatSegmentTime(segment.timestamp)}
                     </span>
                     <div className="relative flex shrink-0 items-start pt-1.5">
@@ -234,7 +253,7 @@ export function MeetingTranscription({
 
               {state.currentSegment && (
                 <div className="flex gap-4 py-3">
-                  <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono text-[11px] text-muted-foreground">
+                  <span className="w-[44px] shrink-0 pt-0.5 text-right font-mono tabular-nums text-[11px] text-muted-foreground">
                     {formatSegmentTime(state.currentSegment.timestamp)}
                   </span>
                   <div className="relative flex shrink-0 items-start pt-1.5">
