@@ -280,6 +280,12 @@ function App(): React.JSX.Element {
     } else {
       document.documentElement.removeAttribute('data-theme')
     }
+
+    // Sync title bar overlay color with theme
+    const overlayTheme = effectiveTheme === 'dark'
+      ? { color: '#1A1816', symbolColor: '#E8E4DD' }
+      : { color: '#FAF8F3', symbolColor: '#2D2A26' }
+    void window.api.updateTitleBarOverlay(overlayTheme).catch(() => { /* ignore on unsupported platforms */ })
   }, [])
 
   useEffect(() => { applyTheme(theme) }, [theme, applyTheme])

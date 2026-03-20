@@ -235,7 +235,7 @@ export function TranscriptDetail({ id, onBack }: TranscriptDetailProps): React.J
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       <header
-        className="px-8 pb-3"
+        className="px-8 pb-3 pr-[140px]"
         style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
       >
         <div className="flex items-center gap-3 mb-2 pt-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>

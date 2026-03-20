@@ -11,7 +11,7 @@ export function DashboardHeader({
 }: DashboardHeaderProps): JSX.Element {
   return (
     <header
-      className="flex items-end px-8 pb-2"
+      className="flex items-end px-8 pb-2 pr-[140px]"
       style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
     >
       <div

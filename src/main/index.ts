@@ -312,12 +312,13 @@ function createMainWindow(): BrowserWindow {
   // Use hidden title bar so our renderer draws its own chrome.
   // titleBarOverlay gives us native window controls (minimize/maximize/close)
   // painted over our content on Windows/Linux.
+  // Color must match the CONTENT area background (right side), not the sidebar.
   const titleBarOverlay =
     process.platform === 'darwin'
       ? undefined
       : {
-          color: '#2D2A26',
-          symbolColor: '#E8E4DD',
+          color: '#FAF8F3',
+          symbolColor: '#2D2A26',
           height: 36
         }
 
@@ -1299,3 +1300,19 @@ ipcMain.handle('generate-meeting-action-items', async (_event, id: string) => {
 ipcMain.handle('get-home-stats', () => {
   return getHomeStats()
 })
+
+// ─── Title bar overlay theme sync ───
+ipcMain.handle(
+  'update-title-bar-overlay',
+  (_event, theme: { color: string; symbolColor: string }) => {
+    if (process.platform === 'darwin' || !mainWindow || mainWindow.isDestroyed()) return
+    try {
+      mainWindow.setTitleBarOverlay({
+        color: theme.color,
+        symbolColor: theme.symbolColor
+      })
+    } catch {
+      // setTitleBarOverlay may not be available on all platforms
+    }
+  }
+)

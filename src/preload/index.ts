@@ -257,7 +257,11 @@ const api = {
     const handler = (): void => callback()
     ipcRenderer.on('home-stats-updated', handler)
     return () => ipcRenderer.removeListener('home-stats-updated', handler)
-  }
+  },
+
+  // Title bar overlay theme
+  updateTitleBarOverlay: (theme: { color: string; symbolColor: string }): Promise<void> =>
+    ipcRenderer.invoke('update-title-bar-overlay', theme)
 }
 
 if (process.contextIsolated) {

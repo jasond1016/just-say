@@ -83,7 +83,7 @@ export function TranscriptHistory({
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col bg-background">
       <header
-        className="flex items-end justify-between px-8 pb-2"
+        className="flex items-end justify-between px-8 pb-2 pr-[140px]"
         style={{ WebkitAppRegion: 'drag', minHeight: 52 } as React.CSSProperties}
       >
         <div className="flex items-baseline gap-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>

@@ -166,6 +166,9 @@ interface JustSayAPI {
   }>
 
   onHomeStatsUpdated: (callback: () => void) => () => void
+
+  // Title bar overlay theme
+  updateTitleBarOverlay: (theme: { color: string; symbolColor: string }) => Promise<void>
 }
 
 declare global {
