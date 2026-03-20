@@ -113,6 +113,92 @@ function buildTranscriptText(
     .join('\n')
 }
 
+// ---------------------------------------------------------------------------
+// Language detection – used to align output language with transcript content
+// ---------------------------------------------------------------------------
+
+type DetectedLanguage = 'zh' | 'ja' | 'ko' | 'en'
+
+/** Count characters that belong to each script family. */
+function detectDominantLanguage(text: string): DetectedLanguage {
+  let cjCommon = 0 // CJK Unified ideographs (shared by zh/ja)
+  let hiragana = 0
+  let katakana = 0
+  let hangul = 0
+  let latin = 0
+
+  for (const ch of text) {
+    const code = ch.codePointAt(0)!
+    if (code >= 0x4e00 && code <= 0x9fff) {
+      cjCommon++
+    } else if (code >= 0x3040 && code <= 0x309f) {
+      hiragana++
+    } else if (code >= 0x30a0 && code <= 0x30ff) {
+      katakana++
+    } else if (code >= 0xac00 && code <= 0xd7af) {
+      hangul++
+    } else if (
+      (code >= 0x41 && code <= 0x5a) ||
+      (code >= 0x61 && code <= 0x7a) ||
+      (code >= 0xc0 && code <= 0x24f)
+    ) {
+      latin++
+    }
+  }
+
+  const kana = hiragana + katakana
+  // Japanese uses a mix of kanji + kana; if kana present it's almost certainly Japanese.
+  if (kana > 0 && kana + cjCommon > latin && kana + cjCommon > hangul) return 'ja'
+  if (hangul > cjCommon && hangul > latin) return 'ko'
+  if (cjCommon > latin) return 'zh'
+  return 'en'
+}
+
+interface LanguageLabels {
+  name: string
+  keyTopics: string
+  keyDecisions: string
+  discussionHighlights: string
+  summaryInstruction: string
+  actionItemsInstruction: string
+}
+
+const LANGUAGE_LABELS: Record<DetectedLanguage, LanguageLabels> = {
+  zh: {
+    name: '中文',
+    keyTopics: '主要议题',
+    keyDecisions: '关键决策',
+    discussionHighlights: '讨论要点',
+    summaryInstruction: '请用中文总结以下会议转录内容：',
+    actionItemsInstruction: '请用中文从以下会议转录中提取待办事项：'
+  },
+  ja: {
+    name: '日本語',
+    keyTopics: '主なトピック',
+    keyDecisions: '主な決定事項',
+    discussionHighlights: '議論のハイライト',
+    summaryInstruction: '以下の会議の文字起こしを日本語で要約してください：',
+    actionItemsInstruction:
+      '以下の会議の文字起こしからアクションアイテムを日本語で抽出してください：'
+  },
+  ko: {
+    name: '한국어',
+    keyTopics: '주요 주제',
+    keyDecisions: '주요 결정 사항',
+    discussionHighlights: '논의 하이라이트',
+    summaryInstruction: '다음 회의 녹취록을 한국어로 요약해 주세요:',
+    actionItemsInstruction: '다음 회의 녹취록에서 한국어로 액션 아이템을 추출해 주세요:'
+  },
+  en: {
+    name: 'English',
+    keyTopics: 'Key Topics',
+    keyDecisions: 'Key Decisions',
+    discussionHighlights: 'Discussion Highlights',
+    summaryInstruction: 'Please summarize the following meeting transcript:',
+    actionItemsInstruction: 'Extract action items from the following meeting transcript:'
+  }
+}
+
 // Rough token estimation (Chinese ~1.5 tok/char, English ~1.3 tok/word)
 function estimateTokens(text: string): number {
   const cjkChars = (text.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]/g) || []).length
@@ -143,27 +229,29 @@ export async function generateSummary(
 
   const truncated = truncateToTokenBudget(transcript, MAX_INPUT_TOKENS)
   const { model } = resolveEndpointAndKey()
+  const lang = detectDominantLanguage(transcript)
+  const l = LANGUAGE_LABELS[lang]
 
   const systemPrompt = [
     'You are a professional meeting-notes assistant.',
     'Given a meeting transcript, produce a clear, structured summary.',
     'The transcript may contain minor speech recognition errors — ignore them and focus on meaning.',
-    'Output in the SAME language as the majority of the transcript.',
+    `You MUST write your ENTIRE output in ${l.name}.`,
     '',
     'Format:',
-    '## Key Topics',
+    `## ${l.keyTopics}`,
     '- Bullet points of main topics discussed',
     '',
-    '## Key Decisions',
+    `## ${l.keyDecisions}`,
     '- Bullet points of decisions made (if any)',
     '',
-    '## Discussion Highlights',
+    `## ${l.discussionHighlights}`,
     '- Brief summary of important points, context, or outcomes',
     '',
     'Be concise. Do NOT fabricate information that is not in the transcript.'
   ].join('\n')
 
-  const userPrompt = `Please summarize the following meeting transcript:\n\n${truncated}`
+  const userPrompt = `${l.summaryInstruction}\n\n${truncated}`
 
   const summary = await callChatCompletion(systemPrompt, userPrompt)
 
@@ -184,6 +272,8 @@ export async function generateActionItems(
 
   const truncated = truncateToTokenBudget(transcript, MAX_INPUT_TOKENS)
   const { model } = resolveEndpointAndKey()
+  const lang = detectDominantLanguage(transcript)
+  const l = LANGUAGE_LABELS[lang]
 
   const systemPrompt = [
     'You are a professional meeting-notes assistant.',
@@ -194,6 +284,7 @@ export async function generateActionItems(
     '- Only include genuinely actionable tasks that were discussed or agreed upon.',
     '- If an assignee is mentioned or can be clearly inferred, include it.',
     '- Do NOT invent tasks that are not in the transcript.',
+    `- The "content" field MUST be written in ${l.name}.`,
     '- Output strict JSON only, no markdown fences, no extra text.',
     '',
     'Output format (JSON array):',
@@ -202,11 +293,10 @@ export async function generateActionItems(
     '  ...',
     ']',
     '',
-    'If there are no action items, return an empty array: []',
-    'The "content" field should be in the SAME language as the transcript.'
+    'If there are no action items, return an empty array: []'
   ].join('\n')
 
-  const userPrompt = `Extract action items from the following meeting transcript:\n\n${truncated}`
+  const userPrompt = `${l.actionItemsInstruction}\n\n${truncated}`
 
   const raw = await callChatCompletion(systemPrompt, userPrompt)
   const items = parseActionItemsResponse(raw)
