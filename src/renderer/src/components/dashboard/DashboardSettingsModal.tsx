@@ -89,13 +89,13 @@ function Toggle({
       aria-checked={checked}
       aria-labelledby={labelledBy}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full border transition-colors ${
+      className={`relative inline-flex h-[22px] w-10 items-center rounded-full border transition-colors duration-200 ${
         checked ? 'border-primary bg-primary' : 'border-border bg-muted'
       } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1`}
     >
       <span
-        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
-          checked ? 'translate-x-[18px]' : 'translate-x-[2px]'
+        className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+          checked ? 'translate-x-[20px]' : 'translate-x-[2px]'
         }`}
       />
     </button>
@@ -104,7 +104,7 @@ function Toggle({
 
 /* ─── Form field styles ─── */
 const fieldClass =
-  'h-9 rounded-md border border-input bg-transparent px-3 text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary/30 placeholder:text-muted-foreground/50 appearance-none'
+  'h-9 rounded-md border border-input bg-transparent px-3 text-[13px] outline-none transition-all focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:shadow-tinted-sm placeholder:text-muted-foreground/50 appearance-none'
 const fullFieldClass = `${fieldClass} w-full`
 
 /* ─── Row: label + value on same line ─── */
@@ -197,7 +197,7 @@ function StatusBar({
   actionDisabled?: boolean
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-sm">
+    <div className="flex items-center justify-between border border-border bg-muted/30 px-3 py-2 rounded-md">
       <p className="text-[12px] text-muted-foreground">{text}</p>
       {action && actionLabel && (
         <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={action} disabled={actionDisabled}>
@@ -512,19 +512,19 @@ export function DashboardSettingsModal({
         aria-modal="true"
         aria-labelledby="settings-panel-title"
         aria-describedby="settings-panel-description"
-        className="relative z-10 flex w-[520px] max-w-[calc(100vw-4rem)] flex-col bg-card border-l border-border animate-[slideOverIn_280ms_var(--ease-out-expo)] mt-9"
+        className="relative z-10 flex w-[520px] max-w-[calc(100vw-4rem)] flex-col bg-card border-l border-border shadow-tinted-xl animate-[slideOverIn_280ms_var(--ease-out-expo)] mt-9"
       >
         <p id="settings-panel-description" className="sr-only">{m.settings.modalDescription}</p>
 
         {/* Panel header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 id="settings-panel-title" className="font-display text-xl italic text-foreground">
+          <h2 id="settings-panel-title" className="font-display text-xl text-foreground">
             {m.settings.title}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            className="press-scale inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             aria-label={m.settings.closeAria}
           >
             <X className="h-4 w-4" />
@@ -534,8 +534,26 @@ export function DashboardSettingsModal({
         {/* Tabs + Content */}
         <div className="min-h-0 flex flex-1 flex-col overflow-hidden">
           {loading ? (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              {m.settings.loading}
+            <div className="flex flex-1 flex-col gap-5 p-5">
+              <div className="skeleton h-4 w-24 rounded" />
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="skeleton h-4 w-28 rounded" />
+                  <div className="skeleton h-9 w-[220px] rounded-md" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="skeleton h-4 w-20 rounded" />
+                  <div className="skeleton h-9 w-[220px] rounded-md" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="skeleton h-4 w-24 rounded" />
+                  <div className="skeleton h-9 w-[220px] rounded-md" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="skeleton h-4 w-32 rounded" />
+                  <div className="skeleton h-[22px] w-10 rounded-full" />
+                </div>
+              </div>
             </div>
           ) : (
             <>
