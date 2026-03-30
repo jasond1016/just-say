@@ -75,6 +75,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
     >
   > = {}
   private partialDispatchScheduled = false
+  private lastDebugJson = ''
   private preConnectAttemptId = 0
 
   private preconnectedRecognizer: Recognizer | null = null
@@ -396,6 +397,7 @@ export class MeetingTranscriptionManager extends EventEmitter {
     this.transcriptHistory = []
     this.pendingPartialDispatchBySource = {}
     this.partialDispatchScheduled = false
+    this.lastDebugJson = ''
     this.partialStateBySource = {}
     this.currentSegmentTimestampBySource = {}
     this.segmentTimestampCache.clear()
@@ -759,16 +761,16 @@ export class MeetingTranscriptionManager extends EventEmitter {
     }
 
     if (this.recognizers.system instanceof StreamingLocalWsRecognizer) {
-      console.log(
-        '[MeetingTranscription][Debug]',
-        JSON.stringify({
-          segments: speakerSegments.length,
-          segmentTexts: speakerSegments.map((item) => `${item.source}:${item.text}`),
-          currentText: currentSpeakerSegment?.text || '',
-          currentSource: currentSpeakerSegment?.source || null,
-          combined: segment.text
-        })
-      )
+      const debugJson = JSON.stringify({
+        segments: speakerSegments.length,
+        segmentTexts: speakerSegments.map((item) => `${item.source}:${item.text}`),
+        currentText: currentSpeakerSegment?.text || '',
+        currentSource: currentSpeakerSegment?.source || null
+      })
+      if (debugJson !== this.lastDebugJson) {
+        this.lastDebugJson = debugJson
+        console.log('[MeetingTranscription][Debug]', debugJson)
+      }
     }
 
     this.emit('transcript', segment)

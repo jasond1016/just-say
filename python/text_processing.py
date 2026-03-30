@@ -1293,3 +1293,42 @@ def find_committable_stable_preview_prefix(
         return prefix, remaining
 
     return None
+
+
+CJK_COMMIT_BOUNDARY_CHARS = {"、", "，"}
+CJK_COMMIT_MIN_PREFIX_CHARS = 6
+CJK_COMMIT_MIN_REMAINING_CHARS = 2
+
+
+def find_committable_cjk_stable_prefix(
+    text: str,
+    stable_preview: str,
+    *,
+    min_prefix_chars: int = CJK_COMMIT_MIN_PREFIX_CHARS,
+    min_remaining_chars: int = CJK_COMMIT_MIN_REMAINING_CHARS,
+) -> tuple[str, str] | None:
+    normalized = (text or "").strip()
+    normalized_stable = (stable_preview or "").strip()
+    if not normalized or not normalized_stable:
+        return None
+    if not normalized.startswith(normalized_stable):
+        return None
+
+    best_prefix = ""
+    for index, ch in enumerate(normalized_stable):
+        if ch not in CJK_COMMIT_BOUNDARY_CHARS:
+            continue
+        candidate = normalized_stable[: index + 1]
+        if count_meaningful_chars(candidate) < min_prefix_chars:
+            continue
+        remaining = normalized[len(candidate) :].lstrip()
+        if count_meaningful_chars(remaining) < min_remaining_chars:
+            continue
+        if len(candidate) > len(best_prefix):
+            best_prefix = candidate
+
+    if not best_prefix:
+        return None
+
+    remaining = normalized[len(best_prefix) :].lstrip()
+    return best_prefix, remaining

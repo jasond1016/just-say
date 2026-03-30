@@ -462,4 +462,33 @@ describe('StreamingLocalWsRecognizer', () => {
       unstableTailText: ' world'
     })
   })
+
+  it('appends consecutive final_chunks without client-side deduplication', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer()
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: '今日は日本の夏によく食べるものをご紹介。'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: 'まず一つ目はそうめんです。'
+      })
+    )
+
+    // Server already deduplicates — client trusts and appends as-is
+    expect(partials.at(-1)?.segments).toMatchObject([
+      { text: '今日は日本の夏によく食べるものをご紹介。', isFinal: true },
+      { text: 'まず一つ目はそうめんです。', isFinal: true }
+    ])
+  })
 })

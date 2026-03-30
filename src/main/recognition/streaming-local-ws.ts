@@ -495,17 +495,10 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
   private appendConfirmed(text: string): string {
     const normalized = this.normalizeText(text)
     if (!normalized) return ''
-    if (!this.confirmedText) {
-      this.confirmedText = normalized
-      return normalized
-    }
-    const overlap = findTextOverlap(this.confirmedText, normalized, 200)
-    const deduped = overlap > 0 ? normalized.slice(overlap) : normalized
-    if (!deduped.trim()) {
-      return ''
-    }
-    this.confirmedText = mergeText(this.confirmedText, deduped)
-    return deduped
+    this.confirmedText = this.confirmedText
+      ? mergeText(this.confirmedText, normalized)
+      : normalized
+    return normalized
   }
 
   private appendCommittedChunk(text: string): string {
@@ -595,23 +588,18 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       return
     }
 
-    const committedTail = this.completedSegments
-      .slice(-3)
-      .map((segment) => segment.text)
-      .join(' | ')
     console.log(
       '[StreamingLocalWs][Debug]',
       JSON.stringify({
         eventType,
         completedSegments: this.completedSegments.length,
         sentencePairs: this.sentencePairs.length,
-        rawPreviewText: this.rawPreviewText,
-        previewText: this.previewText,
-        previewStableText: this.previewStableText,
-        previewUnstableText: this.previewUnstableText,
-        previewRevision: this.previewRevision,
-        endpointReason: this.endpointReason,
-        committedTail
+        serverPreview: this.rawPreviewText,
+        pendingText: this.previewText,
+        stableText: this.previewStableText,
+        unstableTail: this.previewUnstableText,
+        revision: this.previewRevision,
+        endpointReason: this.endpointReason
       })
     )
   }

@@ -218,7 +218,7 @@ class WebSocketStreamingSession:
             return
         preview_word_timings = result.get("word_timings")
         overlap = find_text_overlap(self.get_visible_text_base(), preview_text)
-        if overlap > 0:
+        if overlap >= 4:
             deduped = preview_text[overlap:]
             preview_word_timings = drop_word_timing_prefix(preview_word_timings, preview_text[:overlap])
         else:
@@ -272,7 +272,7 @@ class WebSocketStreamingSession:
 
         final_word_timings = result.get("word_timings")
         overlap = find_text_overlap(self.get_visible_text_base(), final_chunk)
-        if overlap > 0:
+        if overlap >= 4:
             deduped = final_chunk[overlap:]
             final_word_timings = drop_word_timing_prefix(final_word_timings, final_chunk[:overlap])
         else:

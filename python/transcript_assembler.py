@@ -3,8 +3,11 @@ import time
 from text_processing import (
     accumulate_preview_text,
     apply_text_corrections,
+    count_meaningful_chars,
+    find_committable_cjk_stable_prefix,
     find_committable_sentence_prefix,
     find_committable_stable_preview_prefix,
+    get_common_prefix,
     get_common_prefix_for_many,
     guard_preview_reset_with_stable_prefix,
     is_latin_dominant_text,
@@ -26,7 +29,7 @@ class TranscriptAssembler:
     """Owns transcript semantics for one streaming session."""
 
     PREVIEW_STABILITY_WINDOW = 3
-    PREVIEW_STABLE_TAIL_CHARS = 6
+    PREVIEW_STABLE_TAIL_CHARS = 3
     PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 6
 
     def __init__(self, normalize_event_text, text_corrections: list[dict]):
@@ -100,6 +103,15 @@ class TranscriptAssembler:
                 commit_ready, _remaining = split
                 self.current_commit_ready_text = commit_ready
                 return commit_ready
+        else:
+            split = find_committable_cjk_stable_prefix(normalized_pending, normalized_stable)
+            if split:
+                commit_ready, _remaining = split
+                self.current_commit_ready_text = commit_ready
+                return commit_ready
+            if count_meaningful_chars(normalized_stable) >= 8:
+                self.current_commit_ready_text = normalized_stable
+                return normalized_stable
 
         self.current_commit_ready_text = ""
         return ""
@@ -111,6 +123,9 @@ class TranscriptAssembler:
             self.current_preview_stable_text = ""
             self.current_preview_unstable_text = ""
             return "", ""
+
+        if self.preview_history and not get_common_prefix(self.preview_history[-1], normalized):
+            self.preview_history = []
 
         self.preview_history.append(normalized)
         stability_window = self.PREVIEW_STABILITY_WINDOW
@@ -290,8 +305,6 @@ class TranscriptAssembler:
             commit_text,
         )
         if commit_timings is None:
-            if not is_latin_dominant_text(commit_text):
-                return False, []
             remaining_timings = None
 
         self.pending_final_chunk = commit_text
