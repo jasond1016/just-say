@@ -285,10 +285,16 @@ async function main() {
   }
 
   // Step 1: Convert audio to WAV
-  console.log(`[Prepare] 转换音频: ${audioPath}`)
-  console.log(`[Prepare] 目标格式: ${sampleRate}Hz, mono, 16-bit PCM`)
-  await convertAudioWithFfmpeg(audioPath, wavOutputPath, sampleRate)
-  console.log(`[Prepare] WAV 已生成: ${wavOutputPath}`)
+  const inputResolved = path.resolve(audioPath)
+  const outputResolved = path.resolve(wavOutputPath)
+  if (inputResolved === outputResolved) {
+    console.log(`[Prepare] 输入已是目标 WAV，跳过转换: ${audioPath}`)
+  } else {
+    console.log(`[Prepare] 转换音频: ${audioPath}`)
+    console.log(`[Prepare] 目标格式: ${sampleRate}Hz, mono, 16-bit PCM`)
+    await convertAudioWithFfmpeg(audioPath, wavOutputPath, sampleRate)
+    console.log(`[Prepare] WAV 已生成: ${wavOutputPath}`)
+  }
 
   // Step 2: Transcribe
   const wavBuffer = await fs.readFile(wavOutputPath)
