@@ -207,6 +207,7 @@ class WebSocketStreamingSession:
             return
 
         result = self.transcribe_pcm(self.get_preview_pcm())
+        is_full_audio = len(self.pending_pcm) <= self.bytes_for_ms(self.preview_window_ms)
         self.last_preview_at = now
         self.last_preview_audio_bytes = len(self.pending_pcm)
         if not result.get("success"):
@@ -230,6 +231,7 @@ class WebSocketStreamingSession:
         payload = self.assembler.build_interim_event(
             deduped,
             word_timings=preview_word_timings,
+            full_preview=is_full_audio,
         )
         if not payload:
             return

@@ -167,10 +167,14 @@ class TranscriptAssembler:
         deduped_preview_text: str,
         *,
         word_timings: list[dict] | None,
+        full_preview: bool = False,
     ) -> dict | None:
         normalized_preview = self.normalize_event_text(deduped_preview_text).strip()
-        accumulated = accumulate_preview_text(self.current_preview_text, deduped_preview_text)
-        normalized_accumulated = self.normalize_event_text(accumulated)
+        if full_preview:
+            normalized_accumulated = self.normalize_event_text(deduped_preview_text)
+        else:
+            accumulated = accumulate_preview_text(self.current_preview_text, deduped_preview_text)
+            normalized_accumulated = self.normalize_event_text(accumulated)
         if should_guard_preview_reset(
             self.current_preview_text,
             deduped_preview_text,
