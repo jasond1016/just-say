@@ -1064,16 +1064,19 @@ def should_guard_preview_reset(
         return False
     if not normalized_previous.startswith(normalized_stable):
         return False
-    if not is_latin_dominant_text(normalized_previous) and not is_latin_dominant_text(normalized_incoming):
-        return False
+
+    is_latin = is_latin_dominant_text(normalized_previous) or is_latin_dominant_text(normalized_incoming)
 
     previous_chars = count_meaningful_chars(normalized_previous)
     incoming_chars = count_meaningful_chars(normalized_incoming)
     stable_chars = count_meaningful_chars(normalized_stable)
-    min_stable_chars = 8
-    if is_latin_dominant_text(normalized_previous) or is_latin_dominant_text(normalized_incoming):
+    if is_latin:
         min_stable_chars = ENGLISH_PREVIEW_RESET_MIN_STABLE_CHARS
-    if previous_chars < 18 or incoming_chars < 4 or stable_chars < min_stable_chars:
+        min_previous_chars = 18
+    else:
+        min_stable_chars = 6
+        min_previous_chars = 12
+    if previous_chars < min_previous_chars or incoming_chars < 4 or stable_chars < min_stable_chars:
         return False
     if incoming_chars > max(12, int(previous_chars * 0.72)):
         return False

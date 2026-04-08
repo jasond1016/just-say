@@ -28,9 +28,9 @@ from text_processing import (
 class TranscriptAssembler:
     """Owns transcript semantics for one streaming session."""
 
-    PREVIEW_STABILITY_WINDOW = 3
-    PREVIEW_STABLE_TAIL_CHARS = 3
-    PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 6
+    PREVIEW_STABILITY_WINDOW = 4
+    PREVIEW_STABLE_TAIL_CHARS = 5
+    PREVIEW_MAX_STABLE_ROLLBACK_CHARS = 4
 
     def __init__(self, normalize_event_text, text_corrections: list[dict]):
         self.normalize_event_text = normalize_event_text

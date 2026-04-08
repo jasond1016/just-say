@@ -29,10 +29,10 @@ class WebSocketStreamingSession:
         self.websocket = websocket
         self.params = params
         self.sample_rate = parse_positive_int(params.get("sample_rate", ["16000"])[0], 16000)
-        self.preview_interval_ms = parse_positive_int(params.get("preview_interval_ms", ["450"])[0], 450)
+        self.preview_interval_ms = parse_positive_int(params.get("preview_interval_ms", ["550"])[0], 550)
         self.preview_min_audio_ms = parse_positive_int(params.get("preview_min_audio_ms", ["350"])[0], 350)
         self.preview_min_new_audio_ms = parse_positive_int(params.get("preview_min_new_audio_ms", ["220"])[0], 220)
-        self.preview_window_ms = parse_positive_int(params.get("preview_window_ms", ["2600"])[0], 2600)
+        self.preview_window_ms = parse_positive_int(params.get("preview_window_ms", ["4000"])[0], 4000)
         self.min_chunk_ms = parse_positive_int(params.get("min_chunk_ms", ["1000"])[0], 1000)
         self.silence_threshold_ms = parse_positive_int(params.get("silence_ms", ["700"])[0], 700)
         self.max_chunk_ms = parse_positive_int(params.get("max_chunk_ms", ["5000"])[0], 5000)
