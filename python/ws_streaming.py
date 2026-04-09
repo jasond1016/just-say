@@ -35,10 +35,10 @@ class WebSocketStreamingSession:
         self.preview_window_ms = parse_positive_int(params.get("preview_window_ms", ["2500"])[0], 2500)
         self.min_chunk_ms = parse_positive_int(params.get("min_chunk_ms", ["1000"])[0], 1000)
         self.silence_threshold_ms = parse_positive_int(params.get("silence_ms", ["700"])[0], 700)
-        self.max_chunk_ms = parse_positive_int(params.get("max_chunk_ms", ["5000"])[0], 5000)
+        self.max_chunk_ms = parse_positive_int(params.get("max_chunk_ms", ["10000"])[0], 10000)
         self.overlap_ms = parse_positive_int(params.get("overlap_ms", ["520"])[0], 520)
         self.max_chunk_extension_ms = parse_positive_int(
-            params.get("max_chunk_extension_ms", ["1400"])[0], 1400
+            params.get("max_chunk_extension_ms", ["2800"])[0], 2800
         )
 
         self.pending_pcm = bytearray()

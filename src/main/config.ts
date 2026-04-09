@@ -187,7 +187,7 @@ const defaultConfig: AppConfig = {
         previewWindowMs: 2500,
         minChunkMs: 950,
         silenceMs: 520,
-        maxChunkMs: 3600,
+        maxChunkMs: 10000,
         overlapMs: 480,
         holdMs: 260
       }

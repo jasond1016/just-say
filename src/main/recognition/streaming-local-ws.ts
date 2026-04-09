@@ -501,15 +501,22 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
     return normalized
   }
 
+  private static readonly SENTENCE_END_RE = /[。！？!?.]$/
+
   private appendCommittedChunk(text: string): string {
     const committed = this.appendConfirmed(text)
     if (committed) {
-      this.completedSegments.push({
-        speaker: 0,
-        text: committed,
-        isFinal: true,
-        timestamp: Date.now()
-      })
+      const prev = this.completedSegments[this.completedSegments.length - 1]
+      if (prev && prev.isFinal && !StreamingLocalWsRecognizer.SENTENCE_END_RE.test(prev.text)) {
+        prev.text = mergeText(prev.text, committed)
+      } else {
+        this.completedSegments.push({
+          speaker: 0,
+          text: committed,
+          isFinal: true,
+          timestamp: Date.now()
+        })
+      }
       this.liveSentenceTail = mergeText(this.liveSentenceTail, committed)
     }
     return committed

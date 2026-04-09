@@ -109,7 +109,7 @@ class TranscriptAssembler:
                 commit_ready, _remaining = split
                 self.current_commit_ready_text = commit_ready
                 return commit_ready
-            if count_meaningful_chars(normalized_stable) >= 8:
+            if count_meaningful_chars(normalized_stable) >= 20:
                 self.current_commit_ready_text = normalized_stable
                 return normalized_stable
 

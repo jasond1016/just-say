@@ -179,7 +179,7 @@ describe('StreamingLocalWsRecognizer', () => {
     })
   })
 
-  it('keeps committed chunks as separate history segments even after a multi-chunk sentence event', async () => {
+  it('merges consecutive committed chunks into a single segment when previous lacks sentence-ending punctuation', async () => {
     const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
     const recognizer = new StreamingLocalWsRecognizer()
     const partials: any[] = []
@@ -201,8 +201,7 @@ describe('StreamingLocalWsRecognizer', () => {
     )
 
     expect(partials.at(-1)?.segments).toMatchObject([
-      { text: '今日は日本の夏に', isFinal: true },
-      { text: 'よく食べるものをご紹介します。', isFinal: true }
+      { text: '今日は日本の夏によく食べるものをご紹介します。', isFinal: true }
     ])
     ;(recognizer as any).handleMessage(
       JSON.stringify({
@@ -212,8 +211,7 @@ describe('StreamingLocalWsRecognizer', () => {
     )
 
     expect(partials.at(-1)?.segments).toMatchObject([
-      { text: '今日は日本の夏に', isFinal: true },
-      { text: 'よく食べるものをご紹介します。', isFinal: true }
+      { text: '今日は日本の夏によく食べるものをご紹介します。', isFinal: true }
     ])
   })
 

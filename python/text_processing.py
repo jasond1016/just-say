@@ -1179,7 +1179,7 @@ def try_extend_candidate_with_preview(candidate: str, preview: str) -> str | Non
     return replace_trailing_tail(candidate, preview_tail.rstrip("\u3002\uff01\uff1f!?. \t\r\n"))
 
 
-def has_stable_final_boundary(text: str, min_tail_chars: int = 3) -> bool:
+def has_stable_final_boundary(text: str, min_tail_chars: int = 5) -> bool:
     normalized = (text or "").strip()
     if not normalized or normalized[-1] not in {"\u3002", "\uff01", "\uff1f", "!", "?", "."}:
         return False
@@ -1298,8 +1298,8 @@ def find_committable_stable_preview_prefix(
     return None
 
 
-CJK_COMMIT_BOUNDARY_CHARS = {"、", "，"}
-CJK_COMMIT_MIN_PREFIX_CHARS = 6
+CJK_COMMIT_BOUNDARY_CHARS = {"。", "！", "？", "!", "?", "."}
+CJK_COMMIT_MIN_PREFIX_CHARS = 12
 CJK_COMMIT_MIN_REMAINING_CHARS = 2
 
 
