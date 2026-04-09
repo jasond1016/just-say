@@ -40,5 +40,6 @@ Python (local recognition/LAN mode):
 ## Commit & Pull Request Guidelines
 
 - Commit messages commonly follow Conventional Commits (e.g., `feat: ...`, `fix: ...`, `chore: ...`, `docs: ...`, `test: ...`, `refactor: ...`, `perf: ...`), optionally with a scope (`feat(ui): ...`).
+- Do not add Co-authored-by trailers to commit messages.
 - PRs should include: a clear summary, how you tested (`pnpm test`, `pnpm typecheck`), and screenshots/GIFs for UI changes.
 - Security: never commit API keys. Keys are stored at runtime via `electron-store` (see `src/main/secureStore.ts`).
