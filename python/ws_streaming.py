@@ -32,7 +32,7 @@ class WebSocketStreamingSession:
         self.preview_interval_ms = parse_positive_int(params.get("preview_interval_ms", ["550"])[0], 550)
         self.preview_min_audio_ms = parse_positive_int(params.get("preview_min_audio_ms", ["350"])[0], 350)
         self.preview_min_new_audio_ms = parse_positive_int(params.get("preview_min_new_audio_ms", ["220"])[0], 220)
-        self.preview_window_ms = parse_positive_int(params.get("preview_window_ms", ["4000"])[0], 4000)
+        self.preview_window_ms = parse_positive_int(params.get("preview_window_ms", ["2500"])[0], 2500)
         self.min_chunk_ms = parse_positive_int(params.get("min_chunk_ms", ["1000"])[0], 1000)
         self.silence_threshold_ms = parse_positive_int(params.get("silence_ms", ["700"])[0], 700)
         self.max_chunk_ms = parse_positive_int(params.get("max_chunk_ms", ["5000"])[0], 5000)

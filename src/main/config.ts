@@ -184,7 +184,7 @@ const defaultConfig: AppConfig = {
         previewIntervalMs: 520,
         previewMinAudioMs: 450,
         previewMinNewAudioMs: 360,
-        previewWindowMs: 4200,
+        previewWindowMs: 2500,
         minChunkMs: 950,
         silenceMs: 520,
         maxChunkMs: 3600,
