@@ -565,20 +565,31 @@ export class StreamingLocalWsRecognizer extends EventEmitter {
       Math.min(this.pendingSentenceStartIndex, this.completedSegments.length)
     )
     const endIndex = this.completedSegments.length
-    this.pendingSentenceStartIndex = endIndex
 
     if (startIndex >= endIndex) {
+      this.pendingSentenceStartIndex = endIndex
       return null
     }
 
-    if (endIndex - startIndex !== 1) {
-      return null
+    if (endIndex - startIndex === 1) {
+      this.pendingSentenceStartIndex = endIndex
+      this.completedSegments[startIndex] = {
+        ...this.completedSegments[startIndex],
+        sentencePairs: [{ original: normalized }]
+      }
+      return startIndex
     }
 
-    this.completedSegments[startIndex] = {
-      ...this.completedSegments[startIndex],
+    const pendingSegments = this.completedSegments.slice(startIndex, endIndex)
+    const mergedSegment: SpeakerSegment = {
+      ...pendingSegments[0],
+      text: normalized,
+      isFinal: true,
       sentencePairs: [{ original: normalized }]
     }
+
+    this.completedSegments.splice(startIndex, endIndex - startIndex, mergedSegment)
+    this.pendingSentenceStartIndex = startIndex + 1
     return startIndex
   }
 

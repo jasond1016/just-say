@@ -215,6 +215,72 @@ describe('StreamingLocalWsRecognizer', () => {
     ])
   })
 
+  it('coalesces multi-chunk sentence events so translation is attached to the merged segment', async () => {
+    const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
+    const recognizer = new StreamingLocalWsRecognizer({
+      translation: {
+        enabled: true,
+        targetLanguage: 'zh',
+        translator: async () => '合并后的译文。'
+      }
+    })
+    const partials: any[] = []
+
+    recognizer.on('partial', (result) => {
+      partials.push(result)
+    })
+    ;(recognizer as any).isActive = true
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: '長期金利の指標となっている。'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: '10年もの国債などが。'
+      })
+    )
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'final_chunk',
+        text: '機関投資家として巨額の国債を売買。'
+      })
+    )
+
+    expect(partials.at(-1)?.segments).toMatchObject([
+      { text: '長期金利の指標となっている。', isFinal: true },
+      { text: '10年もの国債などが。', isFinal: true },
+      { text: '機関投資家として巨額の国債を売買。', isFinal: true }
+    ])
+
+    ;(recognizer as any).handleMessage(
+      JSON.stringify({
+        type: 'sentence',
+        text: '長期金利の指標となっている。10年もの国債などが。機関投資家として巨額の国債を売買。'
+      })
+    )
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(partials.at(-1)?.segments).toMatchObject([
+      {
+        text: '長期金利の指標となっている。10年もの国債などが。機関投資家として巨額の国債を売買。',
+        translatedText: '合并后的译文。',
+        sentencePairs: [
+          {
+            original:
+              '長期金利の指標となっている。10年もの国債などが。機関投資家として巨額の国債を売買。',
+            translated: '合并后的译文。'
+          }
+        ],
+        isFinal: true
+      }
+    ])
+  })
+
   it('does not synthesize sentence pairs locally on final without a sentence event', async () => {
     const { StreamingLocalWsRecognizer } = await import('./streaming-local-ws')
     const recognizer = new StreamingLocalWsRecognizer()
