@@ -87,6 +87,9 @@ export function DashboardSettingsModal({
   const [translationApiKeyInput, setTranslationApiKeyInput] = useState('')
   const [translationApiKeyConfigured, setTranslationApiKeyConfigured] = useState(false)
   const [updatingTranslationApiKey, setUpdatingTranslationApiKey] = useState(false)
+  const [testingTranslationConfig, setTestingTranslationConfig] = useState(false)
+  const [translationTestResult, setTranslationTestResult] = useState<boolean | null>(null)
+  const [translationTestMessage, setTranslationTestMessage] = useState<string | null>(null)
   const [theme, setTheme] = useState<ThemeOption>('system')
   const [indicatorEnabled, setIndicatorEnabled] = useState(true)
   const [soundEnabled, setSoundEnabled] = useState(true)
@@ -182,6 +185,18 @@ export function DashboardSettingsModal({
   // ─── Side effects ───
   useEffect(() => { if (isSenseVoiceEngine) setModelSize('small') }, [isSenseVoiceEngine])
   useEffect(() => { setLocalServerTestResult(null) }, [localServerMode, localServerHost, localServerPortInput, engine])
+  useEffect(() => {
+    setTranslationTestResult(null)
+    setTranslationTestMessage(null)
+  }, [
+    translationProvider,
+    translationEndpoint,
+    translationModel,
+    translationApiKeyInput,
+    translationApiKeyConfigured,
+    targetLanguage,
+    anyTranslationEnabled
+  ])
 
   useEffect(() => {
     setOnlineApiKeyInput('')
@@ -225,6 +240,41 @@ export function DashboardSettingsModal({
       const healthy = await window.api.testWhisperServer(localServerHost.trim() || '127.0.0.1', resolveLocalServerPort())
       setLocalServerTestResult(healthy)
     } catch { setLocalServerTestResult(false) } finally { setTestingLocalServer(false) }
+  }
+
+  const testTranslationConfig = async (): Promise<void> => {
+    if (testingTranslationConfig) return
+
+    setTestingTranslationConfig(true)
+    setTranslationTestResult(null)
+    setTranslationTestMessage(null)
+
+    try {
+      const result = await window.api.testTranslationConfig({
+        endpoint: translationEndpoint.trim(),
+        model: translationModel.trim(),
+        apiKey: translationApiKeyInput.trim() || undefined,
+        targetLanguage
+      })
+
+      setTranslationTestResult(result.ok)
+      if (result.ok) {
+        setTranslationTestMessage(m.settings.translationTestSuccess)
+      } else {
+        const reason = result.error?.trim()
+        setTranslationTestMessage(
+          reason
+            ? `${m.settings.translationTestFailed}: ${reason}`
+            : m.settings.translationTestFailed
+        )
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      setTranslationTestResult(false)
+      setTranslationTestMessage(`${m.settings.translationTestFailed}: ${reason}`)
+    } finally {
+      setTestingTranslationConfig(false)
+    }
   }
 
   // ─── Dialog keyboard ───
@@ -463,6 +513,10 @@ export function DashboardSettingsModal({
                     translationApiKeyInput={translationApiKeyInput} setTranslationApiKeyInput={setTranslationApiKeyInput}
                     translationApiKeyConfigured={translationApiKeyConfigured} updatingTranslationApiKey={updatingTranslationApiKey}
                     clearTranslationApiKey={clearTranslationApiKey}
+                    testingTranslationConfig={testingTranslationConfig}
+                    translationTestResult={translationTestResult}
+                    translationTestMessage={translationTestMessage}
+                    testTranslationConfig={testTranslationConfig}
                   />
                 )}
                 {activeTab === 'appearance' && (

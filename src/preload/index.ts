@@ -56,6 +56,13 @@ const api = {
   deleteModel: (modelType: string): Promise<void> => ipcRenderer.invoke('delete-model', modelType),
   testWhisperServer: (host: string, port: number): Promise<boolean> =>
     ipcRenderer.invoke('test-whisper-remote', { host, port }),
+  testTranslationConfig: (options: {
+    endpoint: string
+    model: string
+    apiKey?: string
+    targetLanguage?: string
+  }): Promise<{ ok: boolean; error?: string; translatedText?: string }> =>
+    ipcRenderer.invoke('test-translation-config', options),
   onDownloadProgress: (
     callback: (progress: { model: string; percent: number; status: string }) => void
   ): (() => void) => {

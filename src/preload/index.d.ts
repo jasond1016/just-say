@@ -33,6 +33,12 @@ interface JustSayAPI {
   downloadModel: (modelType: string) => Promise<void>
   deleteModel: (modelType: string) => Promise<void>
   testWhisperServer: (host: string, port: number) => Promise<boolean>
+  testTranslationConfig: (options: {
+    endpoint: string
+    model: string
+    apiKey?: string
+    targetLanguage?: string
+  }) => Promise<{ ok: boolean; error?: string; translatedText?: string }>
   onDownloadProgress: (
     callback: (progress: { model: string; percent: number; status: string }) => void
   ) => () => void

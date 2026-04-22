@@ -38,6 +38,7 @@ import { InputSimulator } from './input/simulator'
 import { MeetingTranscriptionManager, TranscriptSegment } from './meeting-transcription'
 import { StreamingGroqConfig } from './recognition/streaming-groq'
 import { StreamingSonioxConfig } from './recognition/streaming-soniox'
+import { OpenAICompatibleTranslator } from './translation/openai-compatible'
 import { StreamingLocalConfig } from './recognition/streaming-local'
 import { TranslationService } from './translation/service'
 import { processPttRecognitionResult } from './ptt/postProcess'
@@ -1035,6 +1036,48 @@ ipcMain.handle(
     const port = typeof options?.port === 'number' ? options.port : 8765
     const client = new WhisperServerClient({ mode: 'remote', host, port, autoStart: false })
     return client.isHealthy()
+  }
+)
+
+ipcMain.handle(
+  'test-translation-config',
+  async (
+    _event,
+    options?: { endpoint?: string; model?: string; apiKey?: string; targetLanguage?: string }
+  ) => {
+    const endpoint = options?.endpoint?.trim() || ''
+    const model = options?.model?.trim() || ''
+    const apiKey = options?.apiKey?.trim() || getApiKey('openai') || ''
+    const targetLanguage = options?.targetLanguage?.trim() || 'zh'
+
+    if (!endpoint) {
+      return { ok: false, error: 'Missing translation endpoint' }
+    }
+    if (!model) {
+      return { ok: false, error: 'Missing translation model' }
+    }
+    if (!apiKey) {
+      return { ok: false, error: 'Missing translation API key' }
+    }
+
+    try {
+      const translator = new OpenAICompatibleTranslator({
+        endpoint,
+        apiKey,
+        model,
+        timeoutMs: 10_000
+      })
+      const translatedText = await translator.validateConnection(targetLanguage)
+      return {
+        ok: true,
+        translatedText
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
   }
 )
 

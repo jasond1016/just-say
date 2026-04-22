@@ -40,6 +40,12 @@ export class OpenAICompatibleTranslator {
     this.config = config
   }
 
+  async validateConnection(targetLanguage: string): Promise<string> {
+    return this.translate('Connection test', targetLanguage, {
+      context: 'ptt'
+    })
+  }
+
   async translate(
     text: string,
     targetLanguage: string,

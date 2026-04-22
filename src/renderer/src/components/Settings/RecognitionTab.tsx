@@ -93,6 +93,10 @@ export interface RecognitionTabProps {
   translationApiKeyConfigured: boolean
   updatingTranslationApiKey: boolean
   clearTranslationApiKey: () => Promise<void>
+  testingTranslationConfig: boolean
+  translationTestResult: boolean | null
+  translationTestMessage: string | null
+  testTranslationConfig: () => Promise<void>
 }
 
 export function RecognitionTab(props: RecognitionTabProps): React.JSX.Element {
@@ -284,6 +288,19 @@ export function RecognitionTab(props: RecognitionTabProps): React.JSX.Element {
             action={() => { void props.clearTranslationApiKey() }}
             actionLabel={m.settings.removeStoredKey}
             actionDisabled={!props.translationApiKeyConfigured || props.updatingTranslationApiKey || props.saving}
+          />
+
+          <StatusBar
+            text={
+              props.translationTestResult === null
+                ? m.settings.translationTestIdle
+                : props.translationTestResult
+                  ? props.translationTestMessage || m.settings.translationTestSuccess
+                  : props.translationTestMessage || m.settings.translationTestFailed
+            }
+            action={() => { void props.testTranslationConfig() }}
+            actionLabel={props.testingTranslationConfig ? m.settings.translationTesting : m.settings.validateTranslation}
+            actionDisabled={props.testingTranslationConfig || props.saving}
           />
         </>
       )}
